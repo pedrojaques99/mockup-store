@@ -6,12 +6,26 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "render": "bun scripts/render-server.ts",
+    "render:ps": "bun scripts/ps-render-server.ts"
   },
   "dependencies": {
-    "next": "16.3.0-preview.0",
-    "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "@anthropic-ai/sdk": "^0.104.1",
+    "@printmadehq/mockup-generator": "^1.0.5",
+    "ag-psd": "^30.1.1",
+    "canvas": "^3.2.3",
+    "lucide-react": "^1.17.0",
+    "mongodb": "^7.3.0",
+    "next": "^15.5.19",
+    "puppeteer": "^25.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-easy-crop": "^5.5.7",
+    "react-resizable-panels": "^4.11.2",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -21,6 +35,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.0-preview.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.8"
   }
 }
