@@ -391,6 +391,7 @@ export default function Home() {
   const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set());
   const [isPreviewResult, setIsPreviewResult] = useState(false);
   const [currentStep, setCurrentStep] = useState<string | null>(null);
+  const [copiedPng, setCopiedPng] = useState(false);
   
   // Duplicates modal
   type DupeGroup = { hash: string; sizeBytes: number; keepPath: string; removePaths: string[]; wastedBytes: number };
@@ -791,6 +792,30 @@ export default function Home() {
   const handleSearchInput = (value: string) => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => setSearch(value), 300);
+  };
+
+  // Copia o render pro clipboard como PNG (preview vem em JPEG → converte)
+  const copyRenderAsPng = async () => {
+    if (!renderResult) return;
+    try {
+      const blob = await fetch(renderResult).then((r) => r.blob());
+      let png = blob;
+      if (blob.type !== "image/png") {
+        const bmp = await createImageBitmap(blob);
+        const cv = document.createElement("canvas");
+        cv.width = bmp.width;
+        cv.height = bmp.height;
+        cv.getContext("2d")!.drawImage(bmp, 0, 0);
+        png = await new Promise<Blob>((resolve, reject) =>
+          cv.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob falhou"))), "image/png")
+        );
+      }
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+      setCopiedPng(true);
+      setTimeout(() => setCopiedPng(false), 1500);
+    } catch (err) {
+      console.error("Copiar PNG falhou:", err);
+    }
   };
 
   const handleArtSelect = (file: File, slotIdx?: number) => {
@@ -1449,9 +1474,18 @@ export default function Home() {
                 
                 <div className="absolute top-3 left-3 flex gap-2 opacity-0 group-hover/preview:opacity-100 transition-all translate-y-2 group-hover/preview:translate-y-0 duration-300">
                   {renderResult && (
-                    <button onClick={() => setFullscreen(true)} className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90">
-                      <Maximize2 className="w-4 h-4" />
-                    </button>
+                    <>
+                      <button onClick={() => setFullscreen(true)} className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90">
+                        <Maximize2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={copyRenderAsPng}
+                        title="Copiar como PNG"
+                        className={`backdrop-blur shadow-xl w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 ${copiedPng ? "bg-emerald-500 text-black" : "bg-black/80 hover:bg-white hover:text-black text-white"}`}
+                      >
+                        {copiedPng ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </>
                   )}
                   {selected.psdPath && (
                     <button
@@ -1924,6 +1958,12 @@ export default function Home() {
               <span className="text-sm font-bold text-neutral-300">{selected?.name}</span>
             </div>
             <div className="flex gap-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); copyRenderAsPng(); }}
+                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl transition-all active:scale-95 ${copiedPng ? "bg-emerald-500 text-black" : "bg-neutral-800 hover:bg-neutral-700 text-white"}`}
+              >
+                {copiedPng ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copiedPng ? "Copiado!" : "Copiar PNG"}
+              </button>
               <a
                 href={renderResult}
                 download={`${selected?.name || "render"}-render.${isPreviewResult ? "jpg" : "png"}`}
