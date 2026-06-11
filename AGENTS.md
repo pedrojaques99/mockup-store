@@ -19,3 +19,23 @@ npx tsx --env-file=.env.local scripts/agent-cli.ts render --brand <id> --count 2
 - Pré-requisitos: render-server rodando (`npm run render`, porta 4200) e Visant conectada (login pela UI uma vez — tokens ficam em `~/.visant/` — ou `VISANT_API_KEY` no `.env.local`).
 - Sempre `npx tsx`, nunca `bun`, para scripts que acessam o Mongo (bun não resolve `mongodb+srv` no Windows).
 - Debug de PSD: `bun scripts/debug-tree.ts <psd>` (árvore de camadas), `agent-cli.ts faces <psdFileName>` (faces editáveis), `bun scripts/render-cli.ts` (render sem TCP).
+
+## Batch de mockups por marca/cliente
+
+"crie N mockups com esses layouts" → `scripts/brand-mockup-batch.ts` (motor genérico; os `soccer248-batch*.ts` foram os primeiros casos):
+
+```
+npx tsx --env-file=.env.local scripts/brand-mockup-batch.ts \
+  --layouts "H:/.../Layouts" --out "H:/.../Mockups" --count 20
+```
+
+- Pega os layouts (pasta ou CSV de arquivos), cura PSDs da biblioteca por categoria (billboard/poster/device/retail/signage, cotas proporcionais ao `--count`), casa cada arte por **aspect** da face e cospe full-res PNG numerado + `_summary.json`.
+- Flags: `--preview` (JPEG rápido), `--fresh` (ignora summary, recomeça do 1), `--include billboard,poster` (filtra categorias), `--min-kb N` (descarta layouts pequenos), `--square` (só logo/ícone: pega PSDs com face ~1:1 — coaster, badge, sticker, selo, tag, mug, app icon, patch…).
+- **Logo/ícone em mockups 1:1**: rode `scripts/prep-logo-squares.ts` (trim + recompõe o ícone centrado num quadrado com respiro, gera variações navy/amarelo/app-icon em `.tmp/soccer248-logo-art`) e depois `brand-mockup-batch --layouts .tmp/soccer248-logo-art --square`.
+- **Retomável**: sem `--fresh`, pula o que já está no `_summary.json` e continua a numeração — dá pra ir disparando lotes na mesma pasta.
+
+Regras embutidas (mantêm consistência, vieram de erros reais):
+- **device = face com aspect de tela** (retrato ~0.40–0.65), não a maior — senão pinta o cenário de fundo e deixa a tela com watermark.
+- Cap de 8 faces (anti-OOM em murais de pôster) + try/catch por render.
+- Murais multi-face recebem **layouts variados** (rotaciona entre os 3 mais próximos no aspect).
+- Pré-requisito: render-server na 4200 (`npm run render`). PSDs resolvidos via `psd_metadata.filePath` no disco.
