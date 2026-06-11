@@ -19,7 +19,7 @@ import { spawn } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { SO_TARGET as SO_PATTERNS, BRAND_HIDE } from "../src/lib/psd-constants";
+import { SO_TARGET as SO_PATTERNS, BRAND_HIDE } from "@visantlabs/psd-engine";
 
 const PORT = parseInt(process.env.PS_RENDER_PORT || "4201");
 const JOB_TIMEOUT = parseInt(process.env.PS_JOB_TIMEOUT_MS || "180000");

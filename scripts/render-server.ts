@@ -1,12 +1,13 @@
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { createServer } from "net";
-import { SO_TARGET as SO_PATTERNS, BRAND_HIDE } from "../src/lib/psd-constants";
 import {
+  SO_TARGET as SO_PATTERNS,
+  BRAND_HIDE,
   flattenLayers,
   replaceLinkedSmartObjects,
   composePsd,
-} from "../src/lib/psd-compose";
+} from "@visantlabs/psd-engine";
 
 const PORT = parseInt(process.env.RENDER_PORT || "4200");
 const JOB_TIMEOUT = 90_000;

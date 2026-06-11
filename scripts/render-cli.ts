@@ -5,8 +5,13 @@
  */
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
-import { SO_TARGET as SO_PATTERNS, BRAND_HIDE } from "../src/lib/psd-constants";
-import { flattenLayers, replaceLinkedSmartObjects, composePsd } from "../src/lib/psd-compose";
+import {
+  SO_TARGET as SO_PATTERNS,
+  BRAND_HIDE,
+  flattenLayers,
+  replaceLinkedSmartObjects,
+  composePsd,
+} from "@visantlabs/psd-engine";
 
 const rawArgs = process.argv.slice(2);
 const extraSlots: Array<{ so: string; art: string }> = [];

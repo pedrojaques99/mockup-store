@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { walkDir } from "@/lib/fs-walk";
-import { IMAGE_EXTS } from "@/lib/psd-constants";
+import { IMAGE_EXTS } from "@/lib/psd-scan";
 import { existsSync } from "fs";
 
 export async function GET(req: NextRequest) {

@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { addRuntimeDir } from "@/lib/psd-index";
 import { walkDir } from "@/lib/fs-walk";
-import { scanPsd } from "@/lib/psd-scan";
-import { IMAGE_EXTS } from "@/lib/psd-constants";
+import { scanPsd, IMAGE_EXTS } from "@/lib/psd-scan";
 import { existsSync } from "fs";
 
 const ALL_EXTS = new Set([...IMAGE_EXTS, ".psd"]);

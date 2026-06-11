@@ -95,7 +95,7 @@ async function cmdSuggest() {
 async function cmdFaces() {
   const fileName = positional[0] || die("uso: faces <psdFileName>");
   const { getDb } = await import("../src/lib/db");
-  const { computeFaces } = await import("../src/lib/psd-faces");
+  const { computeFaces } = await import("@visantlabs/psd-engine");
   const db = await getDb();
   const meta = await db.collection("psd_metadata").findOne({ fileName });
   if (!meta) die(`psd_metadata não tem "${fileName}"`);
@@ -202,7 +202,7 @@ async function cmdRender() {
   mkdirSync(artDir, { recursive: true });
 
   const { getDb } = await import("../src/lib/db");
-  const { computeFaces } = await import("../src/lib/psd-faces");
+  const { computeFaces } = await import("@visantlabs/psd-engine");
   const { frameArt } = await import("../src/lib/server-frame");
   const db = await getDb();
 

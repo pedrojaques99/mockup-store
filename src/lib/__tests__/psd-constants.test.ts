@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { SO_TARGET, BRAND_HIDE, IMAGE_EXTS } from "../psd-constants";
+import { SO_TARGET, BRAND_HIDE } from "@visantlabs/psd-engine";
+import { IMAGE_EXTS } from "../psd-scan";
 
 describe("SO_TARGET regex", () => {
   const shouldMatch = [

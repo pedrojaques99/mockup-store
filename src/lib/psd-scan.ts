@@ -1,21 +1,14 @@
 import { readPsd } from "ag-psd";
 import { readFileSync, statSync } from "fs";
 import { basename } from "path";
-import { BRAND_HIDE } from "./psd-constants";
+import { BRAND_HIDE, flattenLayers } from "@visantlabs/psd-engine";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function flattenLayers(layers: any[], parentPath = ""): any[] {
-  const r: any[] = [];
-  for (const l of layers) {
-    const currentPath = parentPath ? `${parentPath} > ${l.name || "unnamed"}` : (l.name || "unnamed");
-    const layerWithMetadata = { ...l, path: currentPath };
-    r.push(layerWithMetadata);
-    if (l.children) {
-      r.push(...flattenLayers(l.children, currentPath));
-    }
-  }
-  return r;
-}
+// flattenLayers vem do pacote SSoT; re-exporta p/ consumidores (e o teste deste módulo).
+export { flattenLayers };
+
+// Extensões de imagem aceitas no walk de filesystem — específico do mockup-store (scan
+// de pasta), não do engine de compose. Por isso fica aqui, não no pacote.
+export const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
 export interface SmartObjectMeta {
   name: string;

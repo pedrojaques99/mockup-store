@@ -3,7 +3,7 @@
  */
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
-import { composePsd } from "../src/lib/psd-compose";
+import { composePsd } from "@visantlabs/psd-engine";
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const [psdPath, outPath] = args;
