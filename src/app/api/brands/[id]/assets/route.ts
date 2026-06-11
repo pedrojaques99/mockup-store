@@ -13,15 +13,20 @@ export async function GET(
     const logos = guideline.logos || [];
     
     // Formata para a UI da library
-    const assets = logos.map(l => ({
-      id: l.id,
-      url: `/api/brands/${id}/logo?variant=${l.variant}&assetId=${l.id}`, // Proxy local
-      directUrl: l.url,
-      variant: l.variant,
-      label: l.label || l.variant,
-      format: l.format,
-      thumbnail: l.thumbnailUrl || l.url
-    }));
+    const assets = logos.map((l, i) => {
+      // Proxy server-side: evita CORS/auth/expiração das URLs diretas da Visant.
+      const proxy = `/api/brands/${id}/logo?variant=${l.variant}&assetId=${l.id}`;
+      return {
+        // id pode vir duplicado/vazio da Visant — garante chave única na UI
+        id: l.id ? `${l.id}-${i}` : `${l.variant}-${i}`,
+        url: proxy,
+        directUrl: l.url,
+        variant: l.variant,
+        label: l.label || l.variant,
+        format: l.format,
+        thumbnail: proxy,
+      };
+    });
 
     return NextResponse.json({
       brandName: guideline.identity?.name,

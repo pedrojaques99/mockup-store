@@ -353,6 +353,11 @@ export default function Home() {
   const [ingestResult, setIngestResult] = useState<string | null>(null);
   const [folderInput, setFolderInput] = useState("");
   const [showFolderInput, setShowFolderInput] = useState(false);
+  // Wizard: step 0=hidden, 1=path input, 2=confirm preview
+  const [wizardStep, setWizardStep] = useState(0);
+  const [wizardPreview, setWizardPreview] = useState<{ psdCount: number; refCount: number } | null>(null);
+  const [wizardScanError, setWizardScanError] = useState<string | null>(null);
+  const [wizardScanning, setWizardScanning] = useState(false);
 
   const [visantConnected, setVisantConnected] = useState<boolean | null>(null);
   const [visantLoginUrl, setVisantLoginUrl] = useState<string | null>(null);
@@ -393,6 +398,9 @@ export default function Home() {
   const [currentStep, setCurrentStep] = useState<string | null>(null);
   const [copiedPng, setCopiedPng] = useState(false);
   
+  // Advanced settings modal
+  const [showSettings, setShowSettings] = useState(false);
+
   // Duplicates modal
   type DupeGroup = { hash: string; sizeBytes: number; keepPath: string; removePaths: string[]; wastedBytes: number };
   const [showDupes, setShowDupes] = useState(false);
@@ -490,6 +498,9 @@ export default function Home() {
   const [showSmartObjects, setShowSmartObjects] = useState(true);
   const [showAdjustments, setShowAdjustments] = useState(false);
   const [expandSoList, setExpandSoList] = useState(false);
+
+  // Sync: fechar Smart Objects fecha o painel de arte automaticamente
+  useEffect(() => { if (!showSmartObjects) setArtSectionCollapsed(true); }, [showSmartObjects]);
 
   const renderTimerRef = useRef<ReturnType<typeof setInterval>>(null);
 
@@ -1010,6 +1021,7 @@ export default function Home() {
       );
       setFolderInput("");
       setShowFolderInput(false);
+      setWizardStep(0);
       fetch("/api/references/studios").then((r) => r.json()).then(setStudios);
       fetchPage(1, false);
     } catch (err) {
@@ -1017,6 +1029,37 @@ export default function Home() {
     } finally {
       setIngesting(false);
     }
+  };
+
+  const openFolderWizard = () => {
+    setFolderInput("");
+    setWizardStep(1);
+    setWizardPreview(null);
+    setWizardScanError(null);
+    setIngestResult(null);
+  };
+
+  const wizardScan = async () => {
+    const path = folderInput.trim();
+    if (!path) return;
+    setWizardScanning(true);
+    setWizardScanError(null);
+    try {
+      const res = await fetch(`/api/ingest-folder/scan?path=${encodeURIComponent(path)}`);
+      const data = await res.json();
+      if (!res.ok) { setWizardScanError(data.error || `HTTP ${res.status}`); return; }
+      setWizardPreview({ psdCount: data.psdCount ?? 0, refCount: data.refCount ?? 0 });
+      setWizardStep(2);
+    } catch (err) {
+      setWizardScanError(String(err));
+    } finally {
+      setWizardScanning(false);
+    }
+  };
+
+  const wizardConfirm = async () => {
+    await handleIngestFolder();
+    setWizardStep(0);
   };
 
   const activeSoName = selectedSo || selected?.smartObjectName || "";
@@ -1124,12 +1167,11 @@ export default function Home() {
           )}
 
           <button
-            onClick={() => { setShowDupes(true); if (!dupesGroups.length && !dupesScanning) scanDuplicates(); }}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-[10px] font-bold text-amber-400 hover:bg-amber-500/20 hover:text-amber-300 transition-all active:scale-95"
-            title="Encontrar duplicatas"
+            onClick={() => setShowSettings(true)}
+            className="p-2 rounded-lg hover:bg-white/5 text-neutral-500 hover:text-white transition-all active:scale-95"
+            title="Configurações avançadas"
           >
-            <Copy className="w-3.5 h-3.5" />
-            Duplicatas
+            <Settings2 className="w-4.5 h-4.5" />
           </button>
           
           <button 
@@ -1228,39 +1270,82 @@ export default function Home() {
             </div>
 
 
-            {showFolderInput ? (
-              <div className="flex gap-2 mb-2 animate-in slide-in-from-top-1 duration-300">
-                <input
-                  type="text"
-                  value={folderInput}
-                  onChange={(e) => setFolderInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleIngestFolder()}
-                  placeholder="Caminho da pasta..."
-                  autoFocus
-                  className="flex-1 min-w-0 h-10 rounded-xl bg-neutral-900 border border-neutral-700 px-4 text-xs focus:outline-none focus:border-neutral-500 shadow-xl"
-                />
+            {wizardStep === 0 && (
+              <>
                 <button
-                  onClick={handleIngestFolder}
-                  disabled={ingesting || !folderInput.trim()}
-                  className="shrink-0 h-10 rounded-xl bg-white text-black text-[11px] font-black px-4 disabled:opacity-30 active:scale-90 transition-all shadow-lg"
+                  onClick={openFolderWizard}
+                  className="w-full flex items-center justify-center gap-2.5 h-11 rounded-xl border-2 border-dashed border-neutral-800 px-4 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:border-neutral-600 hover:bg-neutral-900/50 hover:text-neutral-300 transition-all mb-2 group shadow-sm"
                 >
-                  {ingesting ? <Loader2 className="w-4 h-4 animate-spin" /> : "OK"}
+                  <FolderPlus className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                  Adicionar pasta
                 </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowFolderInput(true)}
-                className="w-full flex items-center justify-center gap-2.5 h-11 rounded-xl border-2 border-dashed border-neutral-800 px-4 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:border-neutral-600 hover:bg-neutral-900/50 hover:text-neutral-300 transition-all mb-2 group shadow-sm"
-              >
-                <FolderPlus className="w-4 h-4 group-hover:scale-110 transition-transform" />
-                Adicionar pasta
-              </button>
+                {ingestResult && (
+                  <p className={`text-[10px] font-bold py-2 px-3 rounded-xl mb-2 flex items-center gap-2 ${ingestResult.startsWith("Erro") ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}`}>
+                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${ingestResult.startsWith("Erro") ? "bg-red-400" : "bg-emerald-400"}`} />
+                    {ingestResult}
+                  </p>
+                )}
+              </>
             )}
-            {ingestResult && (
-              <p className={`text-[10px] font-bold py-2 px-3 rounded-xl mt-2 flex items-center gap-2 ${ingestResult.startsWith("Erro") ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}`}>
-                <div className={`w-1.5 h-1.5 rounded-full ${ingestResult.startsWith("Erro") ? "bg-red-400" : "bg-emerald-400"}`} />
-                {ingestResult}
-              </p>
+            {wizardStep === 1 && (
+              <div className="flex flex-col gap-2 mb-2 animate-in slide-in-from-top-1 duration-300">
+                <div className="flex items-center gap-2 px-1 mb-0.5">
+                  <div className="w-4 h-4 rounded-full bg-white text-black flex items-center justify-center text-[9px] font-black shrink-0">1</div>
+                  <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Caminho da pasta</p>
+                  <button onClick={() => setWizardStep(0)} className="ml-auto text-neutral-600 hover:text-neutral-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={folderInput}
+                    onChange={(e) => setFolderInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && wizardScan()}
+                    placeholder="ex: H:/Mockups/Layouts"
+                    autoFocus
+                    className="flex-1 min-w-0 h-10 rounded-xl bg-neutral-900 border border-neutral-700 px-4 text-xs focus:outline-none focus:border-neutral-500 shadow-xl"
+                  />
+                  <button
+                    onClick={wizardScan}
+                    disabled={wizardScanning || !folderInput.trim()}
+                    className="shrink-0 h-10 rounded-xl bg-white text-black text-[11px] font-black px-4 disabled:opacity-30 active:scale-90 transition-all shadow-lg"
+                  >
+                    {wizardScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : "Scan"}
+                  </button>
+                </div>
+                {wizardScanError && <p className="text-[10px] text-red-400 font-bold px-1">{wizardScanError}</p>}
+              </div>
+            )}
+            {wizardStep === 2 && wizardPreview && (
+              <div className="flex flex-col gap-2 mb-2 animate-in slide-in-from-top-1 duration-300">
+                <div className="flex items-center gap-2 px-1 mb-0.5">
+                  <div className="w-4 h-4 rounded-full bg-white text-black flex items-center justify-center text-[9px] font-black shrink-0">2</div>
+                  <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Confirmar</p>
+                  <button onClick={() => setWizardStep(1)} className="ml-auto text-neutral-600 hover:text-neutral-400 transition-colors text-[10px] font-bold">← voltar</button>
+                </div>
+                <div className="rounded-2xl bg-neutral-900 border border-neutral-800 p-3 flex flex-col gap-1.5">
+                  <p className="text-[10px] text-neutral-500 truncate font-mono">{folderInput}</p>
+                  <div className="flex gap-3">
+                    <div className="flex-1 bg-neutral-800/60 rounded-xl p-2 text-center">
+                      <p className="text-sm font-black text-white">{wizardPreview.psdCount}</p>
+                      <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-widest">PSDs</p>
+                    </div>
+                    <div className="flex-1 bg-neutral-800/60 rounded-xl p-2 text-center">
+                      <p className="text-sm font-black text-white">{wizardPreview.refCount}</p>
+                      <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-widest">Refs</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setWizardStep(0)} className="flex-1 h-9 rounded-xl border border-neutral-800 text-[11px] font-black text-neutral-500 hover:bg-neutral-900 transition-all active:scale-95">Cancelar</button>
+                  <button
+                    onClick={wizardConfirm}
+                    disabled={ingesting}
+                    className="flex-1 h-9 rounded-xl bg-white text-black text-[11px] font-black disabled:opacity-30 active:scale-90 transition-all shadow-lg"
+                  >
+                    {ingesting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Ingerir"}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 
@@ -1508,37 +1593,78 @@ export default function Home() {
               <div className="flex flex-col p-4 gap-5">
                 {/* Controls Accordion */}
                 <div className="space-y-3">
-                  {/* Section: Smart Objects */}
+                  {/* Section: Smart Objects — Photoshop-style layers */}
                   {psdInfo && psdInfo.smartObjects.length > 0 && (
-                    <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden transition-all duration-300">
-                      <button 
+                    <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden">
+                      <button
                         onClick={() => setShowSmartObjects(!showSmartObjects)}
-                        className="w-full flex items-center justify-between p-4 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500 hover:bg-white/5 transition-colors"
+                        className="w-full flex items-center justify-between px-4 py-3 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500 hover:bg-white/5 transition-colors"
                       >
-                        <div className="flex items-center gap-2 text-neutral-300"><Layers className="w-3.5 h-3.5 text-neutral-500" /> Smart Objects ({psdInfo.smartObjects.length})</div>
+                        <div className="flex items-center gap-2 text-neutral-300">
+                          <Layers className="w-3.5 h-3.5 text-neutral-500" />
+                          Smart Objects ({psdInfo.smartObjects.length})
+                        </div>
                         <ChevronDown className={`w-4 h-4 transition-transform duration-300 ${showSmartObjects ? "" : "-rotate-90"}`} />
                       </button>
-                      <div className={`overflow-hidden transition-all duration-300 ${showSmartObjects ? "max-h-[500px] border-t border-neutral-800" : "max-h-0"}`}>
-                        <div className="p-2 space-y-0.5">
-                          {(expandSoList ? psdInfo.smartObjects : psdInfo.smartObjects.slice(0, 5)).map((so, i) => (
-                            <label key={i} className={`flex flex-col gap-0.5 py-2 px-3 rounded-xl cursor-pointer transition-all ${selectedSo === (so.path || so.name) ? "bg-white text-black shadow-xl scale-[1.02]" : "hover:bg-white/5 text-neutral-400 hover:text-white"}`}>
-                              <div className="flex items-center gap-3">
-                                <input type="radio" name="so-select" checked={selectedSo === (so.path || so.name)} onChange={() => { setSelectedSo(so.path || so.name); setFrame((f) => ({ ...f, cropPixels: undefined })); }} className="accent-black w-3.5 h-3.5" />
-                                <span className="text-[11px] font-bold truncate flex-1">{so.name}</span>
-                                <span className={`text-[9px] font-mono font-bold ${selectedSo === (so.path || so.name) ? "text-black/40" : "text-neutral-700"}`}>{so.innerWidth}x{so.innerHeight}</span>
+                      {showSmartObjects && (
+                        <div className="border-t border-neutral-800 overflow-y-auto max-h-60 no-scrollbar">
+                          {psdInfo.smartObjects.map((so, i) => {
+                            const faceIdx = faces.findIndex(f => f.name === so.name || f.smartObject === (so.path || so.name));
+                            const isFace = faceIdx >= 0;
+                            const slot = isFace ? (artSlots[faceIdx] ?? null) : null;
+                            const isActive = isFace && activeSlot === faceIdx;
+                            return (
+                              <div
+                                key={i}
+                                onClick={() => {
+                                  if (!isFace) return;
+                                  setActiveSlot(faceIdx);
+                                  setSelectedSo(so.path || so.name);
+                                  setFrame((f) => ({ ...f, cropPixels: undefined }));
+                                  setArtSectionCollapsed(false);
+                                }}
+                                className={`flex items-center gap-3 px-3 py-2.5 border-b border-neutral-900/70 last:border-b-0 transition-all select-none ${
+                                  isFace
+                                    ? isActive
+                                      ? "bg-white/8 cursor-pointer"
+                                      : "hover:bg-white/4 cursor-pointer"
+                                    : "opacity-35 cursor-default"
+                                }`}
+                              >
+                                {/* Active dot */}
+                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? "bg-white" : isFace ? "bg-neutral-600" : "bg-neutral-800"}`} />
+                                {/* Name + path */}
+                                <div className="flex-1 min-w-0">
+                                  <p className={`text-[11px] font-bold truncate ${isActive ? "text-white" : isFace ? "text-neutral-300" : "text-neutral-500"}`}>{so.name}</p>
+                                  {so.path && so.path.includes(" > ") && (
+                                    <p className="text-[9px] text-neutral-700 truncate">{so.path.split(" > ").slice(0, -1).join(" › ")}</p>
+                                  )}
+                                </div>
+                                {/* Dims */}
+                                <span className={`text-[9px] font-mono shrink-0 ${isActive ? "text-neutral-400" : "text-neutral-700"}`}>{so.innerWidth}×{so.innerHeight}</span>
+                                {/* Face slot thumbnail */}
+                                {isFace ? (
+                                  <div
+                                    className={`shrink-0 w-8 h-8 rounded-lg overflow-hidden border transition-all ${isActive ? "border-white/40 shadow-lg shadow-white/5" : "border-neutral-800"}`}
+                                    onClick={(e) => { e.stopPropagation(); setActiveSlot(faceIdx); setArtSectionCollapsed(false); if (!slot?.preview) fileInputRef.current?.click(); }}
+                                  >
+                                    {slot?.preview ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img src={slot.preview} alt={so.name} className="w-full h-full object-cover" />
+                                    ) : (
+                                      <div className="w-full h-full flex items-center justify-center bg-neutral-900 group-hover:bg-neutral-800">
+                                        <ImageIcon className="w-3 h-3 text-neutral-700" />
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="w-8 shrink-0" />
+                                )}
                               </div>
-                              {so.path && so.path.includes(" > ") && (
-                                <span className={`text-[9px] pl-6.5 truncate ${selectedSo === (so.path || so.name) ? "text-black/60 font-medium" : "text-neutral-600"}`}>{so.path.split(" > ").slice(0, -1).join(" › ")}</span>
-                              )}
-                            </label>
-                          ))}
-                          {psdInfo.smartObjects.length > 5 && (
-                            <button onClick={() => setExpandSoList(!expandSoList)} className="w-full py-2 text-[10px] font-bold text-neutral-600 hover:text-neutral-400 transition-colors">
-                              {expandSoList ? "Ver menos" : `Mostrar mais ${psdInfo.smartObjects.length - 5}`}
-                            </button>
-                          )}
+                            );
+                          })}
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
 
@@ -1586,10 +1712,10 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Art Input — sticky above footer, collapsible + resizable */}
+            {/* Art Input — sticky above footer, collapsible + resizable. Hidden when no editable faces. */}
             <div
               ref={artSectionRef}
-              className="shrink-0 flex flex-col border-t border-neutral-900 bg-neutral-950 overflow-hidden"
+              className={`shrink-0 flex flex-col border-t border-neutral-900 bg-neutral-950 overflow-hidden transition-all duration-300 ${faces.length === 0 ? "hidden" : ""}`}
               style={artSectionHeight != null ? { height: artSectionHeight } : undefined}
             >
               {/* Unified handle: drag = resize, click = collapse */}
@@ -1617,7 +1743,9 @@ export default function Home() {
                   window.addEventListener("mouseup", onUp);
                 }}
               >
-                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-700 group-hover:text-neutral-500 transition-colors flex-1 pointer-events-none">Sua Arte</p>
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-700 group-hover:text-neutral-500 transition-colors flex-1 pointer-events-none">
+                  {faces.length > 1 && activeFace ? `Arte · ${activeFace.name}` : "Sua Arte"}
+                </p>
                 <div className="w-6 h-0.5 rounded-full bg-neutral-800 group-hover:bg-neutral-600 transition-colors" />
                 <ChevronDown className={`w-3 h-3 text-neutral-700 group-hover:text-neutral-500 transition-all duration-200 ${artSectionCollapsed ? "-rotate-180" : ""}`} />
               </div>
@@ -1625,53 +1753,12 @@ export default function Home() {
               {/* Collapsible content */}
               <div className={`flex-1 overflow-hidden transition-all duration-200 ${artSectionCollapsed ? "opacity-0 pointer-events-none" : "opacity-100"}`} style={{ height: artSectionCollapsed ? 0 : undefined }}>
                 <div className="px-4 pb-3 flex flex-col gap-2">
-                  {/* Slots por face — mockups com mais de um SO editável */}
-                  {faces.length > 1 && (
-                    <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
-                      {faces.map((f, i) => {
-                        const s = artSlots[i];
-                        const active = activeSlot === i;
-                        return (
-                          <button
-                            key={f.key}
-                            onClick={() => { setActiveSlot(i); if (!artSlots[i]) fileInputRef.current?.click(); }}
-                            title={`${f.name} · ${f.innerWidth}×${f.innerHeight}px`}
-                            className={`flex items-center gap-2 shrink-0 rounded-xl border px-2 py-1.5 transition-all active:scale-95 ${
-                              active ? "border-white bg-white/10 shadow-lg" : "border-neutral-800 bg-neutral-900/40 hover:border-neutral-600"
-                            }`}
-                          >
-                            {s?.preview ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={s.preview} alt={f.name} className="w-7 h-7 rounded-md object-cover ring-1 ring-white/10" />
-                            ) : (
-                              <div className="w-7 h-7 rounded-md border border-dashed border-neutral-700 flex items-center justify-center">
-                                <ImageIcon className="w-3 h-3 text-neutral-600" />
-                              </div>
-                            )}
-                            <div className="text-left">
-                              <p className={`text-[10px] font-bold leading-tight ${active ? "text-white" : "text-neutral-400"}`}>{f.name}</p>
-                              <p className="text-[8px] text-neutral-600 font-mono leading-tight">{f.innerWidth}×{f.innerHeight}</p>
-                            </div>
-                            {s?.preview && (
-                              <span
-                                role="button"
-                                onClick={(e) => { e.stopPropagation(); clearSlot(i); setRenderResult(null); }}
-                                className="p-0.5 rounded text-neutral-600 hover:text-red-400 transition-colors"
-                                title="Limpar slot"
-                              >
-                                <X className="w-3 h-3" />
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <div className={brandId && !artPreview ? "flex gap-2 items-stretch" : undefined}>
                   <div
                     onDrop={handleDrop}
                     onDragOver={(e) => e.preventDefault()}
                     onClick={() => fileInputRef.current?.click()}
-                    className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all px-3 py-2 relative group ${artPreview ? "border-neutral-700 bg-neutral-900/40 hover:border-neutral-500" : "border-neutral-800 hover:border-neutral-600 bg-neutral-900/30 hover:bg-neutral-900/50"}`}
+                    className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all px-3 py-2 relative group ${brandId && !artPreview ? "flex-1" : ""} ${artPreview ? "border-neutral-700 bg-neutral-900/40 hover:border-neutral-500" : "border-neutral-800 hover:border-neutral-600 bg-neutral-900/30 hover:bg-neutral-900/50"}`}
                   >
                     {artPreview ? (
                       <div className="flex flex-col gap-2 w-full">
@@ -1753,11 +1840,12 @@ export default function Home() {
                     <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleArtSelect(f); }} />
                   </div>
                   {brandId && !artPreview && (
-                    <div className="flex gap-2">
-                      <button onClick={() => loadBrandLogoAsArt()} className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl border border-neutral-800 text-xs font-bold text-neutral-400 hover:bg-white hover:text-black transition-all active:scale-95"><Zap className="w-3.5 h-3.5" /> Usar Logo</button>
-                      <button onClick={() => openLibrary()} className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl border border-neutral-800 text-xs font-bold text-neutral-400 hover:bg-white hover:text-black transition-all active:scale-95"><Library className="w-3.5 h-3.5" /> Library</button>
+                    <div className="flex flex-col gap-2 shrink-0 w-[4.5rem]">
+                      <button onClick={(e) => { e.stopPropagation(); loadBrandLogoAsArt(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-all active:scale-95 py-1"><Zap className="w-4 h-4" /><span>Logo</span></button>
+                      <button onClick={(e) => { e.stopPropagation(); openLibrary(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-all active:scale-95 py-1"><Library className="w-4 h-4" /><span>Library</span></button>
                     </div>
                   )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1993,6 +2081,40 @@ export default function Home() {
           <div className="p-4 text-center text-[10px] font-bold text-neutral-600 uppercase tracking-widest bg-neutral-950/50">
             {renderTime != null && renderTime > 0 && `Processado em ${(renderTime / 1000).toFixed(1)}s`}
             {renderResult && ` · ${isPreviewResult ? "JPEG Preview" : "PNG Lossless"}`}
+          </div>
+        </div>
+      )}
+
+      {/* Advanced Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 animate-in fade-in duration-300">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" onClick={() => setShowSettings(false)} />
+          <div className="relative w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl flex flex-col overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
+            <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/30 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-neutral-800 flex items-center justify-center">
+                  <Settings2 className="w-4 h-4 text-neutral-300" />
+                </div>
+                <p className="text-sm font-black text-white">Configurações avançadas</p>
+              </div>
+              <button onClick={() => setShowSettings(false)} className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-all active:scale-90">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 flex flex-col gap-3">
+              <button
+                onClick={() => { setShowSettings(false); setShowDupes(true); if (!dupesGroups.length && !dupesScanning) scanDuplicates(); }}
+                className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 hover:bg-amber-500/15 hover:border-amber-500/30 transition-all active:scale-[0.98] group text-left"
+              >
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0 group-hover:bg-amber-500/25 transition-colors">
+                  <Copy className="w-4.5 h-4.5 text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-black text-amber-300">Duplicatas</p>
+                  <p className="text-[10px] text-neutral-500 font-medium">Encontrar e remover PSDs duplicados</p>
+                </div>
+              </button>
+            </div>
           </div>
         </div>
       )}
