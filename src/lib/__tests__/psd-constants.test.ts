@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SO_TARGET, BRAND_HIDE } from "@visantlabs/psd-engine";
+import { SO_TARGET, BRAND_HIDE } from "@visant/psd-engine";
 import { IMAGE_EXTS } from "../psd-scan";
 
 describe("SO_TARGET regex", () => {

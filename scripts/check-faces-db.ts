@@ -2,7 +2,7 @@
  * Run: npx tsx --env-file=.env.local scripts/check-faces-db.ts <fileName>
  */
 import { MongoClient } from "mongodb";
-import { computeFaces } from "@visantlabs/psd-engine";
+import { computeFaces } from "@visant/psd-engine";
 
 async function main() {
   const fileName = process.argv[2] || "BOX_ISOLATED";

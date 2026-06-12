@@ -7,7 +7,7 @@ import {
   flattenLayers,
   replaceLinkedSmartObjects,
   composePsd,
-} from "@visantlabs/psd-engine";
+} from "@visant/psd-engine";
 
 const PORT = parseInt(process.env.RENDER_PORT || "4200");
 const JOB_TIMEOUT = 90_000;

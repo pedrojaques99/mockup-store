@@ -11,7 +11,7 @@ import {
   flattenLayers,
   replaceLinkedSmartObjects,
   composePsd,
-} from "@visantlabs/psd-engine";
+} from "@visant/psd-engine";
 
 const rawArgs = process.argv.slice(2);
 const extraSlots: Array<{ so: string; art: string }> = [];

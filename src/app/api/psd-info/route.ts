@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { computeFaces } from "@visantlabs/psd-engine";
+import { computeFaces } from "@visant/psd-engine";
 
 export async function GET(req: NextRequest) {
   const fileName = req.nextUrl.searchParams.get("name");

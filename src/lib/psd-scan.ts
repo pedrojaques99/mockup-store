@@ -1,7 +1,7 @@
 import { readPsd } from "ag-psd";
 import { readFileSync, statSync } from "fs";
 import { basename } from "path";
-import { BRAND_HIDE, flattenLayers } from "@visantlabs/psd-engine";
+import { BRAND_HIDE, flattenLayers } from "@visant/psd-engine";
 
 // flattenLayers vem do pacote SSoT; re-exporta p/ consumidores (e o teste deste módulo).
 export { flattenLayers };

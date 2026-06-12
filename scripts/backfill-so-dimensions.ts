@@ -7,7 +7,7 @@
  */
 
 import { MongoClient } from "mongodb";
-import { SO_TARGET } from "@visantlabs/psd-engine";
+import { SO_TARGET } from "@visant/psd-engine";
 
 const uri = process.env.MONGODB_URI!;
 const dbName = process.env.MONGODB_DB_NAME!;

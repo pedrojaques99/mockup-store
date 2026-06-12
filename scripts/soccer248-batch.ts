@@ -11,7 +11,7 @@ import { MongoClient } from "mongodb";
 import { createConnection } from "net";
 import { existsSync, mkdirSync, writeFileSync, readdirSync, statSync, readFileSync } from "fs";
 import { join, resolve } from "path";
-import { computeFaces } from "@visantlabs/psd-engine";
+import { computeFaces } from "@visant/psd-engine";
 import { frameArt } from "../src/lib/server-frame";
 
 const LAYOUTS_DIR = "H:/Meu Drive/@Clientes VSN/Soccer248/Layouts";
