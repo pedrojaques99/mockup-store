@@ -3,14 +3,15 @@
  * Usage: bun scripts/render-cli.ts <psd> <art> <out.png> [smartObjectName] [--preview N]
  *        slots extras: --slot "<soName>::<artPath>" (repetível, p/ PSDs multi-face)
  */
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
-import { resolve, dirname } from "path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { resolve, dirname, basename } from "path";
 import {
-  SO_TARGET as SO_PATTERNS,
-  BRAND_HIDE,
   flattenLayers,
   replaceLinkedSmartObjects,
   composePsd,
+  resolveSoTarget,
+  preloadDisplacementMaps,
+  applyHideRules,
 } from "@visant/psd-engine";
 
 const rawArgs = process.argv.slice(2);
@@ -46,29 +47,22 @@ const psd = agPsd.readPsd(new Uint8Array(psdBuffer).buffer as ArrayBuffer, { ski
 step(`parsed ${psd.width}x${psd.height}`);
 
 const allLayers = flattenLayers(psd.children || []);
+
+await preloadDisplacementMaps(
+  allLayers, psdPath, createCanvas as any,
+  { exists: existsSync, read: (p) => readFileSync(p), resolve, dirname, basename },
+  (buf, opts) => agPsd.readPsd(buf, opts),
+  (msg) => step(`WARN: ${msg}`)
+);
+
 const smartObjects = allLayers.filter((l: any) => l.placedLayer);
 step(`SOs: ${smartObjects.map((l: any) => `"${l.name}"${l.hidden ? "(hidden)" : ""}`).join(", ")}`);
-
-const byArea = (a: any, b: any) =>
-  (b.right - b.left) * (b.bottom - b.top) > (a.right - a.left) * (a.bottom - a.top) ? b : a;
-const findTarget = (soName: string) => {
-  const patternMatches = smartObjects.filter((l: any) => SO_PATTERNS.test(l.name || ""));
-  return (
-    allLayers.find((l: any) => l.path === soName) ||
-    allLayers.find((l: any) => l.name === soName) ||
-    allLayers.find((l: any) => l.path?.toLowerCase().includes(soName.toLowerCase())) ||
-    allLayers.find((l: any) => l.name?.toLowerCase().includes(soName.toLowerCase())) ||
-    (smartObjects.length === 1 ? smartObjects[0] : null) ||
-    (patternMatches.length ? patternMatches.reduce(byArea) : null) ||
-    (smartObjects.length ? smartObjects.reduce(byArea) : null)
-  );
-};
 
 const slots = [{ so: soNameArg || "Your design", art: artPath }, ...extraSlots];
 const replacedNames = new Set<string>();
 for (const slot of slots) {
   const artImg = await loadImage(readFileSync(resolve(slot.art)));
-  const target = findTarget(slot.so);
+  const target = resolveSoTarget(allLayers, slot.so);
   if (!target) {
     console.error(`No smart object target found for "${slot.so}"`);
     process.exit(1);
@@ -78,12 +72,9 @@ for (const slot of slots) {
   step(`replaced: ${replaced.map((r) => `"${r.name}" ${r.width}x${r.height}${r.warped ? " warp" : ""}`).join(", ")}`);
   for (const r of replaced) replacedNames.add(r.name);
 }
-for (const layer of allLayers) {
-  if (BRAND_HIDE.test(layer.name || "") && !replacedNames.has(layer.name)) {
-    if (layer.__original) layer.__original.hidden = true;
-    step(`hide "${layer.name}"`);
-  }
-}
+
+applyHideRules(allLayers, replacedNames);
+step(`hide rules applied`);
 
 step("compositing...");
 const fullCanvas = composePsd(psd, createCanvas as any);

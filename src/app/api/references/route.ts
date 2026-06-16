@@ -91,6 +91,7 @@ export async function GET(req: NextRequest) {
     id: 1, name: 1, studio: 1, description: 1,
     referenceImageUrl: 1, dimensions: 1, tags: 1,
     psdFileName: 1, psdPath: 1, smartObjectName: 1, soInnerWidth: 1, soInnerHeight: 1,
+    type: 1, photoSceneId: 1,
   };
 
   // Add text score for relevance sorting when using $text
@@ -125,7 +126,7 @@ export async function GET(req: NextRequest) {
   });
 
   if (hasPsd) {
-    const withPsd = enriched.filter((r) => r.psdPath);
+    const withPsd = enriched.filter((r) => r.psdPath || (r as any).type === "photo");
     const start = (page - 1) * limit;
     const sliced = withPsd.slice(start, start + limit);
     return NextResponse.json({

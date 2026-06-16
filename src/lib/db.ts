@@ -29,6 +29,10 @@ export interface Reference {
   smartObjectName?: string;
   soInnerWidth?: number;
   soInnerHeight?: number;
+  /** "photo" for photo-pipeline mockups, undefined for PSD mockups */
+  type?: "photo";
+  /** Scene ID for photo mockups — maps to data/photo-scenes/{id} */
+  photoSceneId?: string;
   createdAt: string;
   updatedAt: string;
 }

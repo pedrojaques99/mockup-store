@@ -43,3 +43,13 @@ next-env.d.ts
 # render cache / outputs
 .tmp/
 
+
+# runtime-generated scene data & published previews (per-instance, not source)
+/data/
+/public/photo-previews/
+
+# large render assets / outputs (not source)
+/Render/
+
+# bun lockfile — project uses npm (see AGENTS.md)
+bun.lock

@@ -20,6 +20,25 @@ npx tsx --env-file=.env.local scripts/agent-cli.ts render --brand <id> --count 2
 - Sempre `npx tsx`, nunca `bun`, para scripts que acessam o Mongo (bun não resolve `mongodb+srv` no Windows).
 - Debug de PSD: `bun scripts/debug-tree.ts <psd>` (árvore de camadas), `agent-cli.ts faces <psdFileName>` (faces editáveis), `bun scripts/render-cli.ts` (render sem TCP).
 
+## Pipeline foto → mockup (sem PSD, sem Photoshop)
+
+Converte fotos reais ou cenas geradas em mockups renderizados pelo engine Visant:
+
+```
+# 1. Detectar superfícies + extrair iluminação (cache em .tmp/photo-test-cv/)
+bun --env-file=.env.local scripts/test-pipeline-cv.ts
+
+# 2. Renderizar arte sobre as cenas detectadas
+bun --env-file=.env.local scripts/photo-render.ts
+bun --env-file=.env.local scripts/photo-render.ts --only nm_billboard_urbano,sp_paulista_billboard
+```
+
+- Adicionar nova foto: incluir em `PHOTOS[]` de `test-pipeline-cv.ts` + em `TARGETS[]` de `photo-render.ts`
+- Imagens neon magenta (H≈300°): `neonMagenta: true` → detecção CV pura, zero LLM
+- Arte: colocar PNGs em `Render/Art/`, referenciar por nome em `artFrame`
+- Saída: `Render/Output/`
+- Novas cenas: gerar via Visant `ai-generate-image` (gpt-image-2, 16:9, 2K) com superfície magenta flat → jogar em `Render/New Mockups/`
+
 ## Batch de mockups por marca/cliente
 
 "crie N mockups com esses layouts" → `scripts/brand-mockup-batch.ts` (motor genérico; os `soccer248-batch*.ts` foram os primeiros casos):

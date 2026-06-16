@@ -1,12 +1,14 @@
-import { readFileSync, writeFileSync } from "fs";
-import { resolve } from "path";
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { resolve, dirname, basename } from "path";
 import { createServer } from "net";
 import {
-  SO_TARGET as SO_PATTERNS,
   BRAND_HIDE,
   flattenLayers,
   replaceLinkedSmartObjects,
   composePsd,
+  resolveSoTarget,
+  preloadDisplacementMaps,
+  applyHideRules,
 } from "@visant/psd-engine";
 
 const PORT = parseInt(process.env.RENDER_PORT || "4200");
@@ -114,20 +116,17 @@ async function handleJob(json: string, socket: import("net").Socket) {
     // 1. Read PSD
     sendProgress(socket, "reading_psd", psdName);
     const psdBuffer = readFileSync(resolve(psdPath));
-    const psdMB = (psdBuffer.length / 1e6).toFixed(0);
-    sendProgress(socket, "psd_loaded", `${psdMB}MB — ${elapsed()}`);
+    sendProgress(socket, "psd_loaded", `${(psdBuffer.length / 1e6).toFixed(0)}MB — ${elapsed()}`);
 
-    // 2. Parse PSD with ag-psd (renders to canvas)
+    // 2. Parse PSD
     sendProgress(socket, "parsing_psd", "ag-psd readPsd...");
-    const psd = engine.readPsd(new Uint8Array(psdBuffer).buffer, {
-      skipThumbnail: true,
-    });
+    const psd = engine.readPsd(new Uint8Array(psdBuffer).buffer, { skipThumbnail: true });
     sendProgress(socket, "psd_parsed", `${psd.width}x${psd.height} — ${elapsed()}`);
 
     const sharp = (await import("sharp")).default;
     const { createCanvas, loadImage } = await import("canvas");
 
-    // 3+4. Para cada slot: lê/upscala a arte e troca o smart object da face
+    // 3. Flatten layers + pre-load displacement maps (Smart Filter Displace)
     const allLayers = flattenLayers(psd.children || []);
     const smartObjects = allLayers.filter((l: any) => l.placedLayer);
     sendProgress(socket, "smart_objects_found",
@@ -136,26 +135,14 @@ async function handleJob(json: string, socket: import("net").Socket) {
         : "0 — will try name-based detection"
     );
 
-    const byArea = (a: any, b: any) => {
-      const areaA = (a.right - a.left) * (a.bottom - a.top);
-      const areaB = (b.right - b.left) * (b.bottom - b.top);
-      return areaB > areaA ? b : a;
-    };
+    await preloadDisplacementMaps(
+      allLayers, psdPath, createCanvas as any,
+      { exists: existsSync, read: (p) => readFileSync(p), resolve, dirname, basename },
+      (buf, opts) => engine.readPsd(buf, opts),
+      (msg) => sendProgress(socket, "warning", msg)
+    );
 
-    // Priority: exact path → exact name → partial name/path → single SO → largest pattern-match → largest SO
-    const findTarget = (soName: string) => {
-      const patternMatches = smartObjects.filter((l: any) => SO_PATTERNS.test(l.name || ""));
-      return (
-        allLayers.find((l: any) => l.path === soName) ||
-        allLayers.find((l: any) => l.name === soName) ||
-        allLayers.find((l: any) => l.path?.toLowerCase().includes(soName.toLowerCase())) ||
-        allLayers.find((l: any) => l.name?.toLowerCase().includes(soName.toLowerCase())) ||
-        (smartObjects.length === 1 ? smartObjects[0] : null) ||
-        (patternMatches.length ? patternMatches.reduce(byArea) : null) ||
-        (smartObjects.length ? smartObjects.reduce(byArea) : null)
-      );
-    };
-
+    // 4. For each slot: read/upscale art → replace SO
     const replacedNames = new Set<string>();
     for (const slot of replacements) {
       sendProgress(socket, "reading_art", slot.artPath.split(/[/\\]/).pop());
@@ -177,12 +164,13 @@ async function handleJob(json: string, socket: import("net").Socket) {
 
       const soName = slot.smartObject || smartObject || "Your design";
       sendProgress(socket, "finding_smart_objects", `Looking for "${soName}"`);
-      const target = findTarget(soName);
+      const target = resolveSoTarget(allLayers, soName);
 
       if (!target) {
         sendProgress(socket, "warning", `Smart object "${soName}" not found — skipping slot`);
-        const names = allLayers.map((l: any) => l.name).filter(Boolean).slice(0, 20);
-        sendProgress(socket, "available_layers", names.join(", "));
+        sendProgress(socket, "available_layers",
+          allLayers.map((l: any) => l.name).filter(Boolean).slice(0, 20).join(", ")
+        );
         continue;
       }
       if (!target.placedLayer && replacedNames.has(target.name)) {
@@ -191,61 +179,51 @@ async function handleJob(json: string, socket: import("net").Socket) {
       }
 
       const artImg = await loadImage(artBuffer);
-      sendProgress(socket, "replacing", `"${target.name}"${target.placedLayer?.id ? ` + linked (id ${String(target.placedLayer.id).slice(0, 8)})` : ""}`);
+      sendProgress(socket, "replacing",
+        `"${target.name}"${target.placedLayer?.id ? ` + linked (id ${String(target.placedLayer.id).slice(0, 8)})` : ""}`
+      );
 
-      const replaced = replaceLinkedSmartObjects(allLayers, target, artImg, createCanvas);
+      const replaced = replaceLinkedSmartObjects(allLayers, target, artImg, createCanvas as any);
       for (const r of replaced) replacedNames.add(r.name);
       sendProgress(socket, "replaced",
         `${replaced.map((r) => `"${r.name}" ${r.width}x${r.height}${r.warped ? " warp" : ""}`).join(", ")} — ${elapsed()}`
       );
     }
 
-    // 5. Hide layers: explicit list + auto-hide branding/placeholder watermarks
-    const allHide = new Set([...(hideLayers || [])]);
+    // 5. Hide layers: BRAND_HIDE watermarks + explicit list (engine SSOT)
+    const hideNames = allLayers
+      .filter((l: any) => (BRAND_HIDE.test(l.name || "") && !replacedNames.has(l.name)) || (hideLayers || []).includes(l.name))
+      .map((l: any) => l.name).filter(Boolean);
+    if (hideNames.length) sendProgress(socket, "hiding", `[${hideNames.join(", ")}]`);
+    applyHideRules(allLayers, replacedNames, hideLayers || []);
 
-    for (const layer of allLayers) {
-      if (BRAND_HIDE.test(layer.name || "")) {
-        allHide.add(layer.name);
-      }
-    }
-    // Never hide the SOs we just replaced with user art — names might match BRAND_HIDE
-    for (const name of replacedNames) allHide.delete(name);
-
-    if (allHide.size) {
-      sendProgress(socket, "hiding", `[${[...allHide].join(", ")}]`);
-    }
-
-    for (const layerTarget of allHide) {
-      const layer = allLayers.find((l: any) => l.path === layerTarget || l.name === layerTarget);
-      if (layer?.__original) {
-        layer.__original.hidden = true;
-      }
-    }
-
-    // 6. Composite all layers bottom-to-top with blend modes, masks and clipping
+    // 6. Composite
     sendProgress(socket, "rendering", "compositing layers...");
-    const { createCanvas: cc2 } = await import("canvas");
-
     let outW = psd.width, outH = psd.height;
     if (previewMaxPx > 0) {
       const scale = previewMaxPx / Math.max(outW, outH);
       if (scale < 1) { outW = Math.round(outW * scale); outH = Math.round(outH * scale); }
     }
 
-    const fullCanvas = composePsd(psd, cc2);
+    let fullCanvas: any;
+    try {
+      fullCanvas = composePsd(psd, createCanvas as any);
+    } catch (composeErr: any) {
+      throw new Error(`composePsd failed: ${composeErr?.message ?? composeErr}`);
+    }
 
     let outCanvas = fullCanvas;
     if (previewMaxPx > 0 && (outW !== psd.width || outH !== psd.height)) {
-      outCanvas = cc2(outW, outH);
-      outCanvas.getContext("2d").drawImage(fullCanvas, 0, 0, outW, outH);
+      outCanvas = createCanvas(outW, outH);
+      (outCanvas as any).getContext("2d").drawImage(fullCanvas, 0, 0, outW, outH);
     }
     sendProgress(socket, "composited", `${outW}x${outH} — ${elapsed()}`);
 
-    // 7. Export (JPEG for preview, PNG for full)
+    // 7. Export
     sendProgress(socket, "exporting_png", previewMaxPx ? "Converting to JPEG..." : "Converting to PNG...");
     const outBuffer = previewMaxPx
-      ? outCanvas.toBuffer("image/jpeg", { quality: 0.75 })
-      : outCanvas.toBuffer("image/png");
+      ? (outCanvas as any).toBuffer("image/jpeg", { quality: 0.75 })
+      : (outCanvas as any).toBuffer("image/png");
     writeFileSync(resolve(outputPath), outBuffer);
 
     const ms = Date.now() - start;

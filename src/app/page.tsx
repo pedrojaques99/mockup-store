@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
+import Link from "next/link";
+import ArtFramePanel from "@/components/ArtFramePanel";
 import {
   Panel,
   Group as PanelGroup,
@@ -16,8 +18,6 @@ import {
   ChevronDown,
   X,
   Maximize2,
-  Minimize2,
-  Crop,
   Folder,
   Image as ImageIcon,
   Layers,
@@ -40,14 +40,16 @@ import {
   RefreshCw,
   HardDrive,
   Terminal,
+  Upload,
+  Camera,
 } from "lucide-react";
 import {
   DEFAULT_FRAME,
   type FrameConfig,
   renderFramedArt,
-  coverCrop,
-  isLowRes,
 } from "@/lib/art-frame";
+import Lottie from "lottie-react";
+import boxLoaderData from "../../public/lottie/box-loader.json";
 
 function MockupCard({
   mockup,
@@ -102,9 +104,12 @@ function MockupCard({
           />
         )}
         
-        {mockup.psdPath && !isRendering && (
+        {(mockup.psdPath || mockup.type === "photo") && !isRendering && (
           <div className="absolute top-2 right-2 flex gap-1">
-            <span className="bg-emerald-500/90 backdrop-blur-sm text-[9px] font-black px-2 py-0.5 rounded shadow-lg text-white uppercase tracking-tighter">PSD</span>
+            {mockup.type === "photo"
+              ? <span className="bg-blue-500/90 backdrop-blur-sm text-[9px] font-black px-2 py-0.5 rounded shadow-lg text-white uppercase tracking-tighter">Photo</span>
+              : <span className="bg-emerald-500/90 backdrop-blur-sm text-[9px] font-black px-2 py-0.5 rounded shadow-lg text-white uppercase tracking-tighter">PSD</span>
+            }
           </div>
         )}
 
@@ -113,7 +118,21 @@ function MockupCard({
             <Loader2 className="w-8 h-8 text-white animate-spin" />
           </div>
         )}
-        
+
+        {mockup.type === "photo" && mockup.photoSceneId && !isRendering && (
+          <a
+            href={`/photo-mockup?scene=${mockup.photoSceneId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center backdrop-blur-[2px]"
+          >
+            <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-all active:scale-90 shadow-2xl uppercase tracking-widest">
+              Abrir
+            </span>
+          </a>
+        )}
+
         {hasArt && mockup.psdPath && !isRendering && (
           <div
             onClick={(e) => { e.stopPropagation(); onApply(); }}
@@ -146,6 +165,8 @@ interface Reference {
   smartObjectName?: string;
   soInnerWidth?: number;
   soInnerHeight?: number;
+  type?: "photo";
+  photoSceneId?: string;
 }
 
 interface Brand {
@@ -384,6 +405,7 @@ export default function Home() {
   const setActiveSlot = (i: number) => { activeSlotRef.current = i; _setActiveSlot(i); };
   const [fullscreen, setFullscreen] = useState(false);
   const [rendering, setRendering] = useState(false);
+  const [previewRendering, setPreviewRendering] = useState(false);
   const [renderingRefId, setRenderingRefId] = useState<string | null>(null);
   const [renderResult, setRenderResult] = useState<string | null>(null);
   const [renderCache, setRenderCache] = useState<Record<string, { url: string; name: string }>>({});
@@ -492,9 +514,6 @@ export default function Home() {
 
   // UI Section States
   const [artSectionCollapsed, setArtSectionCollapsed] = useState(false);
-  const [artSectionHeight, setArtSectionHeight] = useState<number | null>(null);
-  const artSectionRef = useRef<HTMLDivElement>(null);
-  const isDraggingArt = useRef(false);
   const [showSmartObjects, setShowSmartObjects] = useState(true);
   const [showAdjustments, setShowAdjustments] = useState(false);
   const [expandSoList, setExpandSoList] = useState(false);
@@ -503,11 +522,13 @@ export default function Home() {
   useEffect(() => { if (!showSmartObjects) setArtSectionCollapsed(true); }, [showSmartObjects]);
 
   const renderTimerRef = useRef<ReturnType<typeof setInterval>>(null);
+  const autoPreviewTimer = useRef<ReturnType<typeof setTimeout>>(null);
 
   // Faces do PSD selecionado + slot ativo derivado
   const faces = psdInfo?.faces ?? [];
   const activeArt = artSlots[activeSlot] ?? null;
   const artPreview = activeArt?.preview ?? null;
+
   const artFile = activeArt?.file ?? null;
   const artDims = activeArt?.dims ?? null;
   const frame = activeArt?.frame ?? DEFAULT_FRAME;
@@ -536,6 +557,9 @@ export default function Home() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const workerReqId = useRef(0);
+  const previewBlobUrl = useRef<string | null>(null);
 
   const fetchPage = useCallback(
     async (pageNum: number, append: boolean) => {
@@ -867,11 +891,9 @@ export default function Home() {
     return () => window.removeEventListener("paste", onPaste);
   }, []);
 
-  const handleRender = async (preview = false) => {
-    if (!selected?.psdPath) return;
-
-    // Um item por slot preenchido, cada arte já enquadrada no aspect da face
-    // (client-side). Sem dimensões, manda a original e o servidor faz cover.
+  // Builds the arts array (framed art per slot) — shared between preview and export.
+  const buildArts = (sel: typeof selected) => {
+    if (!sel) return [];
     const arts: Array<{ smartObject?: string; artBase64: string }> = [];
     if (faces.length > 0) {
       faces.forEach((f, i) => {
@@ -890,11 +912,86 @@ export default function Home() {
         if (slot.img && soWidth && soHeight) {
           try { payload = renderFramedArt(slot.img, slot.frame, soWidth, soHeight); } catch {}
         }
-        arts.push({ smartObject: selectedSo || selected.smartObjectName || "Your design", artBase64: payload });
+        arts.push({ smartObject: selectedSo || sel.smartObjectName || "Your design", artBase64: payload });
       }
     }
+    return arts;
+  };
+
+  // Preview: client-side Web Worker (OffscreenCanvas + psd-engine, no TCP round-trip).
+  const handlePreviewWorker = async (sel: typeof selected, arts: Array<{ smartObject?: string; artBase64: string }>) => {
+    if (!sel?.psdPath) return;
+
+    // Lazy-init worker
+    if (!workerRef.current) {
+      workerRef.current = new Worker(new URL("../workers/render.worker.ts", import.meta.url));
+    }
+    const worker = workerRef.current;
+
+    const reqId = ++workerReqId.current;
+    setRendering(true);
+    setPreviewRendering(true);
+    setRenderingRefId(sel.id);
+    setCurrentStep("compositing…");
+
+    return new Promise<void>((resolve) => {
+      const cleanup = (err?: string) => {
+        worker.removeEventListener("message", onMessage);
+        worker.removeEventListener("error", onError);
+        if (err) setRenderLogs([{ step: "error", detail: err }]);
+        setRendering(false);
+        setPreviewRendering(false);
+        setRenderingRefId(null);
+        setCurrentStep(null);
+        resolve();
+      };
+
+      const onMessage = (e: MessageEvent) => {
+        if (e.data.id !== reqId) return;
+        if (e.data.error) {
+          cleanup(e.data.error);
+        } else if (e.data.blob) {
+          if (previewBlobUrl.current) URL.revokeObjectURL(previewBlobUrl.current);
+          const url = URL.createObjectURL(e.data.blob);
+          previewBlobUrl.current = url;
+          setRenderResult(url);
+          setIsPreviewResult(true);
+          cleanup();
+        }
+      };
+
+      const onError = (e: ErrorEvent) => {
+        // Worker failed to load or threw an uncaught error — fall back to TCP preview
+        workerRef.current?.terminate();
+        workerRef.current = null;
+        cleanup(`Worker error: ${e.message}`);
+      };
+
+      worker.addEventListener("message", onMessage);
+      worker.addEventListener("error", onError);
+
+      // Worker handles its own PSD fetch + caching by path — no buffer transfer needed.
+      worker.postMessage({
+        id: reqId,
+        psdPath: sel.psdPath,
+        arts,
+        hideLayers: Array.from(hiddenLayers),
+      });
+    });
+  };
+
+  const handleRender = async (preview = false) => {
+    if (!selected?.psdPath) return;
+
+    const arts = buildArts(selected);
     if (arts.length === 0) return;
 
+    // Preview → client-side Worker (fast, no TCP)
+    if (preview) {
+      return handlePreviewWorker(selected, arts);
+    }
+
+    // Full export → render-server TCP (full-res, node-canvas)
     setRendering(true);
     setRenderingRefId(selected.id);
     setRenderResult(null);
@@ -914,7 +1011,7 @@ export default function Home() {
           psdPath: selected.psdPath,
           arts,
           hideLayers: Array.from(hiddenLayers),
-          preview,
+          preview: false,
           stream: true,
         }),
       });
@@ -958,10 +1055,8 @@ export default function Home() {
       if (completedJobId) {
         const url = `/api/render?jobId=${completedJobId}`;
         setRenderResult(url);
-        setIsPreviewResult(preview);
-        if (!preview && selected) {
-          setRenderCache((c) => ({ ...c, [selected.id]: { url, name: selected.name } }));
-        }
+        setIsPreviewResult(false);
+        setRenderCache((c) => ({ ...c, [selected.id]: { url, name: selected.name } }));
       }
     } catch (err) {
       setRenderLogs((prev) => [...prev, { step: "error", detail: String(err) }]);
@@ -1072,19 +1167,19 @@ export default function Home() {
   const soWidth = activeFace?.innerWidth || selectedSoInfo?.innerWidth || selected?.soInnerWidth;
   const soHeight = activeFace?.innerHeight || selectedSoInfo?.innerHeight || selected?.soInnerHeight;
 
-  const lowRes = (() => {
-    if (!artDims || !soWidth || !soHeight) return false;
-    const src =
-      frame.mode === "cover"
-        ? frame.cropPixels ?? coverCrop(artDims.width, artDims.height, soWidth, soHeight)
-        : { width: artDims.width, height: artDims.height };
-    return isLowRes(src.width, src.height, soWidth, soHeight);
-  })();
-
   const renderDisabled =
     filledCount === 0 ||
     rendering ||
     (faces.length === 0 && psdInfo != null && psdInfo.smartObjects.length > 1 && !selectedSo);
+
+  // Auto-preview: dispara handleRender(true) 600ms após crop/zoom parar
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (renderDisabled || !artPreview) return;
+    if (autoPreviewTimer.current) clearTimeout(autoPreviewTimer.current);
+    autoPreviewTimer.current = setTimeout(() => { handleRender(true); }, 250);
+    return () => { if (autoPreviewTimer.current) clearTimeout(autoPreviewTimer.current); };
+  }, [frame.cropPixels, frame.mode]);
 
   const toggleLayer = (name: string) => {
     setHiddenLayers((prev) => {
@@ -1117,6 +1212,14 @@ export default function Home() {
             </div>
             <h1 className="text-sm font-black tracking-tighter uppercase">Boxy Store</h1>
           </div>
+
+          <Link
+            href="/photo-mockup"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-all border border-neutral-800 hover:border-neutral-600"
+          >
+            <Camera className="w-3.5 h-3.5" />
+            Scene Maker
+          </Link>
 
           <div className="flex items-center gap-6 pl-2">
             <div className="flex items-center gap-3">
@@ -1547,14 +1650,36 @@ export default function Home() {
             </div>
 
             <div className="flex-1 overflow-y-auto no-scrollbar">
-              <div className="relative aspect-[4/3] bg-neutral-900 group/preview overflow-hidden ring-1 ring-white/5 mx-4 mt-4 rounded-2xl">
+              <div
+                className="relative aspect-[4/3] bg-neutral-900 group/preview overflow-hidden ring-1 ring-white/5 mx-4 mt-4 rounded-2xl"
+                onClick={!renderResult ? () => fileInputRef.current?.click() : undefined}
+                style={!renderResult ? { cursor: "pointer" } : undefined}
+              >
                 {renderResult ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={renderResult} alt="Render" className="absolute inset-0 w-full h-full object-contain cursor-pointer transition-transform duration-500 group-hover/preview:scale-105" onClick={() => setFullscreen(true)} />
                 ) : selected.referenceImageUrl ? (
-                  <Image src={selected.referenceImageUrl} alt={selected.name} fill className="object-contain" unoptimized priority />
+                  <>
+                    <Image src={selected.referenceImageUrl} alt={selected.name} fill className="object-contain" unoptimized priority />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-0 group-hover/preview:opacity-100 transition-opacity duration-200 bg-black/50">
+                      <Upload className="w-6 h-6 text-white" />
+                      <span className="text-[11px] font-bold text-white">Adicionar arte</span>
+                    </div>
+                  </>
                 ) : (
-                  <div className="absolute inset-0 flex items-center justify-center text-neutral-800"><ImageIcon className="w-12 h-12" /></div>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-neutral-700 group-hover/preview:text-neutral-400 transition-colors">
+                    <Upload className="w-7 h-7" />
+                    <span className="text-[11px] font-bold">Adicionar arte</span>
+                  </div>
+                )}
+                {/* Preview render loading overlay — shown only during Worker compositing */}
+                {previewRendering && (
+                  <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center">
+                    <div className="flex flex-col items-center gap-1.5">
+                      <Lottie animationData={boxLoaderData} loop className="w-10 h-10" />
+                      <span className="text-[10px] font-bold text-white/70 animate-pulse">{currentStep || "compositing…"}</span>
+                    </div>
+                  </div>
                 )}
                 
                 <div className="absolute top-3 left-3 flex gap-2 opacity-0 group-hover/preview:opacity-100 transition-all translate-y-2 group-hover/preview:translate-y-0 duration-300">
@@ -1712,143 +1837,75 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Art Input — sticky above footer, collapsible + resizable. Hidden when no editable faces. */}
-            <div
-              ref={artSectionRef}
-              className={`shrink-0 flex flex-col border-t border-neutral-900 bg-neutral-950 overflow-hidden transition-all duration-300 ${faces.length === 0 ? "hidden" : ""}`}
-              style={artSectionHeight != null ? { height: artSectionHeight } : undefined}
-            >
-              {/* Unified handle: drag = resize, click = collapse */}
-              <div
-                className="h-5 flex items-center justify-center cursor-ns-resize group shrink-0 select-none px-4 gap-2"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  let moved = false;
-                  const startY = e.clientY;
-                  const startH = artSectionRef.current?.getBoundingClientRect().height ?? 200;
-                  const onMove = (ev: MouseEvent) => {
-                    if (Math.abs(ev.clientY - startY) > 4) moved = true;
-                    if (!moved) return;
-                    isDraggingArt.current = true;
-                    const delta = startY - ev.clientY;
-                    setArtSectionHeight(Math.max(56, Math.min(480, startH + delta)));
-                  };
-                  const onUp = () => {
-                    if (!moved) setArtSectionCollapsed((v) => !v);
-                    isDraggingArt.current = false;
-                    window.removeEventListener("mousemove", onMove);
-                    window.removeEventListener("mouseup", onUp);
-                  };
-                  window.addEventListener("mousemove", onMove);
-                  window.addEventListener("mouseup", onUp);
-                }}
+            {/* Art Input — colapsável. Hidden quando não há faces editáveis. */}
+            {faces.length > 0 && (
+              <div className="shrink-0 flex flex-col border-t border-neutral-900 bg-neutral-950">
+              {/* Header — clica para colapsar */}
+              <button
+                onClick={() => setArtSectionCollapsed((v) => !v)}
+                className="h-8 flex items-center justify-between px-4 w-full group select-none"
               >
-                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-700 group-hover:text-neutral-500 transition-colors flex-1 pointer-events-none">
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-600 group-hover:text-neutral-400 transition-colors">
                   {faces.length > 1 && activeFace ? `Arte · ${activeFace.name}` : "Sua Arte"}
                 </p>
-                <div className="w-6 h-0.5 rounded-full bg-neutral-800 group-hover:bg-neutral-600 transition-colors" />
-                <ChevronDown className={`w-3 h-3 text-neutral-700 group-hover:text-neutral-500 transition-all duration-200 ${artSectionCollapsed ? "-rotate-180" : ""}`} />
-              </div>
+                <ChevronDown className={`w-3.5 h-3.5 text-neutral-700 group-hover:text-neutral-500 transition-all duration-200 ${artSectionCollapsed ? "" : "rotate-180"}`} />
+              </button>
 
-              {/* Collapsible content */}
-              <div className={`flex-1 overflow-hidden transition-all duration-200 ${artSectionCollapsed ? "opacity-0 pointer-events-none" : "opacity-100"}`} style={{ height: artSectionCollapsed ? 0 : undefined }}>
-                <div className="px-4 pb-3 flex flex-col gap-2">
+              {/* Conteúdo colapsável */}
+              {!artSectionCollapsed && (
+                <div className="px-4 pb-4 flex flex-col gap-2">
                   <div className={brandId && !artPreview ? "flex gap-2 items-stretch" : undefined}>
-                  <div
-                    onDrop={handleDrop}
-                    onDragOver={(e) => e.preventDefault()}
-                    onClick={() => fileInputRef.current?.click()}
-                    className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all px-3 py-2 relative group ${brandId && !artPreview ? "flex-1" : ""} ${artPreview ? "border-neutral-700 bg-neutral-900/40 hover:border-neutral-500" : "border-neutral-800 hover:border-neutral-600 bg-neutral-900/30 hover:bg-neutral-900/50"}`}
-                  >
-                    {artPreview ? (
-                      <div className="flex flex-col gap-2 w-full">
-                        {/* Preview — draggable in cover mode to set crop position */}
-                        <div
-                          className={`relative w-full overflow-hidden rounded-lg ring-1 ring-white/10 bg-neutral-950 ${frame.mode === "cover" ? "cursor-grab active:cursor-grabbing" : ""}`}
-                          style={{ aspectRatio: soWidth && soHeight ? `${soWidth} / ${soHeight}` : "16 / 9", maxHeight: artSectionHeight ? `${artSectionHeight - 120}px` : "22vh" }}
-                          onMouseDown={(e) => {
-                            if (frame.mode !== "cover" || !artDims || !soWidth || !soHeight) return;
-                            e.preventDefault();
-                            e.stopPropagation();
-                            const startX = e.clientX;
-                            const startY = e.clientY;
-                            const baseCrop = frame.cropPixels ?? coverCrop(artDims.width, artDims.height, soWidth, soHeight);
-                            const el = e.currentTarget as HTMLElement;
-                            const scaleX = baseCrop.width / el.clientWidth;
-                            const scaleY = baseCrop.height / el.clientHeight;
-                            const maxX = artDims.width - baseCrop.width;
-                            const maxY = artDims.height - baseCrop.height;
-                            const onMove = (ev: MouseEvent) => {
-                              const nx = Math.max(0, Math.min(maxX, baseCrop.x - (ev.clientX - startX) * scaleX));
-                              const ny = Math.max(0, Math.min(maxY, baseCrop.y - (ev.clientY - startY) * scaleY));
-                              setFrame((f) => ({ ...f, cropPixels: { x: nx, y: ny, width: baseCrop.width, height: baseCrop.height } }));
-                            };
-                            const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-                            window.addEventListener("mousemove", onMove);
-                            window.addEventListener("mouseup", onUp);
-                          }}
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={artPreview}
-                            alt="Art"
-                            className="w-full h-full"
-                            style={{
-                              objectFit: frame.mode === "cover" ? "cover" : frame.mode === "contain" ? "contain" : "fill",
-                              objectPosition: (() => {
-                                if (frame.mode !== "cover" || !artDims || !soWidth || !soHeight) return "50% 50%";
-                                const crop = frame.cropPixels ?? coverCrop(artDims.width, artDims.height, soWidth, soHeight);
-                                const maxX = artDims.width - crop.width;
-                                const maxY = artDims.height - crop.height;
-                                return `${maxX > 0 ? (crop.x / maxX) * 100 : 50}% ${maxY > 0 ? (crop.y / maxY) * 100 : 50}%`;
-                              })(),
-                            }}
+                    <div
+                      onDrop={handleDrop}
+                      onDragOver={(e) => e.preventDefault()}
+                      onClick={() => !artPreview && fileInputRef.current?.click()}
+                      className={`rounded-2xl flex flex-col gap-2 transition-all relative ${
+                        artPreview
+                          ? "border border-neutral-800 bg-neutral-900/40 p-2"
+                          : `border-2 border-dashed cursor-pointer flex items-center justify-center px-3 py-3 group ${brandId ? "flex-1" : ""} border-neutral-800 hover:border-neutral-600 bg-neutral-900/30 hover:bg-neutral-900/50`
+                      }`}
+                    >
+                      {artPreview ? (
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <ArtFramePanel
+                            artPreview={artPreview}
+                            artDims={artDims}
+                            frame={frame}
+                            onFrameChange={setFrame}
+                            soWidth={soWidth}
+                            soHeight={soHeight}
+                            fileName={artFile?.name || "Área de transferência"}
+                            onClear={() => { clearSlot(activeSlot); setRenderResult(null); }}
                           />
-                          {frame.mode === "cover" && (
-                            <div className="absolute bottom-1.5 right-1.5 pointer-events-none">
-                              <p className="text-[9px] text-white/40 font-medium bg-black/40 px-1.5 py-0.5 rounded">arraste</p>
-                            </div>
-                          )}
                         </div>
-                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-bold text-white truncate">{artFile?.name || "Imagem da área de transferência"}</p>
-                            {artDims && <p className="text-[10px] text-neutral-500 font-medium">{artDims.width}×{artDims.height}px{soWidth && soHeight ? ` · SO ${soWidth}×${soHeight}` : ""}</p>}
+                      ) : (
+                        <div className="flex items-center gap-3 py-1">
+                          <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center group-hover:bg-neutral-700 transition-colors shrink-0">
+                            <ImageIcon className="w-4 h-4 text-neutral-500" />
                           </div>
-                          {lowRes && <div className="text-amber-500 shrink-0" title="Resolução baixa."><AlertTriangle className="w-4 h-4" /></div>}
-                          <div className="flex gap-0.5 shrink-0 bg-neutral-900 border border-neutral-800 rounded-lg p-0.5">
-                            <button onClick={() => setFrame((f) => ({ ...f, mode: "cover", cropPixels: undefined }))} className={`p-1.5 rounded-md transition-all ${frame.mode === "cover" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`} title="Cover — preenche e arraste para reposicionar"><Crop className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => setFrame((f) => ({ ...f, mode: "contain" }))} className={`p-1.5 rounded-md transition-all ${frame.mode === "contain" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`} title="Fit — arte inteira visível"><Minimize2 className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => setFrame((f) => ({ ...f, mode: "stretch" }))} className={`p-1.5 rounded-md transition-all ${frame.mode === "stretch" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`} title="Esticar — distorce para preencher"><Maximize2 className="w-3.5 h-3.5" /></button>
+                          <div>
+                            <p className="text-xs font-bold text-neutral-400">
+                              {faces.length > 1 && activeFace ? <>Arte para <span className="text-white">«{activeFace.name}»</span></> : "Clique ou arraste sua arte"}
+                            </p>
+                            <p className="text-[10px] text-neutral-600">JPG, PNG ou Ctrl+V</p>
                           </div>
-                          <button onClick={() => { clearSlot(activeSlot); setRenderResult(null); }} className="p-1.5 rounded-lg text-neutral-600 hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0" title="Remover arte"><X className="w-3.5 h-3.5" /></button>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-3 py-2">
-                        <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center group-hover:bg-neutral-700 transition-colors shrink-0">
-                          <ImageIcon className="w-4 h-4 text-neutral-500" />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-neutral-400">
-                            {faces.length > 1 && activeFace ? <>Arte para <span className="text-white">«{activeFace.name}»</span></> : "Clique ou arraste sua arte"}
-                          </p>
-                          <p className="text-[10px] text-neutral-600">JPG, PNG ou Ctrl+V</p>
-                        </div>
+                      )}
+                      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleArtSelect(f); }} />
+                    </div>
+
+                    {/* Brand shortcuts — só quando sem arte */}
+                    {brandId && !artPreview && (
+                      <div className="flex flex-col gap-2 shrink-0 w-[4.5rem]">
+                        <button onClick={(e) => { e.stopPropagation(); loadBrandLogoAsArt(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-all active:scale-95 py-1"><Zap className="w-4 h-4" /><span>Logo</span></button>
+                        <button onClick={(e) => { e.stopPropagation(); openLibrary(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-all active:scale-95 py-1"><Library className="w-4 h-4" /><span>Library</span></button>
                       </div>
                     )}
-                    <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleArtSelect(f); }} />
-                  </div>
-                  {brandId && !artPreview && (
-                    <div className="flex flex-col gap-2 shrink-0 w-[4.5rem]">
-                      <button onClick={(e) => { e.stopPropagation(); loadBrandLogoAsArt(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-all active:scale-95 py-1"><Zap className="w-4 h-4" /><span>Logo</span></button>
-                      <button onClick={(e) => { e.stopPropagation(); openLibrary(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-all active:scale-95 py-1"><Library className="w-4 h-4" /><span>Library</span></button>
-                    </div>
-                  )}
                   </div>
                 </div>
-              </div>
+              )}
             </div>
+            )}
 
             {/* Actions Footer */}
             <div className="p-4 border-t border-neutral-900 bg-neutral-950/80 backdrop-blur shrink-0 space-y-4 shadow-[0_-8px_24px_rgba(0,0,0,0.5)]">
@@ -1878,10 +1935,10 @@ export default function Home() {
                 )}
               </div>
 
-              {rendering && (
+              {rendering && !previewRendering && (
                 <div className="flex flex-col gap-2 items-center animate-in fade-in slide-in-from-bottom-2">
-                  <div className="flex items-center gap-3 text-[11px] font-bold text-neutral-400">
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <Lottie animationData={boxLoaderData} loop className="w-16 h-16" />
+                  <div className="flex items-center gap-2 text-[11px] font-bold text-neutral-400">
                     <span className="animate-pulse">{currentStep || "Processando"}…</span>
                     <span className="text-neutral-600">{renderElapsed}s</span>
                   </div>
