@@ -142,3 +142,41 @@ export async function applyReflection(
 
   return sharp(out, { raw: { width, height, channels: bc } }).png().toBuffer();
 }
+
+/**
+ * Specular highlight preservation — screens the photo's bright reflections (window,
+ * light source) back ON TOP of the art, clipped to the surface. Sells glossy
+ * materials (glass, screen, plastic, metal) where the art shouldn't kill the gloss.
+ * Highlights keep their real colour; strength ramps above `threshold` (0..255).
+ */
+export async function applySpecular(
+  baseBuf: Buffer, rawPhotoBuf: Buffer, maskBuf: Buffer,
+  width: number, height: number, opacity: number, threshold = 205,
+): Promise<Buffer> {
+  const op = Math.max(0, Math.min(1, opacity));
+  if (op <= 0) return baseBuf;
+
+  const [base, photo, mask] = await Promise.all([
+    sharp(baseBuf).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
+    sharp(rawPhotoBuf).resize(width, height, { fit: "fill" }).removeAlpha().raw().toBuffer(),
+    sharp(maskBuf).resize(width, height, { fit: "fill" }).ensureAlpha().raw().toBuffer(),
+  ]);
+  const bd = base.data, bc = base.info.channels;
+  const out = Buffer.from(bd);
+  const range = Math.max(1, 255 - threshold);
+
+  for (let i = 0; i < width * height; i++) {
+    const m = mask[i * 4] / 255;
+    if (m <= 0) continue;
+    const pi = i * 3, bi = i * bc;
+    const lum = 0.299 * photo[pi] + 0.587 * photo[pi + 1] + 0.114 * photo[pi + 2];
+    if (lum <= threshold) continue;
+    const f = Math.min(1, (lum - threshold) / range) * op * m;
+    for (let c = 0; c < 3; c++) {
+      const spec = photo[pi + c] * f;
+      // screen blend: 255 - (255-base)(255-spec)/255
+      out[bi + c] = 255 - ((255 - bd[bi + c]) * (255 - spec)) / 255;
+    }
+  }
+  return sharp(out, { raw: { width, height, channels: bc } }).png().toBuffer();
+}

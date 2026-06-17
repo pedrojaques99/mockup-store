@@ -78,15 +78,26 @@ function precisionGain(speedPx: number): number {
   return MIN_GAIN + (1 - MIN_GAIN) * (speedPx / SLOW); // linear ease in the slow band
 }
 
+type BendKey = "top" | "right" | "bottom" | "left";
+const EDGES: { a: keyof Quad; b: keyof Quad; key: BendKey }[] = [
+  { a: "tl", b: "tr", key: "top" },
+  { a: "tr", b: "br", key: "right" },
+  { a: "br", b: "bl", key: "bottom" },
+  { a: "bl", b: "tl", key: "left" },
+];
+interface Bend { top: number; bottom: number; left: number; right: number }
+
 function QuadEditor({
-  imageUrl, imageNW, imageNH, quad, onQuadChange,
+  imageUrl, imageNW, imageNH, quad, onQuadChange, bend, onBendChange,
 }: {
   imageUrl: string; imageNW: number; imageNH: number; quad: Quad; onQuadChange: (q: Quad) => void;
+  bend?: Bend; onBendChange?: (b: Bend) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const dragging = useRef<keyof Quad | null>(null);
+  const draggingEdge = useRef<BendKey | null>(null);
   const scaleRef = useRef({ sx: 1, sy: 1, ox: 0, oy: 0 });
   const lastMouse = useRef<{ x: number; y: number } | null>(null); // canvas px
   const dragPos = useRef<QuadPt | null>(null);                     // float image coords
@@ -96,6 +107,23 @@ function QuadEditor({
     (p: QuadPt) => ({ x: p.x * scaleRef.current.sx + scaleRef.current.ox, y: p.y * scaleRef.current.sy + scaleRef.current.oy }),
     []
   );
+
+  // Edge bend geometry (image space): midpoint, outward normal, dimension, handle pos.
+  const edgeGeom = useCallback((e: { a: keyof Quad; b: keyof Quad; key: BendKey }) => {
+    const a = quad[e.a], b = quad[e.b];
+    const cx = (quad.tl.x + quad.tr.x + quad.br.x + quad.bl.x) / 4;
+    const cy = (quad.tl.y + quad.tr.y + quad.br.y + quad.bl.y) / 4;
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    let nx = b.y - a.y, ny = -(b.x - a.x);
+    const len = Math.hypot(nx, ny) || 1; nx /= len; ny /= len;
+    if ((mx - cx) * nx + (my - cy) * ny < 0) { nx = -nx; ny = -ny; } // point outward
+    const dist = (p: QuadPt, q: QuadPt) => Math.hypot(p.x - q.x, p.y - q.y);
+    const quadW = (dist(quad.tl, quad.tr) + dist(quad.bl, quad.br)) / 2;
+    const quadH = (dist(quad.tl, quad.bl) + dist(quad.tr, quad.br)) / 2;
+    const dim = e.key === "top" || e.key === "bottom" ? quadH : quadW;
+    const bow = (bend?.[e.key] ?? 0) * dim;
+    return { mx, my, nx, ny, dim, bow, handle: { x: mx + nx * bow, y: my + ny * bow } };
+  }, [quad, bend]);
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -104,20 +132,50 @@ function QuadEditor({
 
     const pts = CORNER_KEYS.map((k) => toCanvas(quad[k]));
 
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    pts.forEach((p) => ctx.lineTo(p.x, p.y));
-    ctx.closePath();
+    // Trace the quad outline — edges curve when bent (quadratic bezier through the bow).
+    const tracePath = () => {
+      ctx.beginPath();
+      const start = toCanvas(quad.tl);
+      ctx.moveTo(start.x, start.y);
+      for (const e of EDGES) {
+        const g = edgeGeom(e);
+        const end = toCanvas(quad[e.b]);
+        if (Math.abs(g.bow) > 0.01) {
+          const ctrl = toCanvas({ x: g.mx + g.nx * 2 * g.bow, y: g.my + g.ny * 2 * g.bow });
+          ctx.quadraticCurveTo(ctrl.x, ctrl.y, end.x, end.y);
+        } else {
+          ctx.lineTo(end.x, end.y);
+        }
+      }
+      ctx.closePath();
+    };
+
+    tracePath();
     ctx.fillStyle = "rgba(34, 197, 94, 0.12)";
     ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    pts.forEach((p) => ctx.lineTo(p.x, p.y));
-    ctx.closePath();
+    tracePath();
     ctx.strokeStyle = "#22c55e";
     ctx.lineWidth = 2;
     ctx.stroke();
+
+    // Edge bend handles (small diamonds at each edge midpoint)
+    if (onBendChange) {
+      for (const e of EDGES) {
+        const g = edgeGeom(e);
+        const h = toCanvas(g.handle);
+        const active = draggingEdge.current === e.key;
+        ctx.save();
+        ctx.translate(h.x, h.y);
+        ctx.rotate(Math.PI / 4);
+        const s = active ? 7 : 5;
+        ctx.fillStyle = active ? "#16a34a" : "#0a0a0a";
+        ctx.strokeStyle = "#22c55e";
+        ctx.lineWidth = 2;
+        ctx.fillRect(-s, -s, s * 2, s * 2);
+        ctx.strokeRect(-s, -s, s * 2, s * 2);
+        ctx.restore();
+      }
+    }
 
     CORNER_KEYS.forEach((k, i) => {
       const { x, y } = pts[i];
@@ -209,7 +267,7 @@ function QuadEditor({
       ctx.stroke();
       ctx.restore();
     }
-  }, [quad, toCanvas]);
+  }, [quad, toCanvas, edgeGeom, onBendChange]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -242,6 +300,15 @@ function QuadEditor({
     return null;
   };
 
+  const edgeHitTest = (cx: number, cy: number): BendKey | null => {
+    if (!onBendChange) return null;
+    for (const e of EDGES) {
+      const h = toCanvas(edgeGeom(e).handle);
+      if (Math.hypot(cx - h.x, cy - h.y) <= HANDLE_R + 4) return e.key;
+    }
+    return null;
+  };
+
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const r = canvasRef.current!.getBoundingClientRect();
     const cx = e.clientX - r.left, cy = e.clientY - r.top;
@@ -252,13 +319,28 @@ function QuadEditor({
       dragPos.current = { ...quad[dragging.current] }; // start relative drag from current corner
       fineMode.current = false;
       draw();
+      return;
     }
+    draggingEdge.current = edgeHitTest(cx, cy);
+    if (draggingEdge.current) { e.preventDefault(); draw(); }
   };
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!dragging.current || !lastMouse.current || !dragPos.current) return;
     const r = canvasRef.current!.getBoundingClientRect();
     const cx = e.clientX - r.left, cy = e.clientY - r.top;
+
+    // Edge bend drag — project the cursor onto the edge's outward normal
+    if (draggingEdge.current && onBendChange && bend) {
+      const e2 = EDGES.find((x) => x.key === draggingEdge.current)!;
+      const g = edgeGeom(e2);
+      const { sx, sy, ox, oy } = scaleRef.current;
+      const imgX = (cx - ox) / sx, imgY = (cy - oy) / sy;
+      const d = (imgX - g.mx) * g.nx + (imgY - g.my) * g.ny; // signed distance along normal (px)
+      onBendChange({ ...bend, [draggingEdge.current]: clampN(d / (g.dim || 1), -0.3, 0.3) });
+      return;
+    }
+
+    if (!dragging.current || !lastMouse.current || !dragPos.current) return;
     const dcx = cx - lastMouse.current.x;
     const dcy = cy - lastMouse.current.y;
     lastMouse.current = { x: cx, y: cy };
@@ -277,11 +359,15 @@ function QuadEditor({
     });
   };
 
-  const onMouseUp = () => { dragging.current = null; lastMouse.current = null; dragPos.current = null; fineMode.current = false; draw(); };
+  const onMouseUp = () => {
+    dragging.current = null; draggingEdge.current = null;
+    lastMouse.current = null; dragPos.current = null; fineMode.current = false; draw();
+  };
 
   const getCursor = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const r = canvasRef.current!.getBoundingClientRect();
-    return hitTest(e.clientX - r.left, e.clientY - r.top) ? "grab" : "default";
+    const cx = e.clientX - r.left, cy = e.clientY - r.top;
+    return hitTest(cx, cy) || edgeHitTest(cx, cy) ? "grab" : "default";
   };
 
   return (
@@ -390,6 +476,9 @@ function PhotoMockupPageInner() {
   const [quad, setQuad] = useState<Quad | null>(null);
   const [analyzeState, setAnalyzeState] = useState<StepState>("idle");
   const [analyzeErr, setAnalyzeErr] = useState("");
+  // Curved-surface warp (cylinder + per-edge bend) — fed to engine displacement
+  const [cylinder, setCylinder] = useState(0);
+  const [bend, setBend] = useState({ top: 0, bottom: 0, left: 0, right: 0 });
 
   // Processing — extract tuning (mask + shadow-map params, lib defaults)
   const [processState, setProcessState] = useState<StepState>("idle");
@@ -416,6 +505,8 @@ function PhotoMockupPageInner() {
   const [reflectionOpacity, setReflectionOpacity] = useState(0);  // reflexo (art tint on reflections)
   const [reflectionBlur,    setReflectionBlur]    = useState(24);
   const [reflectionMaskUrl, setReflectionMaskUrl] = useState<string | null>(null); // brush override
+  const [textureAmount,   setTextureAmount]   = useState(0);  // surface-relief displacement (art drapes)
+  const [specularOpacity, setSpecularOpacity] = useState(0);  // glossy highlight preservation
   const [fxGrain,      setFxGrain]      = useState(0);
   const [fxWarmth,     setFxWarmth]     = useState(0);
   const [fxSaturation, setFxSaturation] = useState(100);
@@ -547,6 +638,10 @@ function PhotoMockupPageInner() {
           if (typeof s.preBlur      === "number") setPreBlur(s.preBlur);
           if (typeof s.reflectionOpacity === "number") setReflectionOpacity(s.reflectionOpacity);
           if (typeof s.reflectionBlur    === "number") setReflectionBlur(s.reflectionBlur);
+          if (typeof s.cylinder === "number") setCylinder(s.cylinder);
+          if (s.bend && typeof s.bend === "object") setBend({ top: s.bend.top ?? 0, bottom: s.bend.bottom ?? 0, left: s.bend.left ?? 0, right: s.bend.right ?? 0 });
+          if (typeof s.textureAmount   === "number") setTextureAmount(s.textureAmount);
+          if (typeof s.specularOpacity === "number") setSpecularOpacity(s.specularOpacity);
         }
       } catch { /* scene not found */ }
     })();
@@ -560,6 +655,7 @@ function PhotoMockupPageInner() {
   // render loop. Round to integers so sub-pixel jitter doesn't retrigger either.
   const cp = frame.cropPixels;
   const frameSig = `${frame.mode}|${frame.bg ?? ""}|${cp ? `${Math.round(cp.x)},${Math.round(cp.y)},${Math.round(cp.width)},${Math.round(cp.height)}` : ""}`;
+  const warpSig = `${cylinder}|${bend.top}|${bend.bottom}|${bend.left}|${bend.right}`;
 
   useEffect(() => {
     if (!renderUrl || !uploadId || !artFile) return;
@@ -572,7 +668,7 @@ function PhotoMockupPageInner() {
     }, 600);
     return () => { if (autoRenderTimer.current) clearTimeout(autoRenderTimer.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, shadowOpacity, highlightOpacity, castOpacity, maskFeather, reflectionOpacity, reflectionBlur, frameSig]);
+  }, [fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, shadowOpacity, highlightOpacity, castOpacity, maskFeather, reflectionOpacity, reflectionBlur, textureAmount, specularOpacity, frameSig, warpSig]);
 
   useEffect(() => {
     if (!analysis?.surfaceType) return;
@@ -665,6 +761,9 @@ function PhotoMockupPageInner() {
           maskFeather,
           reflectionOpacity,
           reflectionBlur,
+          warp: { cylinder, bendTop: bend.top, bendBottom: bend.bottom, bendLeft: bend.left, bendRight: bend.right },
+          textureAmount,
+          specularOpacity,
           fx: { grain: fxGrain, warmth: fxWarmth, saturation: fxSaturation, brightness: fxBrightness, contrast: fxContrast },
         }),
       });
@@ -679,7 +778,7 @@ function PhotoMockupPageInner() {
       setRenderErr(e.message); setRenderState("error");
       renderStateRef.current = "error";
     }
-  }, [uploadId, artFile, artImg, frame, surfaceSize.w, surfaceSize.h, shadowOpacity, highlightOpacity, castOpacity, maskFeather, reflectionOpacity, reflectionBlur, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast]);
+  }, [uploadId, artFile, artImg, frame, surfaceSize.w, surfaceSize.h, shadowOpacity, highlightOpacity, castOpacity, maskFeather, reflectionOpacity, reflectionBlur, cylinder, bend, textureAmount, specularOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast]);
 
   const handleAIBlend = useCallback(async () => {
     if (!uploadId || !renderUrl) return;
@@ -722,14 +821,14 @@ function PhotoMockupPageInner() {
       const r = await fetch(`/api/photo-mockup/${uploadId}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, renderBase64, settings: { shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, shadowFloor, preBlur, reflectionOpacity, reflectionBlur }, tags: analysis?.surfaceType ? [analysis.surfaceType] : [] }),
+        body: JSON.stringify({ name, renderBase64, settings: { shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, shadowFloor, preBlur, reflectionOpacity, reflectionBlur, cylinder, bend, textureAmount, specularOpacity }, tags: analysis?.surfaceType ? [analysis.surfaceType] : [] }),
       });
       if (!r.ok) { const j = await r.json(); throw new Error(j.error ?? `HTTP ${r.status}`); }
       setPublishState("done");
     } catch (e: any) {
       setPublishErr(e.message); setPublishState("error");
     }
-  }, [uploadId, renderUrl, aiBlendUrl, showAiResult, analysis, shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, shadowFloor, preBlur, reflectionOpacity, reflectionBlur]);
+  }, [uploadId, renderUrl, aiBlendUrl, showAiResult, analysis, shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, shadowFloor, preBlur, reflectionOpacity, reflectionBlur, cylinder, bend, textureAmount, specularOpacity]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -873,8 +972,23 @@ function PhotoMockupPageInner() {
                     <button onClick={resetPhoto} className="hover:text-zinc-300 transition-colors">Change photo</button>
                   </div>
                   <QuadEditor imageUrl={photoUrl} imageNW={imgDims.w} imageNH={imgDims.h} quad={quad}
-                    onQuadChange={(q) => { setQuad(q); setProcessState("idle"); setRenderUrl(null); }} />
+                    onQuadChange={(q) => { setQuad(q); setProcessState("idle"); setRenderUrl(null); }}
+                    bend={bend} onBendChange={setBend} />
                 </div>
+
+                {/* Surface shape — cylinder + edge bend (warp via engine displacement) */}
+                <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+                  <span className="flex items-center gap-1 shrink-0">Cilindro</span>
+                  <input type="range" min={0} max={1} step={0.02} value={cylinder}
+                    onChange={(e) => { setCylinder(Number(e.target.value)); setRenderUrl(null); }}
+                    className="flex-1 accent-cyan-400 h-1" />
+                  <span className="font-mono text-zinc-500 w-8 text-right">{Math.round(cylinder * 100)}%</span>
+                  {(cylinder || bend.top || bend.bottom || bend.left || bend.right) ? (
+                    <button onClick={() => { setCylinder(0); setBend({ top: 0, bottom: 0, left: 0, right: 0 }); setRenderUrl(null); }}
+                      className="hover:text-zinc-300 transition-colors shrink-0">reset</button>
+                  ) : null}
+                </div>
+                <p className="text-[10px] text-zinc-600 -mt-1">Arraste os losangos nas bordas pra curvar (caneca, lata, garrafa). Resultado aparece no render.</p>
 
                 <div className="flex items-center justify-between">
                   {analysis?.surfaceType !== "manual" ? (
@@ -1227,6 +1341,24 @@ function PhotoMockupPageInner() {
                                 className="w-full accent-fuchsia-300 h-1" />
                             </div>
                           )}
+                        </div>
+                        <div className="space-y-0.5">
+                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
+                            <span>Textura <span className="text-zinc-700">· arte segue o relevo</span></span>
+                            <span className="font-mono text-zinc-500">{Math.round(textureAmount * 100)}%</span>
+                          </label>
+                          <input type="range" min={0} max={1} step={0.05} value={textureAmount}
+                            onChange={(e) => setTextureAmount(Number(e.target.value))}
+                            className="w-full accent-amber-400 h-1" />
+                        </div>
+                        <div className="space-y-0.5">
+                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
+                            <span>Brilho <span className="text-zinc-700">· specular (vidro/tela)</span></span>
+                            <span className="font-mono text-zinc-500">{Math.round(specularOpacity * 100)}%</span>
+                          </label>
+                          <input type="range" min={0} max={1} step={0.05} value={specularOpacity}
+                            onChange={(e) => setSpecularOpacity(Number(e.target.value))}
+                            className="w-full accent-sky-300 h-1" />
                         </div>
                       </div>
 
