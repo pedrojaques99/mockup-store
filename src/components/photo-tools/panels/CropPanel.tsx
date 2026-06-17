@@ -1,8 +1,8 @@
 "use client";
 
-/** CropPanel — proporção + zoom + aplicar. Reusa Slider/Segmented do design system. */
-import { Crop as CropIcon, Loader2, Sparkles, Maximize } from "lucide-react";
-import { Slider } from "@/components/ui/Slider";
+/** CropPanel — moldura livre (8 alças) estilo Photoshop. Proporção opcional,
+ *  reset, e expansão por IA quando a moldura passa da imagem. Reusa Segmented. */
+import { Crop as CropIcon, Loader2, Sparkles, Maximize, RotateCcw } from "lucide-react";
 import { Segmented } from "@/components/ui/Segmented";
 
 export type CropAspect = "free" | "1:1" | "16:9" | "4:5";
@@ -17,8 +17,7 @@ export const ASPECT_VALUE: Record<CropAspect, number | undefined> = {
 export function CropPanel({
   aspect,
   setAspect,
-  zoom,
-  setZoom,
+  onReset,
   onApply,
   applying,
   canApply,
@@ -28,12 +27,11 @@ export function CropPanel({
 }: {
   aspect: CropAspect;
   setAspect: (a: CropAspect) => void;
-  zoom: number;
-  setZoom: (z: number) => void;
+  onReset: () => void;
   onApply: () => void;
   applying: boolean;
   canApply: boolean;
-  /** true quando a área de corte ultrapassa a imagem → expandir com IA (outpaint). */
+  /** true quando a moldura ultrapassa a imagem → expandir com IA (outpaint). */
   expanding: boolean;
   prompt: string;
   setPrompt: (s: string) => void;
@@ -41,6 +39,10 @@ export function CropPanel({
   return (
     <div className="space-y-2 bg-zinc-800/40 rounded-xl border border-zinc-700/40 p-2">
       <p className="text-[9px] uppercase tracking-wider text-zinc-600">Cortar / Expandir</p>
+
+      <p className="text-[10px] text-zinc-500 leading-snug">
+        Arraste as <span className="text-zinc-300">8 alças</span> pra ajustar a moldura. Puxe pra <span className="text-acc">fora da imagem</span> → expande com IA.
+      </p>
 
       <div className="space-y-0.5">
         <label className="text-[10px] text-zinc-400">Proporção</label>
@@ -56,11 +58,17 @@ export function CropPanel({
         />
       </div>
 
-      <Slider label="Zoom" value={zoom} onChange={setZoom} min={0.3} max={3} step={0.01} display={`${zoom.toFixed(2)}×`} />
+      <button
+        type="button"
+        onClick={onReset}
+        className="w-full py-1.5 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors flex items-center justify-center gap-1"
+      >
+        <RotateCcw size={10} /> Resetar moldura
+      </button>
 
       {expanding && (
         <div className="flex items-center gap-1.5 text-[10px] rounded-lg px-2 py-1.5 border text-acc border-acc/30 bg-acc/5">
-          <Maximize size={11} /> Área maior que a imagem → expandir com IA (outpaint)
+          <Maximize size={11} /> Moldura além da imagem → expandir com IA (outpaint)
         </div>
       )}
 
@@ -92,7 +100,7 @@ export function CropPanel({
         )}
       </button>
       <p className="text-[10px] text-zinc-600">
-        {expanding ? "Gera a borda nova via IA (créditos) e recarrega a cena." : "Recorta e recarrega a cena (re-analisa a superfície). Diminua o zoom p/ expandir."}
+        {expanding ? "Gera a borda nova via IA (créditos) e recarrega a cena." : "Recorta e recarrega a cena (re-analisa a superfície)."}
       </p>
     </div>
   );

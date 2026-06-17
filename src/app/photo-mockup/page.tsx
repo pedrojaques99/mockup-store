@@ -22,11 +22,10 @@ import { LuzPanel } from "@/components/photo-tools/panels/LuzPanel";
 import { LuzOverlay } from "@/components/LuzOverlay";
 import { LuzAssetModal } from "@/components/photo-tools/LuzAssetModal";
 import { LUZ_DEFAULTS, toLuzRenderLayers, type LuzLayer, type LuzLayerId } from "@/types/luz";
-import { CropCanvas } from "@/components/CropCanvas";
+import { CropFrame, type CropRect } from "@/components/CropFrame";
 import { CropPanel, ASPECT_VALUE, type CropAspect } from "@/components/photo-tools/panels/CropPanel";
 import { UpscalePanel, type UpscaleTarget, type UpscaleMode } from "@/components/photo-tools/panels/UpscalePanel";
 import { AIEditPanel, type AiEditMode } from "@/components/photo-tools/panels/AIEditPanel";
-import type { Area } from "react-easy-crop";
 import { ArtDropZone } from "@/components/photo-tools/ArtDropZone";
 import { AI_BLEND_DEFAULTS } from "@/components/photo-tools/looks";
 import { DEFAULT_FRAME, type FrameConfig, renderFramedArt } from "@/lib/art-frame";
@@ -519,8 +518,8 @@ function PhotoMockupPageInner() {
 
   // ── Crop — corta client-side e re-sobe como nova cena (handlePhotoFile) ──────
   const [cropAspect, setCropAspect] = useState<CropAspect>("free");
-  const [cropZoom, setCropZoom] = useState(1);
-  const [cropArea, setCropArea] = useState<Area | null>(null);
+  const [cropResetKey, setCropResetKey] = useState(0);
+  const [cropArea, setCropArea] = useState<CropRect | null>(null);
   const [cropApplying, setCropApplying] = useState(false);
   const [cropPrompt, setCropPrompt] = useState("");
 
@@ -685,7 +684,7 @@ function PhotoMockupPageInner() {
           },
         );
         const file = dataUrlToFile(res.base64, "expanded.png");
-        setCropZoom(1); setCropArea(null); setCropPrompt("");
+        setCropResetKey((k) => k + 1); setCropArea(null); setCropPrompt("");
         await handlePhotoFile(file);
         return;
       }
@@ -698,7 +697,7 @@ function PhotoMockupPageInner() {
       const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/png"));
       if (blob) {
         const file = new File([blob], "cropped.png", { type: "image/png" });
-        setCropZoom(1); setCropArea(null);
+        setCropResetKey((k) => k + 1); setCropArea(null);
         await handlePhotoFile(file); // re-sobe → render lê a foto cortada do disco
       }
     } catch (e: any) {
@@ -1439,15 +1438,16 @@ function PhotoMockupPageInner() {
                   );
                 })()}
 
-                {/* Crop — overlay dedicado (react-easy-crop tem pan/zoom próprio). */}
-                {tool === "crop" && photoUrl && (
+                {/* Crop — moldura livre estilo Photoshop (8 alças, estende além da imagem). */}
+                {tool === "crop" && photoUrl && imgDims.w > 0 && (
                   <div className="absolute inset-0 z-10 bg-zinc-950">
-                    <CropCanvas
+                    <CropFrame
                       imageUrl={photoUrl}
+                      naturalW={imgDims.w}
+                      naturalH={imgDims.h}
                       aspect={ASPECT_VALUE[cropAspect]}
-                      zoom={cropZoom}
-                      onZoom={setCropZoom}
-                      onArea={setCropArea}
+                      onChange={setCropArea}
+                      resetKey={cropResetKey}
                     />
                   </div>
                 )}
@@ -1587,8 +1587,7 @@ function PhotoMockupPageInner() {
                         <CropPanel
                           aspect={cropAspect}
                           setAspect={setCropAspect}
-                          zoom={cropZoom}
-                          setZoom={setCropZoom}
+                          onReset={() => { setCropResetKey((k) => k + 1); }}
                           onApply={handleApplyCrop}
                           applying={cropApplying}
                           canApply={!!cropArea}
