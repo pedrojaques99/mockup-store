@@ -10,8 +10,9 @@ import {
 import Draggable from "react-draggable";
 import ArtFramePanel from "@/components/ArtFramePanel";
 import ZoomPanViewer from "@/components/ZoomPanViewer";
-import SegmentCanvas from "@/components/SegmentCanvas";
-import BrushCanvas from "@/components/BrushCanvas";
+import SegmentCanvas, { type SegApi } from "@/components/SegmentCanvas";
+import PenMaskCanvas, { type PenApi } from "@/components/PenMaskCanvas";
+import BrushCanvas, { type BrushApi } from "@/components/BrushCanvas";
 import { DEFAULT_FRAME, type FrameConfig, renderFramedArt } from "@/lib/art-frame";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -38,11 +39,11 @@ type StepState = "idle" | "loading" | "done" | "error";
 
 const LOOK_PRESETS = [
   { name: "Natural", grain: 0,  warmth: 0,   saturation: 100, brightness: 100 },
-  { name: "Warm",    grain: 5,  warmth: 30,  saturation: 110, brightness: 102 },
+  { name: "Quente",    grain: 5,  warmth: 30,  saturation: 110, brightness: 102 },
   { name: "Cold",    grain: 5,  warmth: -30, saturation: 95,  brightness: 100 },
-  { name: "Matte",   grain: 15, warmth: 5,   saturation: 75,  brightness: 95  },
-  { name: "Vivid",   grain: 0,  warmth: 0,   saturation: 145, brightness: 105 },
-  { name: "B&W",     grain: 18, warmth: 0,   saturation: 0,   brightness: 100 },
+  { name: "Fosco",   grain: 15, warmth: 5,   saturation: 75,  brightness: 95  },
+  { name: "Vívido",   grain: 0,  warmth: 0,   saturation: 145, brightness: 105 },
+  { name: "P&B",     grain: 18, warmth: 0,   saturation: 0,   brightness: 100 },
 ] as const;
 
 const AI_BLEND_DEFAULTS: Record<string, { enabled: boolean; strength: number; texture: boolean; textureOpacity: number }> = {
@@ -65,18 +66,6 @@ const HANDLE_R = 9;
 
 const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-/**
- * Speed-adaptive control-display gain for pixel-perfect dragging.
- * Normal 1:1 by default — precision only engages when the user moves very
- * slowly (a few px per event), i.e. deliberately hunting for the exact pixel.
- * `speedPx` is the cursor delta magnitude (canvas px) for this move event.
- */
-function precisionGain(speedPx: number): number {
-  const SLOW = 3.5;       // ≥ this px/event → full 1:1 (normal drag)
-  const MIN_GAIN = 0.25;  // gain at near-still → fine
-  if (speedPx >= SLOW) return 1;
-  return MIN_GAIN + (1 - MIN_GAIN) * (speedPx / SLOW); // linear ease in the slow band
-}
 
 type BendKey = "top" | "right" | "bottom" | "left";
 const EDGES: { a: keyof Quad; b: keyof Quad; key: BendKey }[] = [
@@ -99,9 +88,6 @@ function QuadEditor({
   const dragging = useRef<keyof Quad | null>(null);
   const draggingEdge = useRef<BendKey | null>(null);
   const scaleRef = useRef({ sx: 1, sy: 1, ox: 0, oy: 0 });
-  const lastMouse = useRef<{ x: number; y: number } | null>(null); // canvas px
-  const dragPos = useRef<QuadPt | null>(null);                     // float image coords
-  const fineMode = useRef(false);                                  // precision engaged?
 
   const toCanvas = useCallback(
     (p: QuadPt) => ({ x: p.x * scaleRef.current.sx + scaleRef.current.ox, y: p.y * scaleRef.current.sy + scaleRef.current.oy }),
@@ -241,22 +227,6 @@ function QuadEditor({
       ctx.fillStyle = "#22c55e";
       ctx.fill();
 
-      // Precision-mode badge — shown when slow, fine dragging is engaged
-      if (fineMode.current) {
-        ctx.save();
-        ctx.font = "700 10px ui-monospace, monospace";
-        ctx.textAlign = "center";
-        const label = "FINE";
-        const tw = ctx.measureText(label).width + 10;
-        ctx.fillStyle = "rgba(16,185,129,0.92)";
-        ctx.beginPath();
-        ctx.roundRect(lx - tw / 2, ly + LENS_R + 6, tw, 15, 4);
-        ctx.fill();
-        ctx.fillStyle = "#06281c";
-        ctx.fillText(label, lx, ly + LENS_R + 17);
-        ctx.restore();
-      }
-
       ctx.save();
       ctx.strokeStyle = "rgba(34,197,94,0.35)";
       ctx.lineWidth = 1;
@@ -276,11 +246,12 @@ function QuadEditor({
     const canvas = canvasRef.current;
     if (!canvas || !img) return;
     const update = () => {
-      const r = img.getBoundingClientRect();
-      const cr = container.getBoundingClientRect();
-      canvas.width = cr.width;
-      canvas.height = cr.height;
-      scaleRef.current = { sx: r.width / imageNW, sy: r.height / imageNH, ox: r.left - cr.left, oy: r.top - cr.top };
+      // Use LAYOUT size (offset*), not getBoundingClientRect — the latter reflects the
+      // ZoomPanViewer CSS transform, which would double-scale the canvas. Sizing to layout
+      // means the canvas (and its handles) scale uniformly WITH the transform → always aligned.
+      const iw = (img as HTMLElement).offsetWidth, ih = (img as HTMLElement).offsetHeight;
+      canvas.width = iw; canvas.height = ih;
+      scaleRef.current = { sx: iw / imageNW, sy: ih / imageNH, ox: 0, oy: 0 };
       draw();
     };
     const ro = new ResizeObserver(update);
@@ -292,83 +263,53 @@ function QuadEditor({
 
   useEffect(() => { draw(); }, [draw]);
 
-  const hitTest = (cx: number, cy: number): keyof Quad | null => {
-    for (const k of CORNER_KEYS) {
-      const p = toCanvas(quad[k]);
-      if (Math.hypot(cx - p.x, cy - p.y) <= HANDLE_R + 6) return k;
-    }
-    return null;
+  // Map a screen point to IMAGE coords using the LIVE rect (correct at any zoom),
+  // plus the on-screen scale (image-px per screen-px) for tolerance conversion.
+  const clientToImg = (clientX: number, clientY: number) => {
+    const r = imgRef.current!.getBoundingClientRect();
+    const sc = (r.width / imageNW) || 1;
+    return { x: (clientX - r.left) / r.width * imageNW, y: (clientY - r.top) / r.height * imageNH, sc };
   };
 
-  const edgeHitTest = (cx: number, cy: number): BendKey | null => {
+  const hitTest = (ix: number, iy: number, sc: number): keyof Quad | null => {
+    const tol = (HANDLE_R + 8) / sc;
+    for (const k of CORNER_KEYS) if (Math.hypot(ix - quad[k].x, iy - quad[k].y) <= tol) return k;
+    return null;
+  };
+  const edgeHitTest = (ix: number, iy: number, sc: number): BendKey | null => {
     if (!onBendChange) return null;
-    for (const e of EDGES) {
-      const h = toCanvas(edgeGeom(e).handle);
-      if (Math.hypot(cx - h.x, cy - h.y) <= HANDLE_R + 4) return e.key;
-    }
+    const tol = (HANDLE_R + 6) / sc;
+    for (const e of EDGES) { const h = edgeGeom(e).handle; if (Math.hypot(ix - h.x, iy - h.y) <= tol) return e.key; }
     return null;
   };
 
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const r = canvasRef.current!.getBoundingClientRect();
-    const cx = e.clientX - r.left, cy = e.clientY - r.top;
-    dragging.current = hitTest(cx, cy);
-    if (dragging.current) {
-      e.preventDefault();
-      lastMouse.current = { x: cx, y: cy };
-      dragPos.current = { ...quad[dragging.current] }; // start relative drag from current corner
-      fineMode.current = false;
-      draw();
-      return;
-    }
-    draggingEdge.current = edgeHitTest(cx, cy);
-    if (draggingEdge.current) { e.preventDefault(); draw(); }
+    const { x, y, sc } = clientToImg(e.clientX, e.clientY);
+    const k = hitTest(x, y, sc);
+    if (k) { e.preventDefault(); dragging.current = k; draw(); return; }
+    const ek = edgeHitTest(x, y, sc);
+    if (ek) { e.preventDefault(); draggingEdge.current = ek; draw(); }
   };
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const r = canvasRef.current!.getBoundingClientRect();
-    const cx = e.clientX - r.left, cy = e.clientY - r.top;
-
-    // Edge bend drag — project the cursor onto the edge's outward normal
+    const { x, y, sc } = clientToImg(e.clientX, e.clientY);
+    // Edge bend drag — project the cursor (image space) onto the edge's outward normal
     if (draggingEdge.current && onBendChange && bend) {
-      const e2 = EDGES.find((x) => x.key === draggingEdge.current)!;
+      const e2 = EDGES.find((q) => q.key === draggingEdge.current)!;
       const g = edgeGeom(e2);
-      const { sx, sy, ox, oy } = scaleRef.current;
-      const imgX = (cx - ox) / sx, imgY = (cy - oy) / sy;
-      const d = (imgX - g.mx) * g.nx + (imgY - g.my) * g.ny; // signed distance along normal (px)
+      const d = (x - g.mx) * g.nx + (y - g.my) * g.ny;
       onBendChange({ ...bend, [draggingEdge.current]: clampN(d / (g.dim || 1), -0.3, 0.3) });
       return;
     }
-
-    if (!dragging.current || !lastMouse.current || !dragPos.current) return;
-    const dcx = cx - lastMouse.current.x;
-    const dcy = cy - lastMouse.current.y;
-    lastMouse.current = { x: cx, y: cy };
-
-    // Speed-adaptive gain: 1:1 normally, fine only when moving very slowly
-    const gain = precisionGain(Math.hypot(dcx, dcy));
-    fineMode.current = gain < 0.9;
-
-    const { sx, sy } = scaleRef.current;
-    dragPos.current.x = clampN(dragPos.current.x + (dcx * gain) / sx, 0, imageNW);
-    dragPos.current.y = clampN(dragPos.current.y + (dcy * gain) / sy, 0, imageNH);
-
-    onQuadChange({
-      ...quad,
-      [dragging.current]: { x: Math.round(dragPos.current.x), y: Math.round(dragPos.current.y) },
-    });
+    if (!dragging.current) {
+      (e.currentTarget as HTMLCanvasElement).style.cursor = (hitTest(x, y, sc) || edgeHitTest(x, y, sc)) ? "grab" : "default";
+      return;
+    }
+    // Corner follows the cursor directly in image space — robust at any zoom/pan.
+    onQuadChange({ ...quad, [dragging.current]: { x: Math.round(clampN(x, 0, imageNW)), y: Math.round(clampN(y, 0, imageNH)) } });
   };
 
-  const onMouseUp = () => {
-    dragging.current = null; draggingEdge.current = null;
-    lastMouse.current = null; dragPos.current = null; fineMode.current = false; draw();
-  };
-
-  const getCursor = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const r = canvasRef.current!.getBoundingClientRect();
-    const cx = e.clientX - r.left, cy = e.clientY - r.top;
-    return hitTest(cx, cy) || edgeHitTest(cx, cy) ? "grab" : "default";
-  };
+  const onMouseUp = () => { dragging.current = null; draggingEdge.current = null; draw(); };
 
   return (
     <div ref={containerRef} className="relative select-none">
@@ -378,7 +319,7 @@ function QuadEditor({
         ref={canvasRef}
         className="absolute inset-0"
         onMouseDown={onMouseDown}
-        onMouseMove={(e) => { onMouseMove(e); (e.currentTarget.style.cursor = getCursor(e)); }}
+        onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseUp}
       />
@@ -389,8 +330,8 @@ function QuadEditor({
 // ── Compact pipeline dot ─────────────────────────────────────────────────────
 
 function StepPip({ label, state, active }: { label: string; state: StepState; active: boolean }) {
-  const dot = state === "done"    ? "bg-green-500"
-            : state === "loading" ? "bg-blue-400 animate-pulse"
+  const dot = state === "done"    ? "bg-acc2"
+            : state === "loading" ? "bg-acc animate-pulse"
             : state === "error"   ? "bg-red-500"
             : active              ? "bg-zinc-400"
             :                       "bg-zinc-700";
@@ -401,7 +342,7 @@ function StepPip({ label, state, active }: { label: string; state: StepState; ac
     <div className="flex items-center gap-1.5">
       <span className={["w-1.5 h-1.5 rounded-full flex-none", dot].join(" ")} />
       <span className={["text-xs", text].join(" ")}>{label}</span>
-      {state === "loading" && <Loader2 size={9} className="animate-spin text-blue-400 flex-none" />}
+      {state === "loading" && <Loader2 size={9} className="animate-spin text-acc flex-none" />}
     </div>
   );
 }
@@ -426,19 +367,19 @@ function ArtDropZone({
         "rounded-2xl border-2 border-dashed cursor-pointer transition-colors flex flex-col items-center justify-center text-center group",
         hero ? "gap-3 px-12 py-16 w-[min(440px,70vw)]" : "gap-1.5 p-3 h-24",
         dragOver
-          ? "border-indigo-400 bg-indigo-500/10"
+          ? "border-acc bg-acc/10"
           : "border-zinc-700 hover:border-zinc-500 bg-zinc-900/30 hover:bg-zinc-900/50",
         className,
       ].join(" ")}
     >
       <Upload
         size={hero ? 40 : 20}
-        className={dragOver ? "text-indigo-400" : "text-zinc-600 group-hover:text-zinc-400 transition-colors"}
+        className={dragOver ? "text-acc" : "text-zinc-600 group-hover:text-zinc-400 transition-colors"}
       />
-      <p className={[hero ? "text-base" : "text-[10px]", "font-medium transition-colors", dragOver ? "text-indigo-300" : "text-zinc-500 group-hover:text-zinc-300"].join(" ")}>
-        {dragOver ? "Drop to render" : "Drop artwork here"}
+      <p className={[hero ? "text-base" : "text-[10px]", "font-medium transition-colors", dragOver ? "text-acc" : "text-zinc-500 group-hover:text-zinc-300"].join(" ")}>
+        {dragOver ? "Solte pra renderizar" : "Solte a arte aqui"}
       </p>
-      <p className={[hero ? "text-xs" : "text-[9px]", "text-zinc-700"].join(" ")}>PNG, JPG, SVG · auto-renders on drop</p>
+      <p className={[hero ? "text-xs" : "text-[9px]", "text-zinc-700"].join(" ")}>PNG, JPG, SVG · renderiza ao soltar</p>
     </div>
   );
 }
@@ -500,11 +441,44 @@ function PhotoMockupPageInner() {
   const [artDims, setArtDims] = useState<{ width: number; height: number } | null>(null);
   const [frame, setFrame] = useState<FrameConfig>(DEFAULT_FRAME);
   const [shadowOpacity,    setShadowOpacity]    = useState(0.9);
-  const [highlightOpacity, setHighlightOpacity] = useState(0.30); // ambient light (screen)
+  const [highlightOpacity, setHighlightOpacity] = useState(0.10); // ambient light (screen)
   const [castOpacity,      setCastOpacity]      = useState(0.10); // scene color cast
   const [reflectionOpacity, setReflectionOpacity] = useState(0);  // reflexo (art tint on reflections)
+  const [lightWrap, setLightWrap] = useState(0);  // ambient light wrap on the art edge
+  const [matchScene, setMatchScene] = useState(0);  // grain + colour match to the scene
+  const [contactShadow, setContactShadow] = useState(0);  // cast shadow grounding the surface
+  const [realism, setRealism] = useState(0.3);   // one knob → light wrap + contact shadow + grain
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [procMs, setProcMs] = useState(0);        // live elapsed while processing/rendering
+  const processingRef = useRef(false);            // re-entrancy guard for handleProcess
+  const procStartRef = useRef(0);
+  const extractTimer = useRef<ReturnType<typeof setTimeout> | null>(null);  // debounce re-extract
   const [reflectionBlur,    setReflectionBlur]    = useState(24);
   const [reflectionMaskUrl, setReflectionMaskUrl] = useState<string | null>(null); // brush override
+  // Non-destructive layer visibility — toggling hides a mask from the bake WITHOUT discarding it.
+  const [surfaceOn, setSurfaceOn] = useState(true);
+  const [occluderOn, setOccluderOn] = useState(true);
+  const [reflectionLayerOn, setReflectionLayerOn] = useState(true);
+  // Recorte (Segment) tool options — live in the side panel (Photoshop-style),
+  // controlled here; the canvas component just samples/draws and exposes apply via ref.
+  const segApiRef = useRef<SegApi | null>(null);
+  const [segMode, setSegMode] = useState<"sam" | "smart">("smart");
+  const [segTol, setSegTol] = useState(15);
+  const [segContract, setSegContract] = useState(1);
+  const [segMatte, setSegMatte] = useState(true);
+  const [segFeather, setSegFeather] = useState(2);
+  const [segHasMask, setSegHasMask] = useState(false);
+  const [segApplied, setSegApplied] = useState<{ surface?: boolean; occluder?: boolean }>({});
+  const [segSwatch, setSegSwatch] = useState<[number, number, number] | null>(null);
+  const [segStatus, setSegStatus] = useState<{ status: string; msg: string; device: string | null }>({ status: "loading", msg: "", device: null });
+  // Caneta (Pen) + Reflexo (Brush) tool options — also in the side panel.
+  const penApiRef = useRef<PenApi | null>(null);
+  const [penFeather, setPenFeather] = useState(2);
+  const [penHasMask, setPenHasMask] = useState(false);
+  const [penStatus, setPenStatus] = useState("");
+  const brushApiRef = useRef<BrushApi | null>(null);
+  const [brushSize, setBrushSize] = useState(60);
+  const [brushErase, setBrushErase] = useState(false);
   const [textureAmount,   setTextureAmount]   = useState(0);  // surface-relief displacement (art drapes)
   const [specularOpacity, setSpecularOpacity] = useState(0);  // glossy highlight preservation
   const [fxGrain,      setFxGrain]      = useState(0);
@@ -526,6 +500,11 @@ function PhotoMockupPageInner() {
   const [aiBlendUrl, setAiBlendUrl] = useState<string | null>(null);
   const [aiBlendMs, setAiBlendMs] = useState<number | null>(null);
   const [showAiResult, setShowAiResult] = useState(true);
+  // Unified editor: which tool overlays the single fullscreen canvas.
+  // "result" shows the rendered mockup; the others edit the surface over the scene photo.
+  type EditorTool = "result" | "corners" | "segment" | "pen" | "reflect";
+  const [tool, setTool] = useState<EditorTool>("result");
+  const toolRef = useRef<EditorTool>("result"); toolRef.current = tool;
   const [aiQuality, setAiQuality] = useState<"fast" | "balanced" | "quality">("balanced");
   const [publishState, setPublishState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [publishErr,   setPublishErr]   = useState("");
@@ -552,6 +531,7 @@ function PhotoMockupPageInner() {
     setAnalysis(null); setQuad(null); setAnalyzeState("idle"); setAnalyzeErr("");
     setProcessState("idle"); setProcessErr(""); setShadowPreview(null);
     setRenderUrl(null); setRenderState("idle");
+    setTool("result"); // new photo → land on the Resultado tab
 
     try {
       const form = new FormData();
@@ -668,7 +648,7 @@ function PhotoMockupPageInner() {
     }, 600);
     return () => { if (autoRenderTimer.current) clearTimeout(autoRenderTimer.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, shadowOpacity, highlightOpacity, castOpacity, maskFeather, reflectionOpacity, reflectionBlur, textureAmount, specularOpacity, frameSig, warpSig]);
+  }, [fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, shadowOpacity, highlightOpacity, castOpacity, maskFeather, reflectionOpacity, reflectionBlur, lightWrap, matchScene, contactShadow, textureAmount, specularOpacity, frameSig, warpSig]);
 
   useEffect(() => {
     if (!analysis?.surfaceType) return;
@@ -681,7 +661,8 @@ function PhotoMockupPageInner() {
   }, [analysis?.surfaceType]);
 
   const handleProcess = useCallback(async () => {
-    if (!uploadId || !quad) return;
+    if (!uploadId || !quad || processingRef.current) return;  // guard re-entrancy (corner-drag storm)
+    processingRef.current = true;
     setProcessState("loading"); setProcessErr(""); setShadowPreview(null);
     try {
       await fetch(`/api/photo-mockup/${uploadId}/prepare-magenta`, {
@@ -695,9 +676,9 @@ function PhotoMockupPageInner() {
         // Bake a crisp mask — feather is a live render-time blur, no re-extract needed
         body: JSON.stringify({
           id: uploadId, quad, featherPx: 0, multiplyFloor: shadowFloor, preBlur,
-          surfaceMaskBase64: surfaceMaskUrl ?? undefined,
-          occluderMaskBase64: occluderMaskUrl ?? undefined,
-          reflectionMaskBase64: reflectionMaskUrl ?? undefined,
+          surfaceMaskBase64: (surfaceOn && surfaceMaskUrl) ? surfaceMaskUrl : undefined,
+          occluderMaskBase64: (occluderOn && occluderMaskUrl) ? occluderMaskUrl : undefined,
+          reflectionMaskBase64: (reflectionLayerOn && reflectionMaskUrl) ? reflectionMaskUrl : undefined,
         }),
       });
       setShadowPreview(`/api/photo-mockup/${uploadId}/asset/shadow?t=${Date.now()}`);
@@ -706,8 +687,30 @@ function PhotoMockupPageInner() {
       if (artFile) setTimeout(() => handleRenderRef.current(), 80);
     } catch (e: any) {
       setProcessErr(e.message); setProcessState("error");
+    } finally {
+      processingRef.current = false;
     }
-  }, [uploadId, quad, imgDims, shadowFloor, preBlur, artFile, surfaceMaskUrl, occluderMaskUrl, reflectionMaskUrl]);
+  }, [uploadId, quad, imgDims, shadowFloor, preBlur, artFile, surfaceMaskUrl, occluderMaskUrl, reflectionMaskUrl, surfaceOn, occluderOn, reflectionLayerOn]);
+
+  // Auto-extract → render. DEBOUNCED 700ms so dragging corners coalesces into a
+  // single light/shadow re-extract after you stop (extract is the expensive pass).
+  // Guarded by processingRef so calls can't stack.
+  useEffect(() => {
+    if (!(artFile && quad && uploadId && processState === "idle" && !processingRef.current)) return;
+    if (extractTimer.current) clearTimeout(extractTimer.current);
+    extractTimer.current = setTimeout(() => handleProcess(), 700);
+    return () => { if (extractTimer.current) clearTimeout(extractTimer.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [artFile, quad, uploadId, processState]);
+
+  // Live elapsed timer while processing/rendering — so it never feels stuck.
+  useEffect(() => {
+    const busy = processState === "loading" || renderState === "loading" || autoRenderPending;
+    if (!busy) { procStartRef.current = 0; setProcMs(0); return; }
+    if (!procStartRef.current) procStartRef.current = Date.now();
+    const id = setInterval(() => setProcMs(Date.now() - (procStartRef.current || Date.now())), 100);
+    return () => clearInterval(id);
+  }, [processState, renderState, autoRenderPending]);
 
   // Target surface size = quad's average edge lengths (drives art crop aspect)
   const surfaceSize = (() => {
@@ -761,6 +764,9 @@ function PhotoMockupPageInner() {
           maskFeather,
           reflectionOpacity,
           reflectionBlur,
+          lightWrap,
+          matchScene,
+          contactShadow,
           warp: { cylinder, bendTop: bend.top, bendBottom: bend.bottom, bendLeft: bend.left, bendRight: bend.right },
           textureAmount,
           specularOpacity,
@@ -836,10 +842,103 @@ function PhotoMockupPageInner() {
     if (f?.type.startsWith("image/")) handlePhotoFile(f);
   }, [handlePhotoFile]);
 
+  // ── Global undo/redo — snapshots ALL editable state (params, masks, quad) ──
+  const histRef = useRef<{ stack: string[]; idx: number }>({ stack: [], idx: -1 });
+  const restoringRef = useRef(false);
+  const snapRef = useRef<() => string>(() => "{}");
+  // Latest snapshot fn (captures current state each render).
+  snapRef.current = () => JSON.stringify({
+    shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation,
+    fxBrightness, fxContrast, maskFeather, shadowFloor, preBlur, reflectionOpacity,
+    reflectionBlur, lightWrap, matchScene, contactShadow, cylinder, bend, textureAmount,
+    specularOpacity, surfaceMaskUrl, occluderMaskUrl, reflectionMaskUrl, surfaceOn, occluderOn, reflectionLayerOn, quad, frame,
+  });
+
+  const applySnap = useCallback((s: string) => {
+    const o = JSON.parse(s);
+    setShadowOpacity(o.shadowOpacity); setHighlightOpacity(o.highlightOpacity); setCastOpacity(o.castOpacity);
+    setFxGrain(o.fxGrain); setFxWarmth(o.fxWarmth); setFxSaturation(o.fxSaturation);
+    setFxBrightness(o.fxBrightness); setFxContrast(o.fxContrast); setMaskFeather(o.maskFeather);
+    setShadowFloor(o.shadowFloor); setPreBlur(o.preBlur); setReflectionOpacity(o.reflectionOpacity);
+    setReflectionBlur(o.reflectionBlur); setLightWrap(o.lightWrap); setMatchScene(o.matchScene);
+    setContactShadow(o.contactShadow); setCylinder(o.cylinder); setBend(o.bend);
+    setTextureAmount(o.textureAmount); setSpecularOpacity(o.specularOpacity);
+    setSurfaceMaskUrl(o.surfaceMaskUrl ?? null); setOccluderMaskUrl(o.occluderMaskUrl ?? null);
+    setReflectionMaskUrl(o.reflectionMaskUrl ?? null);
+    setSurfaceOn(o.surfaceOn ?? true); setOccluderOn(o.occluderOn ?? true); setReflectionLayerOn(o.reflectionLayerOn ?? true);
+    setQuad(o.quad ?? null); setFrame(o.frame);
+  }, []);
+
+  // Capture a debounced snapshot whenever any tracked field changes.
+  useEffect(() => {
+    if (restoringRef.current) { restoringRef.current = false; return; }
+    const t = setTimeout(() => {
+      const s = snapRef.current();
+      const h = histRef.current;
+      if (h.stack[h.idx] !== s) { h.stack = h.stack.slice(0, h.idx + 1); h.stack.push(s); h.idx = h.stack.length - 1; }
+    }, 350);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, shadowFloor, preBlur, reflectionOpacity, reflectionBlur, lightWrap, matchScene, contactShadow, cylinder, bend, textureAmount, specularOpacity, surfaceMaskUrl, occluderMaskUrl, reflectionMaskUrl, surfaceOn, occluderOn, reflectionLayerOn, quad, frame]);
+
+  // Ctrl/Cmd+Z = undo · Ctrl+Shift+Z / Ctrl+Y = redo (whole editor state).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      // In Recorte, Ctrl+Z is handled by SegmentCanvas (undo last SAM point) — yield.
+      if (toolRef.current === "segment") return;
+      const k = e.key.toLowerCase();
+      const h = histRef.current;
+      const redo = (k === "z" && e.shiftKey) || k === "y";
+      const undo = k === "z" && !e.shiftKey;
+      if (redo && h.idx < h.stack.length - 1) { e.preventDefault(); h.idx++; restoringRef.current = true; applySnap(h.stack[h.idx]); }
+      else if (undo && h.idx > 0) { e.preventDefault(); h.idx--; restoringRef.current = true; applySnap(h.stack[h.idx]); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [applySnap]);
+
+  // Tool shortcuts (Adobe-style): V result · C cantos · S segmentar · P caneta · R reflexo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const map: Record<string, EditorTool> = { v: "result", c: "corners", s: "segment", p: "pen", r: "reflect" };
+      const tt = map[e.key.toLowerCase()];
+      if (tt) { e.preventDefault(); setTool(tt); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Realism is a single knob — drives light wrap + contact shadow + grain match
+  // together so mockups look grounded out of the box (no manual 3-slider hunt).
+  useEffect(() => {
+    setLightWrap(+(realism * 0.55).toFixed(2));
+    setContactShadow(+(realism * 0.8).toFixed(2));
+    setMatchScene(+(realism * 0.65).toFixed(2));
+  }, [realism]);
+
+  // Re-apply the segment mask when its refine params change — so feather / limpar /
+  // matte / tolerância are LIVE after you've already applied a surface/occluder.
+  useEffect(() => {
+    if (tool !== "segment" || (!segApplied.surface && !segApplied.occluder)) return;
+    const t = setTimeout(() => {
+      if (segApplied.surface) segApiRef.current?.apply("surface");
+      if (segApplied.occluder) segApiRef.current?.apply("occluder");
+    }, 250);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segFeather, segContract, segMatte, segTol, segApplied.surface, segApplied.occluder]);
+
   const resetPhoto = useCallback(() => {
     setPhotoUrl(null); setUploadId(null); setUploadState("idle");
     setAnalyzeState("idle"); setAnalysis(null); setQuad(null);
     setProcessState("idle"); setShadowPreview(null); setRenderUrl(null);
+    setTool("result");
   }, []);
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -861,14 +960,13 @@ function PhotoMockupPageInner() {
 
   const pipelineBar = (
     <div className="flex items-center gap-2">
-      <StepPip label="Upload"  state={uploadState}  active={active === "upload"} />
+      <StepPip label="Foto"  state={uploadState}  active={active === "upload"} />
       <ChevronRight size={10} className="text-zinc-800" />
-      <StepPip label="Quad"    state={analyzeState} active={active === "analyze"} />
+      <StepPip label="Superfície"  state={analyzeState} active={active === "analyze"} />
       <ChevronRight size={10} className="text-zinc-800" />
-      <StepPip label="Extract" state={processState} active={active === "process"} />
+      <StepPip label="Luz"     state={processState} active={active === "process"} />
       <ChevronRight size={10} className="text-zinc-800" />
       <StepPip label="Render"  state={renderState}  active={active === "render"} />
-      <span className="ml-2 text-[10px] font-mono text-zinc-700 bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded">dev</span>
     </div>
   );
 
@@ -910,8 +1008,8 @@ function PhotoMockupPageInner() {
         </div>
       </header>
 
-      {/* ── Phases 1–3 ───────────────────────────────────────────────── */}
-      {active !== "render" && (
+      {/* ── Phases 1–2 (upload + auto-detect) ────────────────────────── */}
+      {(active === "upload" || active === "analyze") && (
         <div className="flex-1 p-4 md:p-8">
           <div className="max-w-5xl mx-auto space-y-6">
 
@@ -934,12 +1032,12 @@ function PhotoMockupPageInner() {
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePhotoFile(f); }}
                     />
                     {uploadState === "loading" ? (
-                      <Loader2 size={32} className="animate-spin text-blue-400" />
+                      <Loader2 size={32} className="animate-spin text-acc" />
                     ) : (
                       <>
                         <Upload size={32} className="text-zinc-500" />
                         <div className="text-center">
-                          <p className="font-medium text-zinc-300">Drop your photo here</p>
+                          <p className="font-medium text-zinc-300">Solte sua foto aqui</p>
                           <p className="text-sm text-zinc-500 mt-1">Business card, poster, billboard, wall…</p>
                         </div>
                       </>
@@ -953,7 +1051,7 @@ function PhotoMockupPageInner() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-zinc-400">Drag corners to adjust · {imgDims.w}×{imgDims.h}px</span>
                       <button onClick={resetPhoto} className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
-                        Change photo
+                        Trocar foto
                       </button>
                     </div>
                     <QuadEditor imageUrl={photoUrl} imageNW={imgDims.w} imageNH={imgDims.h} quad={quad}
@@ -963,173 +1061,16 @@ function PhotoMockupPageInner() {
               </div>
             )}
 
-            {/* Phase 3: Quad placement + extract */}
-            {active === "process" && photoUrl && quad && (
-              <div className="max-w-2xl mx-auto space-y-3">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs text-zinc-500">
-                    <span>Drag corners to mark the surface · {imgDims.w}×{imgDims.h}px</span>
-                    <button onClick={resetPhoto} className="hover:text-zinc-300 transition-colors">Change photo</button>
-                  </div>
-                  <QuadEditor imageUrl={photoUrl} imageNW={imgDims.w} imageNH={imgDims.h} quad={quad}
-                    onQuadChange={(q) => { setQuad(q); setProcessState("idle"); setRenderUrl(null); }}
-                    bend={bend} onBendChange={setBend} />
-                </div>
-
-                {/* Surface shape — cylinder + edge bend (warp via engine displacement) */}
-                <div className="flex items-center gap-3 text-[11px] text-zinc-500">
-                  <span className="flex items-center gap-1 shrink-0">Cilindro</span>
-                  <input type="range" min={0} max={1} step={0.02} value={cylinder}
-                    onChange={(e) => { setCylinder(Number(e.target.value)); setRenderUrl(null); }}
-                    className="flex-1 accent-cyan-400 h-1" />
-                  <span className="font-mono text-zinc-500 w-8 text-right">{Math.round(cylinder * 100)}%</span>
-                  {(cylinder || bend.top || bend.bottom || bend.left || bend.right) ? (
-                    <button onClick={() => { setCylinder(0); setBend({ top: 0, bottom: 0, left: 0, right: 0 }); setRenderUrl(null); }}
-                      className="hover:text-zinc-300 transition-colors shrink-0">reset</button>
-                  ) : null}
-                </div>
-                <p className="text-[10px] text-zinc-600 -mt-1">Arraste os losangos nas bordas pra curvar (caneca, lata, garrafa). Resultado aparece no render.</p>
-
-                <div className="flex items-center justify-between">
-                  {analysis?.surfaceType !== "manual" ? (
-                    <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-                      <span className="capitalize text-zinc-300">{analysis?.surfaceType}</span>
-                      <span>·</span><span>{analysis?.material}</span>
-                      <span>·</span><span>{analysis?.lightingDir} light</span>
-                      <span className={["px-1.5 py-px rounded-full text-[10px]",
-                        (analysis?.confidence ?? 0) >= 0.85 ? "bg-green-500/20 text-green-400" : "bg-yellow-500/20 text-yellow-400"].join(" ")}>
-                        {Math.round((analysis?.confidence ?? 0) * 100)}%
-                      </span>
-                      {analysis?.cached && <span className="font-mono text-[10px] text-zinc-700">cached·$0</span>}
-                      {analysis?.hasOcclusion && <span className="text-yellow-500 text-[10px]">⚠ {analysis.occlusionDesc}</span>}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-zinc-600">Manual placement — adjust corners above</span>
-                  )}
-                  <button onClick={() => handleAnalyze(true)} disabled={analyzeState === "loading"}
-                    className="text-xs text-zinc-500 hover:text-blue-400 disabled:opacity-50 flex items-center gap-1 transition-colors shrink-0">
-                    {analyzeState === "loading"
-                      ? <><Loader2 size={9} className="animate-spin text-blue-400" /> Detecting…</>
-                      : <><Zap size={9} /> Detect with AI</>}
-                  </button>
-                </div>
-                {analyzeErr && <p className="text-red-400 text-xs flex items-center gap-1"><AlertTriangle size={11} /> {analyzeErr}</p>}
-
-                {/* Click-to-segment (SAM2) — optional: refine real surface + mark occluders */}
-                <div className="rounded-xl border border-zinc-800 overflow-hidden">
-                  <button onClick={() => setShowSegment(v => !v)}
-                    className="w-full flex items-center justify-between px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
-                    <span className="flex items-center gap-1.5">
-                      <Wand2 size={11} /> Segmentar com IA
-                      {(surfaceMaskUrl || occluderMaskUrl) && (
-                        <span className="flex items-center gap-1 text-[10px]">
-                          {surfaceMaskUrl && <span className="px-1 rounded bg-green-500/20 text-green-400">superfície</span>}
-                          {occluderMaskUrl && <span className="px-1 rounded bg-amber-500/20 text-amber-400">oclusão</span>}
-                        </span>
-                      )}
-                    </span>
-                    <ChevronRight size={11} className={["transition-transform", showSegment ? "rotate-90" : ""].join(" ")} />
-                  </button>
-                  {showSegment && (
-                    <div className="px-3 pb-3 pt-1 border-t border-zinc-800 space-y-2">
-                      <p className="text-[11px] text-zinc-600">
-                        Clique na <span className="text-green-400">superfície real</span> (incluir) e com o direito nos
-                        elementos na frente — <span className="text-amber-400">dedos, plantas</span> (excluir). Aplica como
-                        máscara de iluminação / oclusão.
-                      </p>
-                      <SegmentCanvas
-                        imageUrl={photoUrl}
-                        imageW={imgDims.w}
-                        imageH={imgDims.h}
-                        onApply={(role, url) => {
-                          if (role === "surface") setSurfaceMaskUrl(url);
-                          else setOccluderMaskUrl(url);
-                          setProcessState("idle");
-                        }}
-                      />
-                      {(surfaceMaskUrl || occluderMaskUrl) && (
-                        <button
-                          onClick={() => { setSurfaceMaskUrl(null); setOccluderMaskUrl(null); setProcessState("idle"); }}
-                          className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
-                        >
-                          Remover máscaras aplicadas
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Reflexo brush — paint where the artwork should tint reflections (overrides auto-detect) */}
-                <div className="rounded-xl border border-zinc-800 overflow-hidden">
-                  <button onClick={() => setShowReflBrush(v => !v)}
-                    className="w-full flex items-center justify-between px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
-                    <span className="flex items-center gap-1.5">
-                      <Wand2 size={11} /> Reflexo — pincel
-                      {reflectionMaskUrl && <span className="px-1 rounded bg-fuchsia-500/20 text-fuchsia-400 text-[10px]">manual</span>}
-                    </span>
-                    <ChevronRight size={11} className={["transition-transform", showReflBrush ? "rotate-90" : ""].join(" ")} />
-                  </button>
-                  {showReflBrush && (
-                    <div className="px-3 pb-3 pt-1 border-t border-zinc-800 space-y-2">
-                      <p className="text-[11px] text-zinc-600">
-                        Pinte onde a arte deve <span className="text-fuchsia-400">refletir</span> (chão molhado, vidro).
-                        Substitui a detecção automática. Ajuste a intensidade no slider <span className="text-fuchsia-400">Reflexo</span> ao renderizar.
-                      </p>
-                      <BrushCanvas
-                        imageUrl={photoUrl}
-                        imageW={imgDims.w}
-                        imageH={imgDims.h}
-                        onChange={(url) => { setReflectionMaskUrl(url); setProcessState("idle"); }}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* Advanced extract settings — only relevant before extracting (they read photo pixels) */}
-                <div className="rounded-xl border border-zinc-800 overflow-hidden">
-                  <button onClick={() => setShowExtractAdv(v => !v)}
-                    className="w-full flex items-center justify-between px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
-                    <span className="flex items-center gap-1.5"><Sliders size={11} /> Extract settings</span>
-                    <ChevronRight size={11} className={["transition-transform", showExtractAdv ? "rotate-90" : ""].join(" ")} />
-                  </button>
-                  {showExtractAdv && (
-                    <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-zinc-800">
-                      {([
-                        { label: "Shadow floor", value: shadowFloor, set: setShadowFloor, min: 0, max: 255, step: 5, accent: "accent-indigo-400",  fmt: (v: number) => `${v}`,  hint: "clamps fake-dark stains" },
-                        { label: "Pre-blur",     value: preBlur,     set: setPreBlur,     min: 0, max: 30,  step: 1, accent: "accent-fuchsia-400", fmt: (v: number) => `σ${v}`, hint: "smears baked-in text" },
-                      ] as const).map(({ label, value, set, min, max, step, accent, fmt, hint }) => (
-                        <div key={label} className="space-y-0.5">
-                          <label className="text-[11px] text-zinc-400 flex items-center justify-between">
-                            <span>{label} <span className="text-zinc-600">· {hint}</span></span>
-                            <span className="font-mono text-zinc-500">{fmt(value)}</span>
-                          </label>
-                          <input type="range" min={min} max={max} step={step} value={value}
-                            onChange={(e) => (set as (v: number) => void)(Number(e.target.value))}
-                            className={["w-full h-1", accent].join(" ")} />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <button onClick={handleProcess} disabled={processState === "loading"}
-                  className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-sm font-medium transition-colors flex items-center justify-center gap-2">
-                  {processState === "loading" && <Loader2 size={14} className="animate-spin" />}
-                  {processState === "loading" ? "Extracting lighting…" : "Extract Lighting & Shadows →"}
-                </button>
-                {processErr && <p className="text-red-400 text-sm flex items-center gap-2"><AlertTriangle size={14} /> {processErr}</p>}
-              </div>
-            )}
 
           </div>
         </div>
       )}
 
-      {/* ── Phase 4: Full-screen render (below header) ───────────────── */}
-      {active === "render" && (
+      {/* ── Unified editor — single fullscreen canvas + side-panel tools ── */}
+      {(active === "process" || active === "render") && (
         <div
           className={["fixed top-14 bottom-0 left-0 right-0 z-40 overflow-hidden transition-colors",
-            !artFile && bgDragOver ? "bg-indigo-950/30" : "bg-zinc-950"].join(" ")}
+            !artFile && bgDragOver ? "bg-acc/10" : "bg-zinc-950"].join(" ")}
           onDragOver={(e) => { if (!artFile) { e.preventDefault(); setBgDragOver(true); } }}
           onDragLeave={(e) => { if (e.currentTarget === e.target) setBgDragOver(false); }}
           onDrop={(e) => {
@@ -1141,8 +1082,55 @@ function PhotoMockupPageInner() {
           <div className="w-full h-full relative">
 
                 {/* Pan / zoom / pinch canvas */}
-                {activeImageUrl ? (
-                  <ZoomPanViewer key={activeImageUrl}>
+                {/* NB: no key={activeImageUrl} — keying here remounts the viewer on
+                    every render / AI↔Original toggle, resetting zoom+pan (flicker).
+                    The inner <img> swaps src in place; zoom/pan state persists. */}
+                {tool === "corners" && photoUrl && quad ? (
+                  // Corners — quad editor over the scene photo (wheel zooms, Space+drag pans).
+                  <ZoomPanViewer requireSpaceToPan>
+                    <div style={{ maxWidth: "calc(100vw - 360px)" }}>
+                      {/* Show the rendered mockup (art) under the handles, not the magenta
+                          base. Keep the last render visible while re-adjusting (no flash). */}
+                      <QuadEditor imageUrl={activeImageUrl ?? photoUrl} imageNW={imgDims.w} imageNH={imgDims.h} quad={quad}
+                        onQuadChange={(q) => { setQuad(q); setProcessState("idle"); }}
+                        bend={bend} onBendChange={setBend} />
+                    </div>
+                  </ZoomPanViewer>
+                ) : tool === "segment" && photoUrl ? (
+                  // requireSpaceToPan: dragging a SAM point moves it; Space+drag pans; wheel zooms.
+                  <ZoomPanViewer requireSpaceToPan>
+                    <div style={{ maxWidth: "calc(100vw - 360px)" }}>
+                      <SegmentCanvas imageUrl={activeImageUrl ?? photoUrl} sampleUrl={photoUrl} imageW={imgDims.w} imageH={imgDims.h}
+                        mode={segMode} tolerance={segTol} contract={segContract} matte={segMatte} feather={segFeather}
+                        onMaskChange={setSegHasMask} onStatusChange={setSegStatus} onSwatch={setSegSwatch} apiRef={segApiRef}
+                        onApply={(role, url) => {
+                          if (role === "surface") setSurfaceMaskUrl(url); else setOccluderMaskUrl(url);
+                          setSegApplied((a) => ({ ...a, [role]: true }));
+                          setProcessState("idle");  // re-bakes → art clips to the segment, render updates (confirmation)
+                        }} />
+                    </div>
+                  </ZoomPanViewer>
+                ) : tool === "pen" && photoUrl ? (
+                  <ZoomPanViewer requireSpaceToPan>
+                    <div style={{ maxWidth: "calc(100vw - 360px)" }}>
+                      <PenMaskCanvas imageUrl={activeImageUrl ?? photoUrl} imageW={imgDims.w} imageH={imgDims.h}
+                        feather={penFeather} onMaskChange={setPenHasMask} onStatus={setPenStatus} apiRef={penApiRef}
+                        onApply={(role, url) => {
+                          if (role === "surface") setSurfaceMaskUrl(url); else setOccluderMaskUrl(url);
+                          setProcessState("idle");
+                        }} />
+                    </div>
+                  </ZoomPanViewer>
+                ) : tool === "reflect" && photoUrl ? (
+                  <ZoomPanViewer requireSpaceToPan>
+                    <div style={{ maxWidth: "calc(100vw - 360px)" }}>
+                      <BrushCanvas imageUrl={activeImageUrl ?? photoUrl} imageW={imgDims.w} imageH={imgDims.h}
+                        brush={brushSize} eraseMode={brushErase} apiRef={brushApiRef}
+                        onChange={(url) => { setReflectionMaskUrl(url); setProcessState("idle"); }} />
+                    </div>
+                  </ZoomPanViewer>
+                ) : activeImageUrl ? (
+                  <ZoomPanViewer>
                     <div style={{ position: "relative", display: "inline-block", lineHeight: 0 }}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
@@ -1164,12 +1152,15 @@ function PhotoMockupPageInner() {
                           alt=""
                           aria-hidden
                           draggable={false}
+                          // Pulse opacity (compositor-only, cheap) — NOT the blur filter,
+                          // which would repaint every frame. Gives a soft breathing shimmer.
+                          className="animate-[art-blur-pulse_1.4s_ease-in-out_infinite]"
                           style={{
                             position: "absolute", inset: 0, width: "100%", height: "100%",
                             objectFit: "contain", pointerEvents: "none",
-                            filter: "blur(7px) brightness(0.96)",
-                            transition: "opacity 0.2s ease-out",
+                            filter: "blur(7px) brightness(0.97)",
                             clipPath: surfaceClip, WebkitClipPath: surfaceClip,
+                            willChange: "opacity",
                           }}
                         />
                       )}
@@ -1191,7 +1182,19 @@ function PhotoMockupPageInner() {
                     )}
                     <div className="absolute inset-0 bg-zinc-950/40 pointer-events-none" />
                     <div className="relative z-10">
-                      <ArtDropZone onFile={handleArtFile} dragOver={bgDragOver} size="hero" />
+                      {(renderState === "loading" || processState === "loading" || autoRenderPending) ? (
+                        <div className="flex flex-col items-center gap-3 text-zinc-300">
+                          <Loader2 size={30} className="animate-spin text-acc" />
+                          <span className="text-sm">Renderizando…</span>
+                        </div>
+                      ) : artFile ? (
+                        <div className="flex flex-col items-center gap-2 text-zinc-400 text-sm text-center">
+                          <span>Arte carregada.</span>
+                          <span className="text-zinc-600 text-xs">Clique em <span className="text-acc">Extrair luz &amp; renderizar</span> no painel.</span>
+                        </div>
+                      ) : (
+                        <ArtDropZone onFile={handleArtFile} dragOver={bgDragOver} size="hero" />
+                      )}
                     </div>
                   </div>
                 )}
@@ -1199,7 +1202,7 @@ function PhotoMockupPageInner() {
                 {/* Subtle top progress bar — non-intrusive, image stays visible (blurred) */}
                 {(renderState === "loading" || autoRenderPending) && (
                   <div className="absolute top-0 left-0 right-0 h-0.5 z-20 overflow-hidden pointer-events-none">
-                    <div className="h-full w-1/3 bg-indigo-400/80 rounded-full animate-[scene-loadbar_1.1s_ease-in-out_infinite]" />
+                    <div className="h-full w-1/3 bg-acc/80 rounded-full animate-[scene-loadbar_1.1s_ease-in-out_infinite]" />
                   </div>
                 )}
 
@@ -1208,10 +1211,17 @@ function PhotoMockupPageInner() {
                   <button
                     onClick={() => setShowAiResult(v => !v)}
                     className={["absolute top-3 left-4 z-20 text-[11px] px-2 py-0.5 rounded-full backdrop-blur-sm flex items-center gap-1 transition-colors",
-                      showAiResult ? "bg-purple-600/80 text-white" : "bg-black/50 text-zinc-400 hover:text-white"].join(" ")}
+                      showAiResult ? "bg-acc/80 text-white" : "bg-black/50 text-zinc-400 hover:text-white"].join(" ")}
                   >
                     <Wand2 size={9} /> {showAiResult ? "AI" : "Original"}
                   </button>
+                )}
+
+                {/* Live status — processing timer (so it never feels stuck) */}
+                {(processState === "loading" || renderState === "loading" || autoRenderPending) && (
+                  <span className="absolute top-3 right-4 z-20 text-[11px] font-mono bg-black/60 text-acc px-2 py-0.5 rounded-full backdrop-blur-sm flex items-center gap-1">
+                    <Loader2 size={9} className="animate-spin" /> {(procMs / 1000).toFixed(1)}s
+                  </span>
                 )}
 
                 {/* Render time */}
@@ -1224,14 +1234,18 @@ function PhotoMockupPageInner() {
                 )}
 
                 {/* Floating draggable control panel */}
-                <Draggable nodeRef={panelRef as any} handle=".panel-drag" bounds="parent" defaultPosition={{ x: 0, y: 0 }}>
+                {/* key re-anchors the panel when crossing the param-count boundary
+                    (Resultado = many params vs editing tools = few) so a panel dragged
+                    while short never ends up with its header off-screen when it grows. */}
+                <Draggable key={tool === "result" ? "panel-full" : "panel-lite"} nodeRef={panelRef as any} handle=".panel-drag" bounds="parent" defaultPosition={{ x: 0, y: 0 }}>
                   <div
                     ref={panelRef}
-                    className="absolute bottom-6 right-6 z-30 w-72 bg-zinc-900/95 backdrop-blur-md border border-zinc-700/70 rounded-2xl shadow-2xl overflow-hidden"
+                    className="absolute bottom-6 right-6 z-30 w-72 bg-zinc-900/95 backdrop-blur-md border border-zinc-700/70 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+                    style={{ maxHeight: "calc(100vh - 28px)" }}
                   >
                     {/* Drag handle */}
-                    <div className="panel-drag cursor-grab active:cursor-grabbing flex items-center justify-between px-3 py-2 border-b border-zinc-800 select-none">
-                      <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-widest">Controls</span>
+                    <div className="panel-drag cursor-grab active:cursor-grabbing flex items-center justify-between px-3 py-2 border-b border-zinc-800 select-none shrink-0">
+                      <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-widest">Ajustes</span>
                       <div className="flex gap-0.5 items-center">
                         <span className="w-1 h-1 rounded-full bg-zinc-600" />
                         <span className="w-1 h-1 rounded-full bg-zinc-600" />
@@ -1239,8 +1253,140 @@ function PhotoMockupPageInner() {
                       </div>
                     </div>
 
-                    <div className="p-3 space-y-3 overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
+                    <div className="p-3 space-y-3 overflow-y-auto flex-1 min-h-0">
 
+                      {/* Surface tools — one canvas, switch what overlays it. */}
+                      {photoUrl && (
+                        <div className="space-y-2 bg-zinc-800/40 rounded-xl border border-zinc-700/40 p-2">
+                          <div className="grid grid-cols-5 gap-1">
+                            {([
+                              ["corners", "Cantos"],
+                              ["segment", "Recorte"],
+                              ["pen", "Caneta"],
+                              ["reflect", "Reflexo"],
+                              ["result", "Render"],
+                            ] as [EditorTool, string][]).map(([t, label]) => (
+                              <button key={t} onClick={() => setTool(t)}
+                                className={["px-0.5 py-1.5 rounded-lg text-[9px] font-medium leading-tight transition-colors border",
+                                  tool === t ? "bg-acc2 text-zinc-950 border-acc2"
+                                             : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                          {tool === "corners" && <p className="text-[10px] text-zinc-600">Arraste os cantos pra ajustar a superfície; losangos curvam as bordas.</p>}
+                          {tool === "segment" && (
+                            <div className="space-y-1.5">
+                              <div className="grid grid-cols-2 gap-1">
+                                {([["smart", "Varinha"], ["sam", "SAM"]] as const).map(([m, l]) => (
+                                  <button key={m} onClick={() => setSegMode(m)}
+                                    className={["py-1 rounded-lg text-[10px] font-medium border transition-colors",
+                                      segMode === m ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>{l}</button>
+                                ))}
+                              </div>
+                              {segMode === "sam"
+                                ? <p className="text-[10px] text-zinc-600">Clique na <span className="text-acc2">superfície</span>; direito nos <span className="text-acc">objetos na frente</span>.</p>
+                                : <p className="text-[10px] text-zinc-600 flex items-center gap-1">Clique na superfície pra selecionar a cor{segSwatch && <span className="inline-block w-3 h-3 rounded-sm border border-zinc-600 align-middle" style={{ background: `rgb(${segSwatch[0]},${segSwatch[1]},${segSwatch[2]})` }} />}</p>}
+                              {segMode === "smart" && (<>
+                                <label className="text-[10px] text-zinc-400 flex justify-between"><span>Tolerância</span><span className="font-mono text-zinc-500">{segTol}</span></label>
+                                <input type="range" min={1} max={80} value={segTol} onChange={(e) => setSegTol(+e.target.value)} className="w-full accent-acc h-1" />
+                                <label className="text-[10px] text-zinc-400 flex justify-between"><span>Limpar borda <span className="text-zinc-700">· tira franja</span></span><span className="font-mono text-zinc-500">{segContract}px</span></label>
+                                <input type="range" min={0} max={8} value={segContract} onChange={(e) => setSegContract(+e.target.value)} className="w-full accent-acc h-1" />
+                                <button onClick={() => setSegMatte(v => !v)}
+                                  className={["w-full py-1 rounded-lg text-[10px] font-medium border transition-colors",
+                                    segMatte ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>Refinar borda (matte) {segMatte ? "on" : "off"}</button>
+                              </>)}
+                              <label className="text-[10px] text-zinc-400 flex justify-between"><span>Suavizar borda</span><span className="font-mono text-zinc-500">{segFeather}px</span></label>
+                              <input type="range" min={0} max={20} value={segFeather} onChange={(e) => setSegFeather(+e.target.value)} className="w-full accent-acc h-1" />
+                              <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                                <button onClick={() => segApiRef.current?.apply("surface")} disabled={!segHasMask}
+                                  className={["py-1.5 rounded-lg text-[10px] font-medium transition-colors", segApplied.surface ? "bg-acc2 text-zinc-950" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40"].join(" ")}>{segApplied.surface ? "Superfície ✓" : "Usar superfície"}</button>
+                                <button onClick={() => segApiRef.current?.apply("occluder")} disabled={!segHasMask}
+                                  className={["py-1.5 rounded-lg text-[10px] font-medium transition-colors", segApplied.occluder ? "bg-acc2 text-zinc-950" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40"].join(" ")}>{segApplied.occluder ? "Oclusão ✓" : "Usar oclusão"}</button>
+                              </div>
+                              <button onClick={() => segApiRef.current?.clear()} disabled={!segHasMask} className="w-full text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">Limpar seleção</button>
+                              {segStatus.status !== "ready" && segMode === "sam" && <p className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 size={9} className="animate-spin" /> {segStatus.msg}</p>}
+                            </div>
+                          )}
+                          {tool === "pen" && (
+                            <div className="space-y-1.5">
+                              <p className="text-[10px] text-zinc-600">{penStatus || "clique = canto · clique-arraste = curva"}</p>
+                              <label className="text-[10px] text-zinc-400 flex justify-between"><span>Suavizar borda</span><span className="font-mono text-zinc-500">{penFeather}px</span></label>
+                              <input type="range" min={0} max={20} value={penFeather} onChange={(e) => setPenFeather(+e.target.value)} className="w-full accent-acc h-1" />
+                              <div className="grid grid-cols-2 gap-1.5">
+                                <button onClick={() => penApiRef.current?.undo()} className="py-1.5 rounded-lg text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors">Desfazer ponto</button>
+                                <button onClick={() => penApiRef.current?.clear()} className="py-1.5 rounded-lg text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors">Limpar traço</button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                <button onClick={() => penApiRef.current?.apply("surface")} disabled={!penHasMask} className="py-1.5 rounded-lg text-[10px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40 transition-colors">Usar superfície</button>
+                                <button onClick={() => penApiRef.current?.apply("occluder")} disabled={!penHasMask} className="py-1.5 rounded-lg text-[10px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40 transition-colors">Usar oclusão</button>
+                              </div>
+                            </div>
+                          )}
+                          {tool === "reflect" && (
+                            <div className="space-y-1.5">
+                              <p className="text-[10px] text-zinc-600">Pinte onde a arte deve <span className="text-acc">refletir</span> (chão molhado, vidro). Botão direito apaga.</p>
+                              <div className="grid grid-cols-2 gap-1">
+                                <button onClick={() => setBrushErase(false)} className={["py-1 rounded-lg text-[10px] font-medium border transition-colors", !brushErase ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>Pintar</button>
+                                <button onClick={() => setBrushErase(true)} className={["py-1 rounded-lg text-[10px] font-medium border transition-colors", brushErase ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>Apagar</button>
+                              </div>
+                              <label className="text-[10px] text-zinc-400 flex justify-between"><span>Tamanho do pincel</span><span className="font-mono text-zinc-500">{brushSize}px</span></label>
+                              <input type="range" min={Math.max(2, Math.round(Math.max(imgDims.w, imgDims.h) * 0.005))} max={Math.max(20, Math.round(Math.max(imgDims.w, imgDims.h) * 0.12))} value={brushSize} onChange={(e) => setBrushSize(+e.target.value)} className="w-full accent-acc h-1" />
+                              <button onClick={() => brushApiRef.current?.clear()} className="w-full text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">Limpar reflexo</button>
+                            </div>
+                          )}
+                          {/* Apply edits → render. Lives in the editing tabs (intuitive),
+                              not in the Render tab. Highlights when there are pending changes. */}
+                          {tool !== "result" && artFile && quad && (
+                            <button onClick={() => handleProcess()} disabled={processState === "loading"}
+                              className={["w-full py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5",
+                                processState === "loading" ? "bg-zinc-700 text-zinc-400"
+                                  : processState === "idle" ? "bg-acc2 text-zinc-950 hover:bg-acc2/90"
+                                  : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"].join(" ")}>
+                              {processState === "loading"
+                                ? <><Loader2 size={12} className="animate-spin" /> Aplicando…</>
+                                : <><RefreshCw size={12} /> Aplicar ao render</>}
+                            </button>
+                          )}
+                          {!artFile && (
+                            <p className="text-[10px] text-acc/80">Solte a arte no painel — o render acontece sozinho.</p>
+                          )}
+                          {(processState === "loading" || renderState === "loading" || autoRenderPending) ? (
+                            <p className="text-[10px] text-acc flex items-center gap-1"><Loader2 size={9} className="animate-spin" /> Processando · {(procMs / 1000).toFixed(1)}s</p>
+                          ) : (artFile && processState === "done" && renderState === "done") ? (
+                            <p className="text-[10px] text-acc2 flex items-center gap-1"><CheckCircle2 size={9} /> Pronto{renderMs ? ` · ${(renderMs / 1000).toFixed(1)}s` : ""}</p>
+                          ) : null}
+
+                          {/* Layers — non-destructive: eye hides a mask from the bake without losing it. */}
+                          {(surfaceMaskUrl || occluderMaskUrl || reflectionMaskUrl) && (
+                            <div className="space-y-1 pt-1.5 mt-0.5 border-t border-zinc-800/60">
+                              <p className="text-[9px] uppercase tracking-wider text-zinc-600">Camadas</p>
+                              {([
+                                { on: surfaceOn, set: setSurfaceOn, url: surfaceMaskUrl, clr: () => setSurfaceMaskUrl(null), label: "Superfície", color: "text-acc2" },
+                                { on: occluderOn, set: setOccluderOn, url: occluderMaskUrl, clr: () => setOccluderMaskUrl(null), label: "Oclusão", color: "text-acc" },
+                                { on: reflectionLayerOn, set: setReflectionLayerOn, url: reflectionMaskUrl, clr: () => setReflectionMaskUrl(null), label: "Reflexo", color: "text-acc" },
+                              ] as const).filter((l) => l.url).map((l) => (
+                                <div key={l.label} className="flex items-center gap-1.5 text-[10px]">
+                                  <button onClick={() => { l.set(!l.on); setProcessState("idle"); }} title="Mostrar/ocultar"
+                                    className="text-zinc-400 hover:text-white transition-colors">
+                                    <Eye size={11} className={l.on ? "" : "opacity-25"} />
+                                  </button>
+                                  <span className={["flex-1", l.on ? l.color : "text-zinc-600 line-through"].join(" ")}>{l.label}</span>
+                                  <button onClick={() => { l.clr(); setProcessState("idle"); }} title="Remover"
+                                    className="text-zinc-600 hover:text-red-400 transition-colors px-0.5">×</button>
+                                </div>
+                              ))}
+                              <div className="flex items-center gap-1.5 text-[10px] text-zinc-500">
+                                <Eye size={11} /><span className="flex-1">Arte (base)</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Art section — only for the rendered Resultado; hidden while in
+                          the process tools (corners / segment / reflect). */}
+                      {tool === "result" && (<>
                       {/* Art upload + fit-mode controls (shared SSOT panel) */}
                       <input id="art-input-fs" type="file" accept="image/*" className="hidden"
                         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleArtFile(f); }} />
@@ -1262,12 +1408,13 @@ function PhotoMockupPageInner() {
                             onClick={() => document.getElementById("art-input-fs")?.click()}
                             className="mt-1.5 w-full text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors"
                           >
-                            Change artwork
+                            Trocar arte
                           </button>
                         </div>
                       ) : (
                         <ArtDropZone onFile={handleArtFile} dragOver={false} size="panel" />
                       )}
+                      </>)}
 
                       {/* Scene info row */}
                       <div className="flex items-center gap-2 bg-zinc-800/40 rounded-xl p-2.5 border border-zinc-700/30">
@@ -1276,54 +1423,71 @@ function PhotoMockupPageInner() {
                           <img src={photoUrl} alt="scene" className="w-12 h-12 object-cover rounded-lg flex-none border border-zinc-700/60" />
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="text-[10px] font-medium text-zinc-300 truncate capitalize">{analysis?.surfaceType ?? "Photo"} · {analysis?.material}</p>
-                          <p className="text-[9px] text-zinc-600">{imgDims.w}×{imgDims.h}px · {analysis?.lightingDir} light</p>
-                          <button onClick={() => handleProcess()} disabled={processState === "loading"}
-                            className="text-[9px] text-zinc-500 hover:text-zinc-300 flex items-center gap-0.5 transition-colors mt-0.5">
-                            {processState === "loading"
-                              ? <><Loader2 size={7} className="animate-spin" /> Re-extracting…</>
-                              : <><RefreshCw size={7} /> Re-extract</>}
+                          <p className="text-[10px] font-medium text-zinc-300 truncate capitalize">{analysis?.surfaceType ?? "Foto"} · {analysis?.material}</p>
+                          <p className="text-[9px] text-zinc-600">{imgDims.w}×{imgDims.h}px</p>
+                          <button onClick={() => handleAnalyze(true)} disabled={analyzeState === "loading"}
+                            className="text-[9px] text-zinc-500 hover:text-acc flex items-center gap-0.5 transition-colors mt-0.5">
+                            <Zap size={7} /> Re-detectar superfície
                           </button>
                         </div>
                       </div>
 
+                      {/* Render params — only for the rendered result; hidden while
+                          editing corners / segment / reflect (those don't use them). */}
+                      {tool === "result" && (<>
                       {/* Lighting — shadow (multiply) · ambient (screen) · color cast */}
                       <div className="space-y-2">
                         <div className="space-y-0.5">
                           <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span className="flex items-center gap-1"><Sliders size={9} /> Shadow</span>
+                            <span className="flex items-center gap-1"><Sliders size={9} /> Sombra</span>
                             <span className="font-mono text-zinc-500">{Math.round(shadowOpacity * 100)}%</span>
                           </label>
                           <input type="range" min={0} max={1} step={0.05} value={shadowOpacity}
                             onChange={(e) => setShadowOpacity(Number(e.target.value))}
-                            className="w-full accent-indigo-500 h-1" />
+                            className="w-full accent-acc h-1" />
                         </div>
+                        {/* Realismo — single knob (primary). Drives the 3 realism passes. */}
                         <div className="space-y-0.5">
                           <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Ambient light</span>
+                            <span className="flex items-center gap-1"><Wand2 size={9} /> Realismo <span className="text-zinc-700">· luz + sombra + grão</span></span>
+                            <span className="font-mono text-zinc-500">{Math.round(realism * 100)}%</span>
+                          </label>
+                          <input type="range" min={0} max={1} step={0.05} value={realism}
+                            onChange={(e) => setRealism(Number(e.target.value))}
+                            className="w-full accent-acc2 h-1" />
+                        </div>
+                        <button onClick={() => setShowAdvanced(v => !v)}
+                          className="w-full flex items-center justify-between text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors pt-0.5">
+                          <span>Ajustes avançados</span>
+                          <ChevronRight size={11} className={["transition-transform", showAdvanced ? "rotate-90" : ""].join(" ")} />
+                        </button>
+                        {showAdvanced && (<>
+                        <div className="space-y-0.5">
+                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
+                            <span>Luz ambiente</span>
                             <span className="font-mono text-zinc-500">{Math.round(highlightOpacity * 100)}%</span>
                           </label>
                           <input type="range" min={0} max={1} step={0.05} value={highlightOpacity}
                             onChange={(e) => setHighlightOpacity(Number(e.target.value))}
-                            className="w-full accent-sky-400 h-1" />
+                            className="w-full accent-acc h-1" />
                         </div>
                         <div className="space-y-0.5">
                           <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Color cast</span>
+                            <span>Matiz <span className="text-zinc-700">· tom da cena</span></span>
                             <span className="font-mono text-zinc-500">{Math.round(castOpacity * 100)}%</span>
                           </label>
                           <input type="range" min={0} max={0.5} step={0.02} value={castOpacity}
                             onChange={(e) => setCastOpacity(Number(e.target.value))}
-                            className="w-full accent-rose-400 h-1" />
+                            className="w-full accent-acc h-1" />
                         </div>
                         <div className="space-y-0.5">
                           <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Edge feather</span>
+                            <span>Suavizar borda</span>
                             <span className="font-mono text-zinc-500">{maskFeather}px</span>
                           </label>
                           <input type="range" min={0} max={30} step={1} value={maskFeather}
                             onChange={(e) => setMaskFeather(Number(e.target.value))}
-                            className="w-full accent-teal-400 h-1" />
+                            className="w-full accent-acc h-1" />
                         </div>
                         <div className="space-y-0.5">
                           <label className="text-[10px] text-zinc-400 flex items-center justify-between">
@@ -1332,15 +1496,42 @@ function PhotoMockupPageInner() {
                           </label>
                           <input type="range" min={0} max={1} step={0.05} value={reflectionOpacity}
                             onChange={(e) => setReflectionOpacity(Number(e.target.value))}
-                            className="w-full accent-fuchsia-400 h-1" />
+                            className="w-full accent-acc h-1" />
                           {reflectionOpacity > 0 && (
                             <div className="flex items-center gap-2 pt-1">
-                              <span className="text-[9px] text-zinc-600 shrink-0">Smear</span>
+                              <span className="text-[9px] text-zinc-600 shrink-0">Espalhar</span>
                               <input type="range" min={4} max={60} step={2} value={reflectionBlur}
                                 onChange={(e) => setReflectionBlur(Number(e.target.value))}
-                                className="w-full accent-fuchsia-300 h-1" />
+                                className="w-full accent-acc h-1" />
                             </div>
                           )}
+                        </div>
+                        <div className="space-y-0.5">
+                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
+                            <span>Light wrap <span className="text-zinc-700">· luz do ambiente na borda</span></span>
+                            <span className="font-mono text-zinc-500">{Math.round(lightWrap * 100)}%</span>
+                          </label>
+                          <input type="range" min={0} max={1} step={0.05} value={lightWrap}
+                            onChange={(e) => setLightWrap(Number(e.target.value))}
+                            className="w-full accent-acc h-1" />
+                        </div>
+                        <div className="space-y-0.5">
+                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
+                            <span>Casar cena <span className="text-zinc-700">· grão + temperatura</span></span>
+                            <span className="font-mono text-zinc-500">{Math.round(matchScene * 100)}%</span>
+                          </label>
+                          <input type="range" min={0} max={1} step={0.05} value={matchScene}
+                            onChange={(e) => setMatchScene(Number(e.target.value))}
+                            className="w-full accent-acc h-1" />
+                        </div>
+                        <div className="space-y-0.5">
+                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
+                            <span>Sombra de contato <span className="text-zinc-700">· aterra a superfície</span></span>
+                            <span className="font-mono text-zinc-500">{Math.round(contactShadow * 100)}%</span>
+                          </label>
+                          <input type="range" min={0} max={1} step={0.05} value={contactShadow}
+                            onChange={(e) => setContactShadow(Number(e.target.value))}
+                            className="w-full accent-acc h-1" />
                         </div>
                         <div className="space-y-0.5">
                           <label className="text-[10px] text-zinc-400 flex items-center justify-between">
@@ -1349,7 +1540,7 @@ function PhotoMockupPageInner() {
                           </label>
                           <input type="range" min={0} max={1} step={0.05} value={textureAmount}
                             onChange={(e) => setTextureAmount(Number(e.target.value))}
-                            className="w-full accent-amber-400 h-1" />
+                            className="w-full accent-acc h-1" />
                         </div>
                         <div className="space-y-0.5">
                           <label className="text-[10px] text-zinc-400 flex items-center justify-between">
@@ -1358,17 +1549,25 @@ function PhotoMockupPageInner() {
                           </label>
                           <input type="range" min={0} max={1} step={0.05} value={specularOpacity}
                             onChange={(e) => setSpecularOpacity(Number(e.target.value))}
-                            className="w-full accent-sky-300 h-1" />
+                            className="w-full accent-acc h-1" />
                         </div>
+                        <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+                          <span className="shrink-0">Cilindro <span className="text-zinc-700">· curvar</span></span>
+                          <input type="range" min={0} max={1} step={0.02} value={cylinder}
+                            onChange={(e) => { setCylinder(Number(e.target.value)); setRenderUrl(null); }}
+                            className="flex-1 accent-acc h-1" />
+                          <span className="font-mono w-7 text-right">{Math.round(cylinder * 100)}%</span>
+                        </div>
+                        </>)}
                       </div>
 
                       {/* Look presets */}
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-zinc-400">Look</span>
+                          <span className="text-[10px] text-zinc-400">Visual</span>
                           <button onClick={() => setShowCustomFX(v => !v)}
                             className="text-[9px] text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1">
-                            <Sliders size={8} /> {showCustomFX ? "Hide" : "Custom"}
+                            <Sliders size={8} /> {showCustomFX ? "Ocultar" : "Personalizar"}
                           </button>
                         </div>
                         <div className="flex gap-1 flex-wrap">
@@ -1389,11 +1588,11 @@ function PhotoMockupPageInner() {
                       {showCustomFX && (
                         <div className="border-t border-zinc-800 pt-2 space-y-2">
                           {([
-                            { label: "Grain",      value: fxGrain,      set: setFxGrain,      min: 0,    max: 100, step: 1,  accent: "accent-zinc-400",   fmt: (v: number) => `${v}%` },
-                            { label: "Warmth",     value: fxWarmth,     set: setFxWarmth,     min: -100, max: 100, step: 5,  accent: "accent-orange-400", fmt: (v: number) => v > 0 ? `+${v}` : `${v}` },
-                            { label: "Saturation", value: fxSaturation, set: setFxSaturation, min: 0,    max: 200, step: 5,  accent: "accent-purple-400", fmt: (v: number) => `${v}%` },
-                            { label: "Brightness", value: fxBrightness, set: setFxBrightness, min: 50,   max: 150, step: 5,  accent: "accent-yellow-400", fmt: (v: number) => `${v}%` },
-                            { label: "Contrast",   value: fxContrast,   set: setFxContrast,   min: 50,   max: 150, step: 5,  accent: "accent-emerald-400", fmt: (v: number) => `${v}%` },
+                            { label: "Grão",      value: fxGrain,      set: setFxGrain,      min: 0,    max: 100, step: 1,  accent: "accent-zinc-400",   fmt: (v: number) => `${v}%` },
+                            { label: "Calor",     value: fxWarmth,     set: setFxWarmth,     min: -100, max: 100, step: 5,  accent: "accent-acc", fmt: (v: number) => v > 0 ? `+${v}` : `${v}` },
+                            { label: "Saturação", value: fxSaturation, set: setFxSaturation, min: 0,    max: 200, step: 5,  accent: "accent-acc", fmt: (v: number) => `${v}%` },
+                            { label: "Claridade", value: fxBrightness, set: setFxBrightness, min: 50,   max: 150, step: 5,  accent: "accent-acc", fmt: (v: number) => `${v}%` },
+                            { label: "Contraste",   value: fxContrast,   set: setFxContrast,   min: 50,   max: 150, step: 5,  accent: "accent-acc", fmt: (v: number) => `${v}%` },
                           ] as const).map(({ label, value, set, min, max, step, accent, fmt }) => (
                             <div key={label} className="space-y-0.5">
                               <label className="text-[10px] text-zinc-400 flex items-center justify-between">
@@ -1412,19 +1611,19 @@ function PhotoMockupPageInner() {
                       <div className="flex items-center gap-1.5">
                         <a href={activeImageUrl ?? "#"} download="mockup.png"
                           className={["flex-1 py-2 rounded-xl text-[11px] font-medium text-center flex items-center justify-center gap-1.5 transition-colors",
-                            activeImageUrl ? "bg-green-600 hover:bg-green-500 text-white" : "bg-zinc-800 text-zinc-500 pointer-events-none"].join(" ")}>
-                          <Download size={11} /> Save PNG
+                            activeImageUrl ? "bg-acc2 hover:bg-acc2/90 text-zinc-950" : "bg-zinc-800 text-zinc-500 pointer-events-none"].join(" ")}>
+                          <Download size={11} /> Salvar PNG
                         </a>
                         <button onClick={handlePublish} disabled={!renderUrl || publishState === "loading"}
                           className={["px-3 py-2 rounded-xl text-[11px] transition-colors flex items-center gap-1.5",
-                            publishState === "done" ? "bg-emerald-700 text-white" :
+                            publishState === "done" ? "bg-acc2 text-zinc-950" :
                             "bg-zinc-800 hover:bg-zinc-700 text-zinc-400 disabled:text-zinc-600"].join(" ")}>
-                          {publishState === "done" ? <><CheckCircle2 size={11} /> Saved!</> :
-                           publishState === "loading" ? <><Loader2 size={11} className="animate-spin" /> Saving…</> :
-                           "Library"}
+                          {publishState === "done" ? <><CheckCircle2 size={11} /> Salvo!</> :
+                           publishState === "loading" ? <><Loader2 size={11} className="animate-spin" /> Salvando…</> :
+                           "Biblioteca"}
                         </button>
                         <button onClick={handleRender} disabled={!artFile || renderState === "loading"}
-                          className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors" title="Re-render">
+                          className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors" title="Renderizar de novo">
                           <RefreshCw size={11} />
                         </button>
                       </div>
@@ -1453,7 +1652,7 @@ function PhotoMockupPageInner() {
                           <button onClick={() => setShowShadowMap(v => !v)}
                             className="w-full flex items-center justify-between px-2.5 py-1.5 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
                             <span className="flex items-center gap-1">
-                              <Eye size={9} /> Shadow map
+                              <Eye size={9} /> Mapa de sombra
                               <span className="bg-zinc-800 text-zinc-500 px-1 rounded text-[9px]">dev</span>
                             </span>
                             <ChevronRight size={9} className={["transition-transform", showShadowMap ? "rotate-90" : ""].join(" ")} />
@@ -1464,17 +1663,18 @@ function PhotoMockupPageInner() {
                           )}
                         </div>
                       )}
+                      </>)}
 
                       {/* AI Enhance */}
-                      {renderUrl && (
+                      {tool === "result" && renderUrl && (
                         <div className={["rounded-xl border transition-all overflow-hidden",
-                          showAiBlend ? "border-purple-700/50 bg-purple-950/20" : "border-zinc-800"].join(" ")}>
+                          showAiBlend ? "border-acc/40 bg-acc/5" : "border-zinc-800"].join(" ")}>
                           <button onClick={() => setShowAiBlend(v => !v)} className="w-full flex items-center justify-between px-3 py-2">
-                            <span className={["flex items-center gap-1.5 text-[11px] font-medium", showAiBlend ? "text-purple-300" : "text-zinc-400"].join(" ")}>
-                              <Wand2 size={10} className={showAiBlend ? "text-purple-400" : "text-zinc-500"} />
-                              AI Enhance
+                            <span className={["flex items-center gap-1.5 text-[11px] font-medium", showAiBlend ? "text-acc" : "text-zinc-400"].join(" ")}>
+                              <Wand2 size={10} className={showAiBlend ? "text-acc" : "text-zinc-500"} />
+                              Melhorar com IA
                               {analysis && AI_BLEND_DEFAULTS[analysis.surfaceType]?.enabled && !showAiBlend && (
-                                <span className="text-[9px] px-1 py-0 rounded-full bg-purple-500/20 text-purple-400">rec</span>
+                                <span className="text-[9px] px-1 py-0 rounded-full bg-acc/20 text-acc">rec</span>
                               )}
                             </span>
                             <ChevronRight size={9} className={["text-zinc-600 transition-transform", showAiBlend ? "rotate-90" : ""].join(" ")} />
@@ -1486,9 +1686,9 @@ function PhotoMockupPageInner() {
                                 {(["fast", "balanced", "quality"] as const).map(q => (
                                   <button key={q} onClick={() => setAiQuality(q)}
                                     className={["py-1 rounded-lg text-[10px] font-medium transition-colors",
-                                      aiQuality === q ? "bg-purple-700 text-white" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"].join(" ")}>
-                                    <span className="capitalize">{q}</span>
-                                    <span className={["block text-[9px] font-normal", aiQuality === q ? "text-purple-300" : "text-zinc-600"].join(" ")}>
+                                      aiQuality === q ? "bg-acc text-zinc-950" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"].join(" ")}>
+                                    <span>{q === "fast" ? "Rápido" : q === "balanced" ? "Equilíbrio" : "Alta"}</span>
+                                    <span className={["block text-[9px] font-normal", aiQuality === q ? "text-acc" : "text-zinc-600"].join(" ")}>
                                       {q === "fast" ? "$0.005" : q === "balanced" ? "$0.015" : "$0.045"}
                                     </span>
                                   </button>
@@ -1496,19 +1696,19 @@ function PhotoMockupPageInner() {
                               </div>
                               <div className="space-y-0.5">
                                 <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                                  <span>Strength</span>
+                                  <span>Intensidade</span>
                                   <span className="text-zinc-300 font-mono">{Math.round(aiStrength * 100)}%</span>
                                 </label>
                                 <input type="range" min={0.05} max={0.70} step={0.05} value={aiStrength}
                                   onChange={e => setAiStrength(Number(e.target.value))}
-                                  className="w-full accent-purple-500 h-1" />
+                                  className="w-full accent-acc h-1" />
                               </div>
                               <div className="flex items-center justify-between">
                                 <span className="text-[10px] text-zinc-400">Texture</span>
                                 <div className="flex items-center gap-2">
                                   {aiTexture && <span className="text-[9px] text-zinc-500 font-mono">{Math.round(aiTextureOpacity * 100)}%</span>}
                                   <button onClick={() => setAiTexture(v => !v)}
-                                    className={["relative w-7 h-3.5 rounded-full transition-colors flex-none", aiTexture ? "bg-purple-600" : "bg-zinc-700"].join(" ")}>
+                                    className={["relative w-7 h-3.5 rounded-full transition-colors flex-none", aiTexture ? "bg-acc" : "bg-zinc-700"].join(" ")}>
                                     <span className={["absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow transition-transform",
                                       aiTexture ? "translate-x-3.5" : "translate-x-0.5"].join(" ")} />
                                   </button>
@@ -1517,10 +1717,10 @@ function PhotoMockupPageInner() {
                               {aiTexture && (
                                 <input type="range" min={0} max={0.6} step={0.05} value={aiTextureOpacity}
                                   onChange={e => setAiTextureOpacity(Number(e.target.value))}
-                                  className="w-full accent-purple-500 h-1" />
+                                  className="w-full accent-acc h-1" />
                               )}
                               <button onClick={handleAIBlend} disabled={aiBlendState === "loading"}
-                                className="w-full py-2 rounded-xl bg-purple-700 hover:bg-purple-600 disabled:bg-zinc-700 disabled:text-zinc-500 text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5">
+                                className="w-full py-2 rounded-xl bg-acc hover:bg-acc disabled:bg-zinc-700 disabled:text-zinc-500 text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5">
                                 {aiBlendState === "loading"
                                   ? <><Loader2 size={10} className="animate-spin" /> Blending…</>
                                   : <><Zap size={10} /> {aiBlendState === "done" ? "Re-apply" : "Apply"} AI Blend</>}

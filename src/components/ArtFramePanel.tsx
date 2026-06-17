@@ -131,7 +131,7 @@ export default function ArtFramePanel({
         </div>
 
         {lowRes && (
-          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" aria-label="Low resolution" />
+          <AlertTriangle className="w-4 h-4 text-acc shrink-0" aria-label="Low resolution" />
         )}
 
         <div className="flex gap-0.5 shrink-0 bg-neutral-950 border border-neutral-800 rounded-lg p-0.5">

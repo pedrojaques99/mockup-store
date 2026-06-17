@@ -9,8 +9,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
 
-const MIN_SCALE = 1;
-const MAX_SCALE = 8;
+const MIN_SCALE = 0.4; // 40% min
+const MAX_SCALE = 3; // 300% max
 const WHEEL_STEP = 0.0015; // per deltaY unit
 const BTN_STEP = 0.6;      // per button press
 
@@ -19,15 +19,31 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 export default function ZoomPanViewer({
   children,
   className = "",
+  requireSpaceToPan = false,
 }: {
   children: React.ReactNode;
   className?: string;
+  /** When true, drag pans ONLY while Space is held — so the wrapped tool keeps
+   *  its own pointer drag (anchors, brush). Wheel/pinch still zoom freely. */
+  requireSpaceToPan?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [tx, setTx] = useState(0);
   const [ty, setTy] = useState(0);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+
+  // Track Space for the pan-gate (edit-tool mode).
+  useEffect(() => {
+    if (!requireSpaceToPan) return;
+    const tag = (el: EventTarget | null) => (el as HTMLElement | null)?.tagName;
+    const down = (e: KeyboardEvent) => { if (e.code === "Space" && tag(e.target) !== "INPUT" && tag(e.target) !== "TEXTAREA") { e.preventDefault(); setSpaceHeld(true); } };
+    const up = (e: KeyboardEvent) => { if (e.code === "Space") setSpaceHeld(false); };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+  }, [requireSpaceToPan]);
 
   const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
@@ -39,8 +55,11 @@ export default function ZoomPanViewer({
     if (!c || !content) return { x: nx, y: ny };
     const cw = c.clientWidth, ch = c.clientHeight;
     const sw = content.offsetWidth * s, sh = content.offsetHeight * s;
-    const maxX = Math.max(0, (sw - cw) / 2);
-    const maxY = Math.max(0, (sh - ch) / 2);
+    // Extra lateral freedom (~half the frame each side) so edges/corners are
+    // reachable and you can nudge the image around even past its natural bounds.
+    const ox = cw * 0.5, oy = ch * 0.5;
+    const maxX = Math.max(0, (sw - cw) / 2) + ox;
+    const maxY = Math.max(0, (sh - ch) / 2) + oy;
     return { x: clamp(nx, -maxX, maxX), y: clamp(ny, -maxY, maxY) };
   }, []);
 
@@ -75,9 +94,10 @@ export default function ZoomPanViewer({
   }, [applyZoom, scale]);
 
   const onPointerDown = (e: React.PointerEvent) => {
-    (e.target as Element).setPointerCapture?.(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const canPan = requireSpaceToPan ? spaceHeld : scale > 1;
     if (pointers.current.size === 2) {
+      (e.target as Element).setPointerCapture?.(e.pointerId);
       const [a, b] = [...pointers.current.values()];
       pinch.current = {
         dist: Math.hypot(a.x - b.x, a.y - b.y),
@@ -86,7 +106,10 @@ export default function ZoomPanViewer({
         cy: (a.y + b.y) / 2,
       };
       drag.current = null;
-    } else if (scale > 1) {
+    } else if (canPan) {
+      // Only grab the pointer when we'll actually pan — otherwise the wrapped
+      // tool keeps the event for its own drag (anchors / brush).
+      (e.target as Element).setPointerCapture?.(e.pointerId);
       drag.current = { x: e.clientX, y: e.clientY, tx, ty };
     }
   };
@@ -131,7 +154,7 @@ export default function ZoomPanViewer({
       <div
         ref={containerRef}
         className="w-full h-full flex items-center justify-center touch-none"
-        style={{ cursor: scale > 1 ? (drag.current ? "grabbing" : "grab") : "default" }}
+        style={{ cursor: (requireSpaceToPan ? spaceHeld : scale > 1) ? (drag.current ? "grabbing" : "grab") : "default" }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

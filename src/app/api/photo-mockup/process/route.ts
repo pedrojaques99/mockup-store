@@ -105,10 +105,11 @@ export async function POST(req: NextRequest) {
   const [{ screen, multiply }, maskBuf, cleanPhotoBuf, autoOccluderBuf, autoReflectionBuf] = await Promise.all([
     extractGrayscaleLayers(rawPhotoPath, quad, surfaceMaskBuf, floor, blurSig),  // raw photo for accurate lighting
     extractMask(W, H, quad, feather),
-    // 1) fill solid magenta with sampled bg, 2) desaturate the antialiased magenta
-    //    fringe (low-sat pixels in the 250–350° hue band) so no pink ring survives at
-    //    the quad edge. Hue-banded → won't touch reds/oranges (warm light, signs).
-    cleanMagentaMarker(cleanSourcePath).then((b) => neutralizeNeonPixels(b, W, H, 300, 50, 0.10)),
+    // 1) fill solid magenta with sampled bg, 2) desaturate ONLY the saturated
+    //    magenta band (hue 300±50, sat ≥ 0.18) so the pink fringe dies but the
+    //    rest of the scene keeps its colour. NB: low minSat (e.g. 0.06) desaturates
+    //    near-neutral scene pixels too → grayscales the whole photo. Keep it ≥ 0.18.
+    cleanMagentaMarker(cleanSourcePath).then((b) => neutralizeNeonPixels(b, W, H, 300, 50, 0.18)),
     extractOccluder(rawPhotoPath, quad),
     // Reflection map — where the magenta surface bounced into the scene (floor/glass)
     extractReflectionMask(rawPhotoPath, quad, W, H),
@@ -133,10 +134,20 @@ export async function POST(req: NextRequest) {
       .toBuffer();
   }
 
+  // Clip the ART to the REAL surface: intersect the quad mask with the segment
+  // surface mask (when applied) so the art shows only on the actual surface
+  // (e.g. the round puck top), not the full quad rectangle → no bleed onto the scene.
+  let artMask = maskBuf;
+  if (surfaceMaskBuf) {
+    const m = await sharp(maskBuf).metadata();
+    const surf = await sharp(surfaceMaskBuf).resize(m.width!, m.height!, { fit: "fill" }).ensureAlpha().png().toBuffer();
+    artMask = await sharp(maskBuf).ensureAlpha().composite([{ input: surf, blend: "dest-in" }]).png().toBuffer();
+  }
+
   const writes: Promise<void>[] = [
     writeFile(join(dir, "shadow.png"), multiply),
     writeFile(join(dir, "shadow-screen.png"), screen),
-    writeFile(join(dir, "mask.png"), maskBuf),
+    writeFile(join(dir, "mask.png"), artMask),
     writeFile(join(dir, "photo-clean.png"), cleanPhotoBuf),
     writeFile(join(dir, "reflection-mask.png"), reflectionBuf),
   ];

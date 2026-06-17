@@ -12,6 +12,17 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Boxy theme — TWO accents only. Everything else is chumbo (zinc) + off-white.
+ *   acc  = cyan-blue  → interactive (sliders, links, info)
+ *   acc2 = neon green → active / primary action / success
+ *   ink  = warm off-white → highlights, primary-on-dark text
+ * Generates bg-acc / text-acc / border-acc / accent-acc / ring-acc (and acc2/ink). */
+@theme {
+  --color-acc: #22d3ee;
+  --color-acc2: #3df27e;
+  --color-ink: #f5f4f0;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
@@ -57,4 +68,11 @@ body {
   0%   { transform: translateX(-100%); }
   50%  { transform: translateX(150%); }
   100% { transform: translateX(400%); }
+}
+
+/* Photo-mockup — soft breathing shimmer on the surface blur while re-rendering.
+   Animates opacity only (compositor-cheap; the blur filter stays static). */
+@keyframes art-blur-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.95; }
 }

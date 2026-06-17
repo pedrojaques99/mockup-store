@@ -180,3 +180,150 @@ export async function applySpecular(
   }
   return sharp(out, { raw: { width, height, channels: bc } }).png().toBuffer();
 }
+
+/**
+ * Light wrap — bleed the scene's ambient light onto a thin INNER band of the
+ * art edge so the composite reads as lit by the environment, not pasted.
+ * ring(i) = mask(i)·(1 − boxblur(mask))·amount → a soft inner-edge weight; the
+ * heavily-blurred scene is screen-blended there. O(n) via integral-image blur.
+ */
+export async function applyLightWrap(
+  png: Buffer,
+  sceneFull: Buffer,
+  maskFullAlpha: Buffer,
+  width: number,
+  height: number,
+  amount: number,
+  radius = 18,
+): Promise<Buffer> {
+  const { boxFilter } = await import("./guided-filter");
+  const [pr, ambient, mr] = await Promise.all([
+    sharp(png).ensureAlpha().raw().toBuffer(),
+    sharp(sceneFull).blur(Math.max(2, radius)).ensureAlpha().raw().toBuffer(),
+    sharp(maskFullAlpha).ensureAlpha().raw().toBuffer(),
+  ]);
+  const n = width * height;
+  const maskNorm = new Float64Array(n);
+  for (let i = 0; i < n; i++) maskNorm[i] = mr[i * 4 + 3] / 255;
+  const mblur = boxFilter(maskNorm, width, height, radius);
+
+  const out = Buffer.from(pr);
+  for (let i = 0; i < n; i++) {
+    const ring = maskNorm[i] * (1 - mblur[i]) * amount;
+    if (ring <= 0.002) continue;
+    const j = i * 4;
+    for (let c = 0; c < 3; c++) {
+      const a = pr[j + c], b = ambient[j + c];
+      const screen = 255 - ((255 - a) * (255 - b)) / 255;
+      out[j + c] = Math.round(a * (1 - ring) + screen * ring);
+    }
+  }
+  return sharp(out, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+/**
+ * Grain + color match — make the composited art belong to the scene by (1)
+ * nudging its channel means toward the scene's average colour (temperature
+ * match) and (2) overlaying monochrome grain at the scene's measured noise
+ * level. Masked to the surface; `amount` 0..1 scales both. Kills the "pasted" look.
+ */
+export async function applyGrainColorMatch(
+  png: Buffer,
+  sceneFull: Buffer,
+  maskFullAlpha: Buffer,
+  width: number,
+  height: number,
+  amount: number,
+): Promise<Buffer> {
+  const [pr, sc, mr] = await Promise.all([
+    sharp(png).ensureAlpha().raw().toBuffer(),
+    sharp(sceneFull).ensureAlpha().raw().toBuffer(),
+    sharp(maskFullAlpha).ensureAlpha().raw().toBuffer(),
+  ]);
+  const n = width * height;
+
+  // Scene mean colour + grain sigma (sampled), and masked-art mean colour.
+  let sR = 0, sG = 0, sB = 0, sc_n = 0, grain = 0, gN = 0;
+  for (let i = 0; i < n; i += 7) {
+    const j = i * 4;
+    sR += sc[j]; sG += sc[j + 1]; sB += sc[j + 2]; sc_n++;
+    if (i % 2 === 0 && i + 1 < n) {
+      const l0 = 0.299 * sc[j] + 0.587 * sc[j + 1] + 0.114 * sc[j + 2];
+      const k = (i + 1) * 4;
+      const l1 = 0.299 * sc[k] + 0.587 * sc[k + 1] + 0.114 * sc[k + 2];
+      grain += Math.abs(l0 - l1); gN++;
+    }
+  }
+  sR /= sc_n; sG /= sc_n; sB /= sc_n;
+  const sigma = Math.min(24, (grain / Math.max(1, gN)) * 0.9);
+
+  let aR = 0, aG = 0, aB = 0, aN = 0;
+  for (let i = 0; i < n; i++) {
+    if (mr[i * 4 + 3] < 128) continue;
+    const j = i * 4; aR += pr[j]; aG += pr[j + 1]; aB += pr[j + 2]; aN++;
+  }
+  if (aN === 0) return png;
+  aR /= aN; aG /= aN; aB /= aN;
+
+  const dR = (sR - aR) * amount * 0.45, dG = (sG - aG) * amount * 0.45, dB = (sB - aB) * amount * 0.45;
+  const out = Buffer.from(pr);
+  const clamp = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v);
+  for (let i = 0; i < n; i++) {
+    const cov = mr[i * 4 + 3] / 255;
+    if (cov <= 0.002) continue;
+    const j = i * 4;
+    const noise = (Math.random() - 0.5) * 2 * sigma * amount;
+    out[j]     = clamp(pr[j]     + (dR + noise) * cov);
+    out[j + 1] = clamp(pr[j + 1] + (dG + noise) * cov);
+    out[j + 2] = clamp(pr[j + 2] + (dB + noise) * cov);
+  }
+  return sharp(out, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+/**
+ * Contact shadow — a soft cast shadow on the scene just below the surface edge,
+ * grounding the mockup. shadow(i) = max(0, mask(x, y-offset) − mask(i)) → a band
+ * below the surface; box-blurred and multiplied (darkened) onto the render.
+ */
+export async function applyContactShadow(
+  png: Buffer,
+  maskFullAlpha: Buffer,
+  width: number,
+  height: number,
+  amount: number,
+  offset?: number,
+  blur?: number,
+): Promise<Buffer> {
+  const { boxFilter } = await import("./guided-filter");
+  const [pr, mr] = await Promise.all([
+    sharp(png).ensureAlpha().raw().toBuffer(),
+    sharp(maskFullAlpha).ensureAlpha().raw().toBuffer(),
+  ]);
+  const n = width * height;
+  const off = offset ?? Math.max(4, Math.round(height * 0.014));
+  const br = blur ?? Math.max(4, Math.round(Math.max(width, height) * 0.012));
+
+  const mask = new Float64Array(n);
+  for (let i = 0; i < n; i++) mask[i] = mr[i * 4 + 3] / 255;
+  const shadow = new Float64Array(n);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      const above = y - off >= 0 ? mask[(y - off) * width + x] : 0;
+      const s = above - mask[i];
+      if (s > 0) shadow[i] = s;
+    }
+  }
+  const sb = boxFilter(shadow, width, height, br);
+
+  const out = Buffer.from(pr);
+  for (let i = 0; i < n; i++) {
+    const d = Math.min(1, sb[i]) * amount;
+    if (d <= 0.002) continue;
+    const j = i * 4;
+    out[j] = Math.round(pr[j] * (1 - d));
+    out[j + 1] = Math.round(pr[j + 1] * (1 - d));
+    out[j + 2] = Math.round(pr[j + 2] * (1 - d));
+  }
+  return sharp(out, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}

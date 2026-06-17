@@ -170,6 +170,33 @@ export async function POST(
     png = await applySpecular(png, await readFile(rawPhotoPath), fullMask, analysis.imageWidth, analysis.imageHeight, specOp);
   }
 
+  // Light wrap — ambient scene light bleeding onto the art's inner edge (under occluders).
+  const lightWrap = typeof body.lightWrap === "number" ? body.lightWrap : 0;
+  if (lightWrap > 0) {
+    const { applyLightWrap } = await import("@/lib/photo-fx");
+    const fullMask = await sharp({ create: { width: analysis.imageWidth, height: analysis.imageHeight, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: maskRaw, left: qMinX, top: qMinY }]).png().toBuffer();
+    png = await applyLightWrap(png, await readFile(rawPhotoPath), fullMask, analysis.imageWidth, analysis.imageHeight, lightWrap, 18);
+  }
+
+  // Grain + colour match — make the art belong to the scene (temperature + noise).
+  const matchScene = typeof body.matchScene === "number" ? body.matchScene : 0;
+  if (matchScene > 0) {
+    const { applyGrainColorMatch } = await import("@/lib/photo-fx");
+    const fullMask = await sharp({ create: { width: analysis.imageWidth, height: analysis.imageHeight, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: maskRaw, left: qMinX, top: qMinY }]).png().toBuffer();
+    png = await applyGrainColorMatch(png, await readFile(rawPhotoPath), fullMask, analysis.imageWidth, analysis.imageHeight, matchScene);
+  }
+
+  // Contact shadow — ground the surface with a soft cast shadow below its edge.
+  const contactShadow = typeof body.contactShadow === "number" ? body.contactShadow : 0;
+  if (contactShadow > 0) {
+    const { applyContactShadow } = await import("@/lib/photo-fx");
+    const fullMask = await sharp({ create: { width: analysis.imageWidth, height: analysis.imageHeight, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      .composite([{ input: maskRaw, left: qMinX, top: qMinY }]).png().toBuffer();
+    png = await applyContactShadow(png, fullMask, analysis.imageWidth, analysis.imageHeight, contactShadow);
+  }
+
   // Composite foreground occluder on top (e.g. plant in front of surface)
   const occluderPath = join(dir, "occluder.png");
   if (existsSync(occluderPath)) {
