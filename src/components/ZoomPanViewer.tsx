@@ -20,12 +20,15 @@ export default function ZoomPanViewer({
   children,
   className = "",
   requireSpaceToPan = false,
+  dims,
 }: {
   children: React.ReactNode;
   className?: string;
   /** When true, drag pans ONLY while Space is held — so the wrapped tool keeps
    *  its own pointer drag (anchors, brush). Wheel/pinch still zoom freely. */
   requireSpaceToPan?: boolean;
+  /** Tamanho da imagem em px — exibido na HUD junto do zoom. */
+  dims?: { w: number; h: number };
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -176,6 +179,14 @@ export default function ZoomPanViewer({
 
       {/* Zoom HUD */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 bg-black/60 backdrop-blur-sm rounded-full px-2.5 py-1.5 border border-zinc-700/50">
+        {dims && dims.w > 0 && (
+          <>
+            <span className="text-zinc-400 text-[10px] px-2 font-mono whitespace-nowrap" title="Tamanho da imagem">
+              {dims.w}×{dims.h}px
+            </span>
+            <span className="w-px h-3.5 bg-zinc-700 mx-1" />
+          </>
+        )}
         <button
           onClick={() => { const p = center(); applyZoom(scale - BTN_STEP, p.x, p.y); }}
           className="text-zinc-400 hover:text-white p-1.5 transition-colors rounded-full hover:bg-white/10"

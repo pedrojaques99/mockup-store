@@ -1302,7 +1302,7 @@ function PhotoMockupPageInner() {
                   if (showViewer) {
                     const baseSrc = (activeImageUrl ?? photoUrl)!;
                     return (
-                      <ZoomPanViewer requireSpaceToPan={tool !== "render"}>
+                      <ZoomPanViewer requireSpaceToPan={tool !== "render"} dims={imgDims}>
                         <div style={{ maxWidth: "calc(100vw - 360px)", position: "relative", display: "inline-block", lineHeight: 0 }}>
                           {/* Persistent base — the ONLY visible scene pixels. */}
                           {/* eslint-disable-next-line @next/next/no-img-element */}
