@@ -96,6 +96,62 @@ async function visantFetch<T>(path: string): Promise<T> {
   throw lastErr || new Error("Falha desconhecida no visantFetch");
 }
 
+// ── Image generation (Visant prod) ──────────────────────────────────────────
+// Endpoints pagos (escopo "generate"). Contratos confirmados na visantlabs-os:
+//   POST /moodboard/upscale   { imageBase64, size }        → { upscaledBase64 }
+//   POST /ai/change-object    { baseImage, newObject, … }  → { imageBase64 } (sem prefixo)
+//   POST /imagelab/inpaint    { imageUrl, maskBase64, … }  → { base64, imageUrl }
+// Cada chamada custa ~2 créditos.
+
+async function visantPost<T>(path: string, body: unknown): Promise<T> {
+  const token = await getAccessToken();
+  if (!token) throw new Error("Não conectado à Visant — use o botão Conectar Visant");
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Visant ${res.status} ${path}: ${text.slice(0, 200)}`);
+  return JSON.parse(text) as T;
+}
+
+const asDataUrl = (s: string) => (s.startsWith("data:") ? s : `data:image/png;base64,${s}`);
+
+export interface UpscaleResult { base64: string; width?: number; height?: number }
+
+export async function upscaleImage(dataUrl: string, size: "1K" | "2K" | "4K"): Promise<UpscaleResult> {
+  const r = await visantPost<{ upscaledBase64: string }>("/moodboard/upscale", { imageBase64: dataUrl, size });
+  return { base64: asDataUrl(r.upscaledBase64) };
+}
+
+export async function changeObjectImage(p: {
+  dataUrl: string; mimeType?: string; newObject: string; resolution?: "1K" | "2K" | "4K";
+}): Promise<{ base64: string }> {
+  const r = await visantPost<{ imageBase64: string }>("/ai/change-object", {
+    baseImage: { base64: p.dataUrl, mimeType: p.mimeType ?? "image/png" },
+    newObject: p.newObject,
+    resolution: p.resolution ?? "2K",
+  });
+  return { base64: asDataUrl(r.imageBase64) };
+}
+
+export type InpaintMode = "replace" | "remove" | "retouch";
+
+export async function inpaintMask(p: {
+  imageDataUrl: string; maskBase64: string; prompt?: string; mode: InpaintMode; resolution?: "1K" | "2K" | "4K";
+}): Promise<{ base64: string; imageUrl?: string }> {
+  const r = await visantPost<{ base64: string; imageUrl?: string }>("/imagelab/inpaint", {
+    imageUrl: p.imageDataUrl,
+    maskBase64: p.maskBase64,
+    prompt: p.prompt,
+    mode: p.mode,
+    resolution: p.resolution ?? "2K",
+    async: false,
+  });
+  return { base64: asDataUrl(r.base64), imageUrl: r.imageUrl };
+}
+
 export async function listBrandGuidelines(): Promise<VisantBrandSummary[]> {
   const data = await visantFetch<{ guidelines: VisantBrandGuideline[] }>(
     "/brand-guidelines?limit=100"

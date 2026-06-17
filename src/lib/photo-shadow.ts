@@ -222,7 +222,7 @@ export async function extractMask(
   width: number,
   height: number,
   quad: QuadPoints,
-  featherPx = 3
+  featherPx = 1
 ): Promise<Buffer> {
   const xs = [quad.tl.x, quad.tr.x, quad.br.x, quad.bl.x];
   const ys = [quad.tl.y, quad.tr.y, quad.br.y, quad.bl.y];
@@ -258,6 +258,41 @@ export async function extractMask(
   const raw = sharp(out, { raw: { width: outW, height: outH, channels: 4 } });
   if (featherPx > 0) return raw.blur(featherPx).png().toBuffer();
   return raw.png().toBuffer();
+}
+
+/**
+ * Morphological erosion of a mask's alpha by `px` pixels (3×3 min-filter per pass).
+ * Retreats the antialiased edge inward so the art never extends into the boundary
+ * band where partial alpha would let the underlying photo (frame/gray) bleed through
+ * as a fringe. Standard defringe — RGB carried along, only alpha is contracted.
+ */
+export async function contractMask(buf: Buffer, px = 1): Promise<Buffer> {
+  if (px <= 0) return buf;
+  const img = sharp(buf).ensureAlpha();
+  const { width: w, height: h } = await img.metadata();
+  if (!w || !h) return buf;
+  let data = await img.raw().toBuffer(); // RGBA
+  for (let pass = 0; pass < Math.round(px); pass++) {
+    const next = Buffer.from(data);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let min = 255;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= h) { min = 0; break; }
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= w) { min = 0; break; }
+            const a = data[(yy * w + xx) * 4 + 3];
+            if (a < min) min = a;
+          }
+        }
+        next[(y * w + x) * 4 + 3] = min;
+      }
+    }
+    data = next;
+  }
+  return sharp(data, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
 }
 
 /**

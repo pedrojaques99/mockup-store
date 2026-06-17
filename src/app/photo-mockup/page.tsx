@@ -5,14 +5,30 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   Upload, Loader2, AlertTriangle, CheckCircle2, RefreshCw,
-  ChevronRight, Eye, Sliders, Download, Wand2, Zap, Camera,
+  ChevronRight, Eye, Wand2, Camera,
 } from "lucide-react";
-import Draggable from "react-draggable";
-import ArtFramePanel from "@/components/ArtFramePanel";
 import ZoomPanViewer from "@/components/ZoomPanViewer";
 import SegmentCanvas, { type SegApi } from "@/components/SegmentCanvas";
 import PenMaskCanvas, { type PenApi } from "@/components/PenMaskCanvas";
 import BrushCanvas, { type BrushApi } from "@/components/BrushCanvas";
+import { ToolRail } from "@/components/photo-tools/ToolRail";
+import { PHOTO_TOOLS, PHOTO_TOOL_KEYS, type PhotoTool, type MaskInstrument, type MaskTarget, type MaskMode } from "@/components/photo-tools/registry";
+import { CornersPanel } from "@/components/photo-tools/panels/CornersPanel";
+import { MaskPanel } from "@/components/photo-tools/panels/MaskPanel";
+import { ReflexoPanel } from "@/components/photo-tools/panels/ReflexoPanel";
+import { SceneInfo } from "@/components/photo-tools/panels/SceneInfo";
+import { RenderPanel } from "@/components/photo-tools/panels/RenderPanel";
+import { LuzPanel } from "@/components/photo-tools/panels/LuzPanel";
+import { LuzOverlay } from "@/components/LuzOverlay";
+import { LuzAssetModal } from "@/components/photo-tools/LuzAssetModal";
+import { LUZ_DEFAULTS, toLuzRenderLayers, type LuzLayer, type LuzLayerId } from "@/types/luz";
+import { CropCanvas } from "@/components/CropCanvas";
+import { CropPanel, ASPECT_VALUE, type CropAspect } from "@/components/photo-tools/panels/CropPanel";
+import { UpscalePanel, type UpscaleTarget, type UpscaleMode } from "@/components/photo-tools/panels/UpscalePanel";
+import { AIEditPanel, type AiEditMode } from "@/components/photo-tools/panels/AIEditPanel";
+import type { Area } from "react-easy-crop";
+import { ArtDropZone } from "@/components/photo-tools/ArtDropZone";
+import { AI_BLEND_DEFAULTS } from "@/components/photo-tools/looks";
 import { DEFAULT_FRAME, type FrameConfig, renderFramedArt } from "@/lib/art-frame";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -37,27 +53,6 @@ interface Analysis {
 type StepId = "upload" | "analyze" | "process" | "render";
 type StepState = "idle" | "loading" | "done" | "error";
 
-const LOOK_PRESETS = [
-  { name: "Natural", grain: 0,  warmth: 0,   saturation: 100, brightness: 100 },
-  { name: "Quente",    grain: 5,  warmth: 30,  saturation: 110, brightness: 102 },
-  { name: "Cold",    grain: 5,  warmth: -30, saturation: 95,  brightness: 100 },
-  { name: "Fosco",   grain: 15, warmth: 5,   saturation: 75,  brightness: 95  },
-  { name: "Vívido",   grain: 0,  warmth: 0,   saturation: 145, brightness: 105 },
-  { name: "P&B",     grain: 18, warmth: 0,   saturation: 0,   brightness: 100 },
-] as const;
-
-const AI_BLEND_DEFAULTS: Record<string, { enabled: boolean; strength: number; texture: boolean; textureOpacity: number }> = {
-  fabric:    { enabled: true,  strength: 0.40, texture: true,  textureOpacity: 0.30 },
-  tshirt:    { enabled: true,  strength: 0.40, texture: true,  textureOpacity: 0.30 },
-  bag:       { enabled: true,  strength: 0.35, texture: true,  textureOpacity: 0.25 },
-  wall:      { enabled: true,  strength: 0.30, texture: true,  textureOpacity: 0.20 },
-  box:       { enabled: true,  strength: 0.25, texture: true,  textureOpacity: 0.20 },
-  billboard: { enabled: false, strength: 0.10, texture: false, textureOpacity: 0.10 },
-  poster:    { enabled: false, strength: 0.10, texture: false, textureOpacity: 0.10 },
-  card:      { enabled: false, strength: 0.10, texture: false, textureOpacity: 0.10 },
-  paper:     { enabled: false, strength: 0.15, texture: false, textureOpacity: 0.15 },
-  screen:    { enabled: false, strength: 0.10, texture: false, textureOpacity: 0.00 },
-};
 
 // ── Quad canvas overlay ───────────────────────────────────────────────────────
 
@@ -77,10 +72,13 @@ const EDGES: { a: keyof Quad; b: keyof Quad; key: BendKey }[] = [
 interface Bend { top: number; bottom: number; left: number; right: number }
 
 function QuadEditor({
-  imageUrl, imageNW, imageNH, quad, onQuadChange, bend, onBendChange,
+  imageUrl, imageNW, imageNH, quad, onQuadChange, bend, onBendChange, transparentImg,
 }: {
   imageUrl: string; imageNW: number; imageNH: number; quad: Quad; onQuadChange: (q: Quad) => void;
   bend?: Bend; onBendChange?: (b: Bend) => void;
+  /** When true the scene img is invisible (opacity 0) — a shared base img shows the pixels;
+   *  this element only provides layout/sizing + magnifier source. */
+  transparentImg?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -314,7 +312,8 @@ function QuadEditor({
   return (
     <div ref={containerRef} className="relative select-none">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img ref={imgRef} src={imageUrl} alt="photo" className="w-full block rounded-xl" draggable={false} />
+      <img ref={imgRef} src={imageUrl} alt="photo" className="w-full block rounded-xl" draggable={false}
+        style={transparentImg ? { opacity: 0 } : undefined} />
       <canvas
         ref={canvasRef}
         className="absolute inset-0"
@@ -347,43 +346,6 @@ function StepPip({ label, state, active }: { label: string; state: StepState; ac
   );
 }
 
-// ── Artwork drop zone (SSOT — used by panel + full-screen canvas) ─────────────
-
-function ArtDropZone({
-  onFile, dragOver, size = "panel", className = "",
-}: {
-  onFile: (f: File) => void;
-  dragOver: boolean;
-  size?: "panel" | "hero";
-  className?: string;
-}) {
-  const hero = size === "hero";
-  return (
-    <div
-      onClick={() => document.getElementById("art-input-fs")?.click()}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f?.type.startsWith("image/")) onFile(f); }}
-      className={[
-        "rounded-2xl border-2 border-dashed cursor-pointer transition-colors flex flex-col items-center justify-center text-center group",
-        hero ? "gap-3 px-12 py-16 w-[min(440px,70vw)]" : "gap-1.5 p-3 h-24",
-        dragOver
-          ? "border-acc bg-acc/10"
-          : "border-zinc-700 hover:border-zinc-500 bg-zinc-900/30 hover:bg-zinc-900/50",
-        className,
-      ].join(" ")}
-    >
-      <Upload
-        size={hero ? 40 : 20}
-        className={dragOver ? "text-acc" : "text-zinc-600 group-hover:text-zinc-400 transition-colors"}
-      />
-      <p className={[hero ? "text-base" : "text-[10px]", "font-medium transition-colors", dragOver ? "text-acc" : "text-zinc-500 group-hover:text-zinc-300"].join(" ")}>
-        {dragOver ? "Solte pra renderizar" : "Solte a arte aqui"}
-      </p>
-      <p className={[hero ? "text-xs" : "text-[9px]", "text-zinc-700"].join(" ")}>PNG, JPG, SVG · renderiza ao soltar</p>
-    </div>
-  );
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 function toBase64File(file: File): Promise<string> {
@@ -393,6 +355,25 @@ function toBase64File(file: File): Promise<string> {
     fr.onerror = rej;
     fr.readAsDataURL(file);
   });
+}
+
+async function urlToDataUrl(url: string): Promise<string> {
+  const blob = await (await fetch(url)).blob();
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result as string);
+    fr.onerror = rej;
+    fr.readAsDataURL(blob);
+  });
+}
+
+function dataUrlToFile(dataUrl: string, name: string): File {
+  const [head, b64] = dataUrl.split(",");
+  const mime = /data:(.*?);/.exec(head)?.[1] ?? "image/png";
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new File([bytes], name, { type: mime });
 }
 
 async function fetchJSON<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -426,6 +407,7 @@ function PhotoMockupPageInner() {
   const [processErr, setProcessErr] = useState("");
   const [shadowPreview, setShadowPreview] = useState<string | null>(null);
   const [maskFeather, setMaskFeather] = useState(3);   // extractMask featherPx
+  const [maskContract, setMaskContract] = useState(1); // render-side mask erosion (px) — kills edge fringe
   const [shadowFloor, setShadowFloor] = useState(0);   // extractGrayscaleLayers multiplyFloor
   const [preBlur,     setPreBlur]     = useState(0);   // extractGrayscaleLayers preBlur
   // SAM2 segmentation (optional) — refines lighting mask + occluder
@@ -433,6 +415,11 @@ function PhotoMockupPageInner() {
   const [surfaceMaskUrl, setSurfaceMaskUrl] = useState<string | null>(null);
   const [occluderMaskUrl, setOccluderMaskUrl] = useState<string | null>(null);
   const [showReflBrush,  setShowReflBrush]  = useState(false);
+  // Mask editor (Photoshop model): one persistent mask per target; instruments
+  // add/subtract into it. Undo keeps a per-target snapshot stack.
+  const [maskTarget, setMaskTarget] = useState<MaskTarget>("surface");
+  const [maskMode, setMaskMode] = useState<MaskMode>("add");
+  const maskHistory = useRef<{ surface: (string | null)[]; occluder: (string | null)[] }>({ surface: [], occluder: [] });
 
   // Render
   const [artFile, setArtFile] = useState<File | null>(null);
@@ -462,7 +449,10 @@ function PhotoMockupPageInner() {
   // Recorte (Segment) tool options — live in the side panel (Photoshop-style),
   // controlled here; the canvas component just samples/draws and exposes apply via ref.
   const segApiRef = useRef<SegApi | null>(null);
-  const [segMode, setSegMode] = useState<"sam" | "smart">("smart");
+  // Mask method — Varinha / SAM (SegmentCanvas) or Caneta (PenMaskCanvas). SSoT for
+  // "how the surface/occluder is defined"; Caneta is a method here, not a separate view.
+  const [maskMethod, setMaskMethod] = useState<MaskInstrument>("brush");
+  const segMode: "sam" | "smart" = maskMethod === "sam" ? "sam" : "smart";
   const [segTol, setSegTol] = useState(15);
   const [segContract, setSegContract] = useState(1);
   const [segMatte, setSegMatte] = useState(true);
@@ -500,11 +490,54 @@ function PhotoMockupPageInner() {
   const [aiBlendUrl, setAiBlendUrl] = useState<string | null>(null);
   const [aiBlendMs, setAiBlendMs] = useState<number | null>(null);
   const [showAiResult, setShowAiResult] = useState(true);
-  // Unified editor: which tool overlays the single fullscreen canvas.
-  // "result" shows the rendered mockup; the others edit the surface over the scene photo.
-  type EditorTool = "result" | "corners" | "segment" | "pen" | "reflect";
-  const [tool, setTool] = useState<EditorTool>("result");
-  const toolRef = useRef<EditorTool>("result"); toolRef.current = tool;
+  // Unified editor: which tool overlays the single fullscreen canvas (SSoT: PhotoTool).
+  // "render" shows the rendered mockup; the others edit the surface over the scene photo.
+  const [tool, setTool] = useState<PhotoTool>("render");
+  const toolRef = useRef<PhotoTool>("render"); toolRef.current = tool;
+  const [panelOpen, setPanelOpen] = useState(true); // tool panel popover open?
+
+  // ── Luz — duas camadas de overlay (Sombra / Luz) ────────────────────────────
+  const [luzLayers, setLuzLayers] = useState<LuzLayer[]>(LUZ_DEFAULTS);
+  const [luzActive, setLuzActive] = useState<LuzLayerId>("shadow");
+  const [luzModalOpen, setLuzModalOpen] = useState(false);
+  const updateLuz = useCallback((id: LuzLayerId, patch: Partial<LuzLayer>) => {
+    setLuzLayers((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  }, []);
+  const setLuzAssetFromPath = useCallback((id: LuzLayerId, path: string) => {
+    updateLuz(id, { src: `/api/local-image?path=${encodeURIComponent(path)}`, srcPath: path, srcBase64: null });
+  }, [updateLuz]);
+  const setLuzAssetFromFile = useCallback((id: LuzLayerId, file: File) => {
+    const fr = new FileReader();
+    fr.onload = () => updateLuz(id, { src: URL.createObjectURL(file), srcPath: null, srcBase64: fr.result as string });
+    fr.readAsDataURL(file);
+  }, [updateLuz]);
+  const resetLuzLayer = useCallback((id: LuzLayerId) => {
+    const def = LUZ_DEFAULTS.find((d) => d.id === id)!;
+    setLuzLayers((ls) => ls.map((l) => (l.id === id ? { ...def } : l)));
+  }, []);
+
+  // ── Crop — corta client-side e re-sobe como nova cena (handlePhotoFile) ──────
+  const [cropAspect, setCropAspect] = useState<CropAspect>("free");
+  const [cropZoom, setCropZoom] = useState(1);
+  const [cropArea, setCropArea] = useState<Area | null>(null);
+  const [cropApplying, setCropApplying] = useState(false);
+  const [cropPrompt, setCropPrompt] = useState("");
+
+  // ── Upscale — bicubic (local) ou IA (Visant), alvo foto/arte ─────────────────
+  const [upTarget, setUpTarget] = useState<UpscaleTarget>("photo");
+  const [upMode, setUpMode] = useState<UpscaleMode>("bicubic");
+  const [upFactor, setUpFactor] = useState(2);
+  const [upSize, setUpSize] = useState<"1K" | "2K" | "4K">("2K");
+  const [upscaling, setUpscaling] = useState(false);
+  const [upscaleErr, setUpscaleErr] = useState("");
+
+  // ── AI edit — inpaint por máscara (fallback change-object) ───────────────────
+  const [aiEditPrompt, setAiEditPrompt] = useState("");
+  const [aiEditMode, setAiEditMode] = useState<AiEditMode>("replace");
+  const [aiEditRes, setAiEditRes] = useState<"1K" | "2K" | "4K">("2K");
+  const [aiEditing, setAiEditing] = useState(false);
+  const [aiEditErr, setAiEditErr] = useState("");
+  const [aiEditVia, setAiEditVia] = useState("");
   const [aiQuality, setAiQuality] = useState<"fast" | "balanced" | "quality">("balanced");
   const [publishState, setPublishState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [publishErr,   setPublishErr]   = useState("");
@@ -517,12 +550,55 @@ function PhotoMockupPageInner() {
   const [activeLook,    setActiveLook]    = useState("Natural");
 
   const dropRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
   const autoRenderTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleRenderRef  = useRef<() => void>(() => {});
   const renderStateRef   = useRef<StepState>("idle");
   const [autoRenderPending, setAutoRenderPending] = useState(false);
   const [bgDragOver, setBgDragOver] = useState(false);
+
+  // ── Mask editor (add/subtract into the persistent per-target mask) ────────────
+  const maskUrlFor = (t: MaskTarget) => (t === "surface" ? surfaceMaskUrl : occluderMaskUrl);
+
+  const applyMaskPatch = useCallback(async (patchUrl: string) => {
+    const { compositeMask } = await import("@/lib/mask-compose");
+    const cur = maskTarget === "surface" ? surfaceMaskUrl : occluderMaskUrl;
+    const set = maskTarget === "surface" ? setSurfaceMaskUrl : setOccluderMaskUrl;
+    maskHistory.current[maskTarget].push(cur);
+    if (maskHistory.current[maskTarget].length > 30) maskHistory.current[maskTarget].shift();
+    set(await compositeMask(cur, patchUrl, maskMode, imgDims.w, imgDims.h));
+    setProcessState("idle");
+  }, [maskTarget, maskMode, surfaceMaskUrl, occluderMaskUrl, imgDims.w, imgDims.h]);
+
+  const invertMaskTarget = useCallback(async () => {
+    const cur = maskTarget === "surface" ? surfaceMaskUrl : occluderMaskUrl;
+    if (!cur) return;
+    const { invertMask } = await import("@/lib/mask-compose");
+    const set = maskTarget === "surface" ? setSurfaceMaskUrl : setOccluderMaskUrl;
+    maskHistory.current[maskTarget].push(cur);
+    set(await invertMask(cur, imgDims.w, imgDims.h));
+    setProcessState("idle");
+  }, [maskTarget, surfaceMaskUrl, occluderMaskUrl, imgDims.w, imgDims.h]);
+
+  const clearMaskTarget = useCallback(() => {
+    const cur = maskTarget === "surface" ? surfaceMaskUrl : occluderMaskUrl;
+    const set = maskTarget === "surface" ? setSurfaceMaskUrl : setOccluderMaskUrl;
+    maskHistory.current[maskTarget].push(cur);
+    set(null);
+    setProcessState("idle");
+  }, [maskTarget, surfaceMaskUrl, occluderMaskUrl]);
+
+  const undoMaskTarget = useCallback(() => {
+    const stack = maskHistory.current[maskTarget];
+    if (!stack.length) return;
+    (maskTarget === "surface" ? setSurfaceMaskUrl : setOccluderMaskUrl)(stack.pop() ?? null);
+    setProcessState("idle");
+  }, [maskTarget]);
+
+  // Push the active instrument's current selection into the mask (pen/wand/sam).
+  const applyActiveInstrument = useCallback(() => {
+    if (maskMethod === "pen") penApiRef.current?.apply(maskTarget);
+    else if (maskMethod === "wand" || maskMethod === "sam") segApiRef.current?.apply(maskTarget);
+  }, [maskMethod, maskTarget]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -531,7 +607,7 @@ function PhotoMockupPageInner() {
     setAnalysis(null); setQuad(null); setAnalyzeState("idle"); setAnalyzeErr("");
     setProcessState("idle"); setProcessErr(""); setShadowPreview(null);
     setRenderUrl(null); setRenderState("idle");
-    setTool("result"); // new photo → land on the Resultado tab
+    setTool("render"); // new photo → land on the Render tool
 
     try {
       const form = new FormData();
@@ -559,6 +635,77 @@ function PhotoMockupPageInner() {
       setUploadErr(e.message); setUploadState("error");
     }
   }, []);
+
+  // true quando a área de corte ultrapassa a imagem original → outpaint (expandir com IA).
+  const cropExpanding = !!cropArea && imgDims.w > 0 && imgDims.h > 0 && (
+    cropArea.x < -1 || cropArea.y < -1 ||
+    cropArea.x + cropArea.width > imgDims.w + 1 ||
+    cropArea.y + cropArea.height > imgDims.h + 1
+  );
+
+  const loadImgEl = (src: string) => new Promise<HTMLImageElement>((res, rej) => {
+    const im = new Image();
+    im.crossOrigin = "anonymous";
+    im.onload = () => res(im);
+    im.onerror = rej;
+    im.src = src;
+  });
+
+  const handleApplyCrop = useCallback(async () => {
+    if (!photoUrl || !cropArea || cropArea.width < 1 || cropArea.height < 1) return;
+    setCropApplying(true); setUploadErr("");
+    try {
+      const img = await loadImgEl(photoUrl);
+      const W = Math.round(cropArea.width), H = Math.round(cropArea.height);
+
+      if (cropExpanding) {
+        // Outpaint: original na posição correta + borda transparente; máscara branca
+        // na borda nova (gerar) e preta sobre o original (manter).
+        const base = document.createElement("canvas"); base.width = W; base.height = H;
+        const bctx = base.getContext("2d")!;
+        bctx.drawImage(img, -cropArea.x, -cropArea.y, img.naturalWidth, img.naturalHeight);
+        const mask = document.createElement("canvas"); mask.width = W; mask.height = H;
+        const mctx = mask.getContext("2d")!;
+        mctx.fillStyle = "#fff"; mctx.fillRect(0, 0, W, H);
+        mctx.fillStyle = "#000"; mctx.fillRect(-cropArea.x, -cropArea.y, img.naturalWidth, img.naturalHeight);
+
+        const res = await fetchJSON<{ base64: string; via?: string }>(
+          `/api/photo-mockup/${uploadId ?? "x"}/ai-edit`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              imageBase64: base.toDataURL("image/png"),
+              maskBase64: mask.toDataURL("image/png"),
+              prompt: cropPrompt.trim() || "extend and continue the existing scene naturally, seamless, same perspective, lighting and style",
+              mode: "replace",
+              resolution: "2K",
+            }),
+          },
+        );
+        const file = dataUrlToFile(res.base64, "expanded.png");
+        setCropZoom(1); setCropArea(null); setCropPrompt("");
+        await handlePhotoFile(file);
+        return;
+      }
+
+      // Corte normal
+      const c = document.createElement("canvas");
+      c.width = W; c.height = H;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(img, cropArea.x, cropArea.y, cropArea.width, cropArea.height, 0, 0, W, H);
+      const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/png"));
+      if (blob) {
+        const file = new File([blob], "cropped.png", { type: "image/png" });
+        setCropZoom(1); setCropArea(null);
+        await handlePhotoFile(file); // re-sobe → render lê a foto cortada do disco
+      }
+    } catch (e: any) {
+      setUploadErr(e?.message ?? "falha ao cortar/expandir");
+    } finally {
+      setCropApplying(false);
+    }
+  }, [photoUrl, cropArea, cropExpanding, cropPrompt, uploadId, handlePhotoFile]);
 
   const handleAnalyze = useCallback(async (force = false) => {
     if (!uploadId) return;
@@ -614,6 +761,7 @@ function PhotoMockupPageInner() {
           if (typeof s.fxBrightness === "number") setFxBrightness(s.fxBrightness);
           if (typeof s.fxContrast   === "number") setFxContrast(s.fxContrast);
           if (typeof s.maskFeather  === "number") setMaskFeather(s.maskFeather);
+          if (typeof s.maskContract === "number") setMaskContract(s.maskContract);
           if (typeof s.shadowFloor  === "number") setShadowFloor(s.shadowFloor);
           if (typeof s.preBlur      === "number") setPreBlur(s.preBlur);
           if (typeof s.reflectionOpacity === "number") setReflectionOpacity(s.reflectionOpacity);
@@ -648,7 +796,7 @@ function PhotoMockupPageInner() {
     }, 600);
     return () => { if (autoRenderTimer.current) clearTimeout(autoRenderTimer.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, shadowOpacity, highlightOpacity, castOpacity, maskFeather, reflectionOpacity, reflectionBlur, lightWrap, matchScene, contactShadow, textureAmount, specularOpacity, frameSig, warpSig]);
+  }, [fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, shadowOpacity, highlightOpacity, castOpacity, maskFeather, maskContract, reflectionOpacity, reflectionBlur, lightWrap, matchScene, contactShadow, textureAmount, specularOpacity, frameSig, warpSig]);
 
   useEffect(() => {
     if (!analysis?.surfaceType) return;
@@ -741,6 +889,62 @@ function PhotoMockupPageInner() {
     setFrame(DEFAULT_FRAME); setRenderUrl(null); setRenderState("idle");
   }, []);
 
+  const handleUpscale = useCallback(async () => {
+    setUpscaleErr("");
+    try {
+      let srcB64: string | null = null;
+      if (upTarget === "photo") {
+        if (!photoUrl) return;
+        srcB64 = await urlToDataUrl(photoUrl);
+      } else {
+        if (!artFile) { setUpscaleErr("Carregue uma arte primeiro."); return; }
+        srcB64 = await toBase64File(artFile);
+      }
+      if (!srcB64) return;
+      setUpscaling(true);
+      const res = await fetchJSON<{ base64: string; width: number; height: number }>(
+        `/api/photo-mockup/${uploadId ?? "x"}/upscale`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ base64: srcB64, mode: upMode, factor: upFactor, size: upSize }),
+        },
+      );
+      const file = dataUrlToFile(res.base64, upTarget === "photo" ? "upscaled.png" : "art-upscaled.png");
+      if (upTarget === "photo") await handlePhotoFile(file);
+      else await handleArtFile(file);
+    } catch (e: any) {
+      setUpscaleErr(e?.message ?? "falha no upscale");
+    } finally {
+      setUpscaling(false);
+    }
+  }, [upTarget, upMode, upFactor, upSize, photoUrl, artFile, uploadId, handlePhotoFile, handleArtFile]);
+
+  const handleAiEdit = useCallback(async () => {
+    if (!photoUrl) return;
+    setAiEditErr(""); setAiEditVia("");
+    setAiEditing(true);
+    try {
+      const imageBase64 = await urlToDataUrl(photoUrl);
+      const maskBase64 = surfaceMaskUrl ? await urlToDataUrl(surfaceMaskUrl) : "";
+      const res = await fetchJSON<{ base64: string; via?: string; fallback?: boolean }>(
+        `/api/photo-mockup/${uploadId ?? "x"}/ai-edit`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageBase64, maskBase64, prompt: aiEditPrompt, mode: aiEditMode, resolution: aiEditRes }),
+        },
+      );
+      if (res.via) setAiEditVia(res.via);
+      const file = dataUrlToFile(res.base64, "ai-edited.png");
+      await handlePhotoFile(file); // baka a edição na cena (render lê do disco)
+    } catch (e: any) {
+      setAiEditErr(e?.message ?? "falha na edição IA");
+    } finally {
+      setAiEditing(false);
+    }
+  }, [photoUrl, surfaceMaskUrl, uploadId, aiEditPrompt, aiEditMode, aiEditRes, handlePhotoFile]);
+
   const handleRender = useCallback(async () => {
     if (!uploadId || !artFile) return;
     if (autoRenderTimer.current) { clearTimeout(autoRenderTimer.current); autoRenderTimer.current = null; }
@@ -762,6 +966,7 @@ function PhotoMockupPageInner() {
           highlightOpacity,
           castOpacity,
           maskFeather,
+          maskContract,
           reflectionOpacity,
           reflectionBlur,
           lightWrap,
@@ -771,6 +976,7 @@ function PhotoMockupPageInner() {
           textureAmount,
           specularOpacity,
           fx: { grain: fxGrain, warmth: fxWarmth, saturation: fxSaturation, brightness: fxBrightness, contrast: fxContrast },
+          luzOverlays: toLuzRenderLayers(luzLayers),
         }),
       });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error ?? `HTTP ${res.status}`); }
@@ -784,7 +990,7 @@ function PhotoMockupPageInner() {
       setRenderErr(e.message); setRenderState("error");
       renderStateRef.current = "error";
     }
-  }, [uploadId, artFile, artImg, frame, surfaceSize.w, surfaceSize.h, shadowOpacity, highlightOpacity, castOpacity, maskFeather, reflectionOpacity, reflectionBlur, cylinder, bend, textureAmount, specularOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast]);
+  }, [uploadId, artFile, artImg, frame, surfaceSize.w, surfaceSize.h, shadowOpacity, highlightOpacity, castOpacity, maskFeather, maskContract, reflectionOpacity, reflectionBlur, cylinder, bend, textureAmount, specularOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, luzLayers]);
 
   const handleAIBlend = useCallback(async () => {
     if (!uploadId || !renderUrl) return;
@@ -827,14 +1033,14 @@ function PhotoMockupPageInner() {
       const r = await fetch(`/api/photo-mockup/${uploadId}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, renderBase64, settings: { shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, shadowFloor, preBlur, reflectionOpacity, reflectionBlur, cylinder, bend, textureAmount, specularOpacity }, tags: analysis?.surfaceType ? [analysis.surfaceType] : [] }),
+        body: JSON.stringify({ name, renderBase64, settings: { shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, maskContract, shadowFloor, preBlur, reflectionOpacity, reflectionBlur, cylinder, bend, textureAmount, specularOpacity }, tags: analysis?.surfaceType ? [analysis.surfaceType] : [] }),
       });
       if (!r.ok) { const j = await r.json(); throw new Error(j.error ?? `HTTP ${r.status}`); }
       setPublishState("done");
     } catch (e: any) {
       setPublishErr(e.message); setPublishState("error");
     }
-  }, [uploadId, renderUrl, aiBlendUrl, showAiResult, analysis, shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, shadowFloor, preBlur, reflectionOpacity, reflectionBlur, cylinder, bend, textureAmount, specularOpacity]);
+  }, [uploadId, renderUrl, aiBlendUrl, showAiResult, analysis, shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, maskContract, shadowFloor, preBlur, reflectionOpacity, reflectionBlur, cylinder, bend, textureAmount, specularOpacity]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -849,7 +1055,7 @@ function PhotoMockupPageInner() {
   // Latest snapshot fn (captures current state each render).
   snapRef.current = () => JSON.stringify({
     shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation,
-    fxBrightness, fxContrast, maskFeather, shadowFloor, preBlur, reflectionOpacity,
+    fxBrightness, fxContrast, maskFeather, maskContract, shadowFloor, preBlur, reflectionOpacity,
     reflectionBlur, lightWrap, matchScene, contactShadow, cylinder, bend, textureAmount,
     specularOpacity, surfaceMaskUrl, occluderMaskUrl, reflectionMaskUrl, surfaceOn, occluderOn, reflectionLayerOn, quad, frame,
   });
@@ -859,6 +1065,7 @@ function PhotoMockupPageInner() {
     setShadowOpacity(o.shadowOpacity); setHighlightOpacity(o.highlightOpacity); setCastOpacity(o.castOpacity);
     setFxGrain(o.fxGrain); setFxWarmth(o.fxWarmth); setFxSaturation(o.fxSaturation);
     setFxBrightness(o.fxBrightness); setFxContrast(o.fxContrast); setMaskFeather(o.maskFeather);
+    if (typeof o.maskContract === "number") setMaskContract(o.maskContract);
     setShadowFloor(o.shadowFloor); setPreBlur(o.preBlur); setReflectionOpacity(o.reflectionOpacity);
     setReflectionBlur(o.reflectionBlur); setLightWrap(o.lightWrap); setMatchScene(o.matchScene);
     setContactShadow(o.contactShadow); setCylinder(o.cylinder); setBend(o.bend);
@@ -879,7 +1086,7 @@ function PhotoMockupPageInner() {
     }, 350);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, shadowFloor, preBlur, reflectionOpacity, reflectionBlur, lightWrap, matchScene, contactShadow, cylinder, bend, textureAmount, specularOpacity, surfaceMaskUrl, occluderMaskUrl, reflectionMaskUrl, surfaceOn, occluderOn, reflectionLayerOn, quad, frame]);
+  }, [shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, maskContract, shadowFloor, preBlur, reflectionOpacity, reflectionBlur, lightWrap, matchScene, contactShadow, cylinder, bend, textureAmount, specularOpacity, surfaceMaskUrl, occluderMaskUrl, reflectionMaskUrl, surfaceOn, occluderOn, reflectionLayerOn, quad, frame]);
 
   // Ctrl/Cmd+Z = undo · Ctrl+Shift+Z / Ctrl+Y = redo (whole editor state).
   useEffect(() => {
@@ -888,7 +1095,7 @@ function PhotoMockupPageInner() {
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (!(e.ctrlKey || e.metaKey)) return;
       // In Recorte, Ctrl+Z is handled by SegmentCanvas (undo last SAM point) — yield.
-      if (toolRef.current === "segment") return;
+      if (toolRef.current === "mask") return;
       const k = e.key.toLowerCase();
       const h = histRef.current;
       const redo = (k === "z" && e.shiftKey) || k === "y";
@@ -906,9 +1113,8 @@ function PhotoMockupPageInner() {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const map: Record<string, EditorTool> = { v: "result", c: "corners", s: "segment", p: "pen", r: "reflect" };
-      const tt = map[e.key.toLowerCase()];
-      if (tt) { e.preventDefault(); setTool(tt); }
+      const tt = PHOTO_TOOL_KEYS[e.key.toLowerCase()];
+      if (tt) { e.preventDefault(); setTool(tt); setPanelOpen(true); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -925,7 +1131,7 @@ function PhotoMockupPageInner() {
   // Re-apply the segment mask when its refine params change — so feather / limpar /
   // matte / tolerância are LIVE after you've already applied a surface/occluder.
   useEffect(() => {
-    if (tool !== "segment" || (!segApplied.surface && !segApplied.occluder)) return;
+    if (tool !== "mask" || (!segApplied.surface && !segApplied.occluder)) return;
     const t = setTimeout(() => {
       if (segApplied.surface) segApiRef.current?.apply("surface");
       if (segApplied.occluder) segApiRef.current?.apply("occluder");
@@ -938,7 +1144,7 @@ function PhotoMockupPageInner() {
     setPhotoUrl(null); setUploadId(null); setUploadState("idle");
     setAnalyzeState("idle"); setAnalysis(null); setQuad(null);
     setProcessState("idle"); setShadowPreview(null); setRenderUrl(null);
-    setTool("result");
+    setTool("render");
   }, []);
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -1081,92 +1287,110 @@ function PhotoMockupPageInner() {
         >
           <div className="w-full h-full relative">
 
-                {/* Pan / zoom / pinch canvas */}
-                {/* NB: no key={activeImageUrl} — keying here remounts the viewer on
-                    every render / AI↔Original toggle, resetting zoom+pan (flicker).
-                    The inner <img> swaps src in place; zoom/pan state persists. */}
-                {tool === "corners" && photoUrl && quad ? (
-                  // Corners — quad editor over the scene photo (wheel zooms, Space+drag pans).
-                  <ZoomPanViewer requireSpaceToPan>
-                    <div style={{ maxWidth: "calc(100vw - 360px)" }}>
-                      {/* Show the rendered mockup (art) under the handles, not the magenta
-                          base. Keep the last render visible while re-adjusting (no flash). */}
-                      <QuadEditor imageUrl={activeImageUrl ?? photoUrl} imageNW={imgDims.w} imageNH={imgDims.h} quad={quad}
-                        onQuadChange={(q) => { setQuad(q); setProcessState("idle"); }}
-                        bend={bend} onBendChange={setBend} />
-                    </div>
-                  </ZoomPanViewer>
-                ) : tool === "segment" && photoUrl ? (
-                  // requireSpaceToPan: dragging a SAM point moves it; Space+drag pans; wheel zooms.
-                  <ZoomPanViewer requireSpaceToPan>
-                    <div style={{ maxWidth: "calc(100vw - 360px)" }}>
-                      <SegmentCanvas imageUrl={activeImageUrl ?? photoUrl} sampleUrl={photoUrl} imageW={imgDims.w} imageH={imgDims.h}
-                        mode={segMode} tolerance={segTol} contract={segContract} matte={segMatte} feather={segFeather}
-                        onMaskChange={setSegHasMask} onStatusChange={setSegStatus} onSwatch={setSegSwatch} apiRef={segApiRef}
-                        onApply={(role, url) => {
-                          if (role === "surface") setSurfaceMaskUrl(url); else setOccluderMaskUrl(url);
-                          setSegApplied((a) => ({ ...a, [role]: true }));
-                          setProcessState("idle");  // re-bakes → art clips to the segment, render updates (confirmation)
-                        }} />
-                    </div>
-                  </ZoomPanViewer>
-                ) : tool === "pen" && photoUrl ? (
-                  <ZoomPanViewer requireSpaceToPan>
-                    <div style={{ maxWidth: "calc(100vw - 360px)" }}>
-                      <PenMaskCanvas imageUrl={activeImageUrl ?? photoUrl} imageW={imgDims.w} imageH={imgDims.h}
-                        feather={penFeather} onMaskChange={setPenHasMask} onStatus={setPenStatus} apiRef={penApiRef}
-                        onApply={(role, url) => {
-                          if (role === "surface") setSurfaceMaskUrl(url); else setOccluderMaskUrl(url);
-                          setProcessState("idle");
-                        }} />
-                    </div>
-                  </ZoomPanViewer>
-                ) : tool === "reflect" && photoUrl ? (
-                  <ZoomPanViewer requireSpaceToPan>
-                    <div style={{ maxWidth: "calc(100vw - 360px)" }}>
-                      <BrushCanvas imageUrl={activeImageUrl ?? photoUrl} imageW={imgDims.w} imageH={imgDims.h}
-                        brush={brushSize} eraseMode={brushErase} apiRef={brushApiRef}
-                        onChange={(url) => { setReflectionMaskUrl(url); setProcessState("idle"); }} />
-                    </div>
-                  </ZoomPanViewer>
-                ) : activeImageUrl ? (
-                  <ZoomPanViewer>
-                    <div style={{ position: "relative", display: "inline-block", lineHeight: 0 }}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={activeImageUrl}
-                        alt="mockup"
-                        draggable={false}
-                        style={{
-                          maxWidth: "calc(100vw - 310px)",
-                          maxHeight: "calc(100vh - 80px)",
-                          objectFit: "contain",
-                          display: "block",
-                        }}
-                      />
-                      {/* Loading: blur ONLY the surface area (clipped to the quad), scene stays sharp */}
-                      {(renderState === "loading" || autoRenderPending) && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={activeImageUrl}
-                          alt=""
-                          aria-hidden
-                          draggable={false}
-                          // Pulse opacity (compositor-only, cheap) — NOT the blur filter,
-                          // which would repaint every frame. Gives a soft breathing shimmer.
-                          className="animate-[art-blur-pulse_1.4s_ease-in-out_infinite]"
-                          style={{
-                            position: "absolute", inset: 0, width: "100%", height: "100%",
-                            objectFit: "contain", pointerEvents: "none",
-                            filter: "blur(7px) brightness(0.97)",
-                            clipPath: surfaceClip, WebkitClipPath: surfaceClip,
-                            willChange: "opacity",
-                          }}
-                        />
-                      )}
-                    </div>
-                  </ZoomPanViewer>
-                ) : (
+                {/* Hidden art file input — always mounted (the rail panel popover unmounts;
+                    the empty-state hero + RenderPanel both trigger this by id). */}
+                <input id="art-input-fs" type="file" accept="image/*" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleArtFile(f); }} />
+
+                {/* ── ONE canvas, one persistent base <img> ──
+                    A single ZoomPanViewer wraps ONE scene <img> that never remounts across
+                    tool switches → zoom/pan persists AND there is zero image flash. Each tool
+                    (Cantos/Recorte/Caneta/Reflexo) is a TRANSPARENT overlay stacked on top
+                    (its own <img> hidden via transparentImg); only its handles/canvas show. */}
+                {(() => {
+                  const showViewer = !!photoUrl && (!!activeImageUrl || tool !== "render");
+                  if (showViewer) {
+                    const baseSrc = (activeImageUrl ?? photoUrl)!;
+                    return (
+                      <ZoomPanViewer requireSpaceToPan={tool !== "render"}>
+                        <div style={{ maxWidth: "calc(100vw - 360px)", position: "relative", display: "inline-block", lineHeight: 0 }}>
+                          {/* Persistent base — the ONLY visible scene pixels. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={baseSrc}
+                            alt="mockup"
+                            draggable={false}
+                            style={{ maxWidth: "calc(100vw - 360px)", maxHeight: "calc(100vh - 80px)", objectFit: "contain", display: "block" }}
+                          />
+                          {/* Loading shimmer — blur ONLY the surface (clipped to the quad). */}
+                          {(renderState === "loading" || autoRenderPending) && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={baseSrc}
+                              alt=""
+                              aria-hidden
+                              draggable={false}
+                              className="animate-[art-blur-pulse_1.4s_ease-in-out_infinite]"
+                              style={{
+                                position: "absolute", inset: 0, width: "100%", height: "100%",
+                                objectFit: "contain", pointerEvents: "none",
+                                filter: "blur(7px) brightness(0.97)",
+                                clipPath: surfaceClip, WebkitClipPath: surfaceClip,
+                                willChange: "opacity",
+                              }}
+                            />
+                          )}
+                          {/* Tool overlays — transparent, stacked over the persistent base. */}
+                          {tool === "corners" && quad && (
+                            <div className="absolute inset-0">
+                              <QuadEditor transparentImg imageUrl={baseSrc} imageNW={imgDims.w} imageNH={imgDims.h} quad={quad}
+                                onQuadChange={(q) => { setQuad(q); setProcessState("idle"); }}
+                                bend={bend} onBendChange={setBend} />
+                            </div>
+                          )}
+                          {/* Mask editor — current target mask shown faintly under the active
+                              instrument so you SEE what's accumulated (Photoshop-style). */}
+                          {tool === "mask" && maskUrlFor(maskTarget) && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={maskUrlFor(maskTarget)!} alt="" aria-hidden draggable={false}
+                              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "fill",
+                                pointerEvents: "none", opacity: 0.4, mixBlendMode: "screen",
+                                filter: maskTarget === "surface" ? "none" : "hue-rotate(150deg)" }} />
+                          )}
+                          {tool === "mask" && (maskMethod === "wand" || maskMethod === "sam") && (
+                            <div className="absolute inset-0">
+                              <SegmentCanvas transparentImg imageUrl={baseSrc} sampleUrl={photoUrl ?? undefined} imageW={imgDims.w} imageH={imgDims.h}
+                                mode={segMode} tolerance={segTol} contract={segContract} matte={segMatte} feather={segFeather}
+                                onMaskChange={setSegHasMask} onStatusChange={setSegStatus} onSwatch={setSegSwatch} apiRef={segApiRef}
+                                onApply={(_role, url) => { applyMaskPatch(url); }} />
+                            </div>
+                          )}
+                          {tool === "mask" && maskMethod === "pen" && (
+                            <div className="absolute inset-0">
+                              <PenMaskCanvas transparentImg imageUrl={baseSrc} imageW={imgDims.w} imageH={imgDims.h}
+                                feather={penFeather} onMaskChange={setPenHasMask} onStatus={setPenStatus} apiRef={penApiRef}
+                                onApply={(_role, url) => { applyMaskPatch(url); }} />
+                            </div>
+                          )}
+                          {tool === "mask" && maskMethod === "brush" && (
+                            <div className="absolute inset-0">
+                              <BrushCanvas transparentImg patchMode imageUrl={baseSrc} imageW={imgDims.w} imageH={imgDims.h}
+                                brush={brushSize} eraseMode={false} apiRef={brushApiRef}
+                                tint={maskMode === "add" ? "61,242,126" : "248,113,113"}
+                                onChange={(url) => { if (url) applyMaskPatch(url); }} />
+                            </div>
+                          )}
+                          {tool === "reflect" && (
+                            <div className="absolute inset-0">
+                              <BrushCanvas transparentImg imageUrl={baseSrc} imageW={imgDims.w} imageH={imgDims.h}
+                                brush={brushSize} eraseMode={brushErase} apiRef={brushApiRef}
+                                onChange={(url) => { setReflectionMaskUrl(url); setProcessState("idle"); }} />
+                            </div>
+                          )}
+                          {/* Luz/Sombra — composite persistente; arrastável só na aba Luz. */}
+                          {luzLayers.some((l) => l.visible && l.src) && (
+                            <LuzOverlay
+                              layers={luzLayers}
+                              activeId={luzActive}
+                              interactive={tool === "luz"}
+                              onPosition={(id, pos) => updateLuz(id, { position: pos })}
+                            />
+                          )}
+                        </div>
+                      </ZoomPanViewer>
+                    );
+                  }
+                  return (
                   <div className="w-full h-full flex items-center justify-center relative overflow-hidden">
                     {/* Scene preview — blurred, dimmed backdrop */}
                     {photoUrl && (
@@ -1196,6 +1420,20 @@ function PhotoMockupPageInner() {
                         <ArtDropZone onFile={handleArtFile} dragOver={bgDragOver} size="hero" />
                       )}
                     </div>
+                  </div>
+                  );
+                })()}
+
+                {/* Crop — overlay dedicado (react-easy-crop tem pan/zoom próprio). */}
+                {tool === "crop" && photoUrl && (
+                  <div className="absolute inset-0 z-10 bg-zinc-950">
+                    <CropCanvas
+                      imageUrl={photoUrl}
+                      aspect={ASPECT_VALUE[cropAspect]}
+                      zoom={cropZoom}
+                      onZoom={setCropZoom}
+                      onArea={setCropArea}
+                    />
                   </div>
                 )}
 
@@ -1233,111 +1471,50 @@ function PhotoMockupPageInner() {
                   </span>
                 )}
 
-                {/* Floating draggable control panel */}
-                {/* key re-anchors the panel when crossing the param-count boundary
-                    (Resultado = many params vs editing tools = few) so a panel dragged
-                    while short never ends up with its header off-screen when it grows. */}
-                <Draggable key={tool === "result" ? "panel-full" : "panel-lite"} nodeRef={panelRef as any} handle=".panel-drag" bounds="parent" defaultPosition={{ x: 0, y: 0 }}>
-                  <div
-                    ref={panelRef}
-                    className="absolute bottom-6 right-6 z-30 w-72 bg-zinc-900/95 backdrop-blur-md border border-zinc-700/70 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
-                    style={{ maxHeight: "calc(100vh - 28px)" }}
-                  >
-                    {/* Drag handle */}
-                    <div className="panel-drag cursor-grab active:cursor-grabbing flex items-center justify-between px-3 py-2 border-b border-zinc-800 select-none shrink-0">
-                      <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-widest">Ajustes</span>
-                      <div className="flex gap-0.5 items-center">
-                        <span className="w-1 h-1 rounded-full bg-zinc-600" />
-                        <span className="w-1 h-1 rounded-full bg-zinc-600" />
-                        <span className="w-1 h-1 rounded-full bg-zinc-600" />
-                      </div>
-                    </div>
+                {/* Floating icon-only tool rail + anchored tool panel popover (Radix). */}
+                <ToolRail
+                  tools={PHOTO_TOOLS}
+                  active={tool}
+                  panelOpen={panelOpen}
+                  onSelect={setTool}
+                  onPanelOpenChange={setPanelOpen}
+                >
+                    <div className="space-y-3">
 
-                    <div className="p-3 space-y-3 overflow-y-auto flex-1 min-h-0">
-
-                      {/* Surface tools — one canvas, switch what overlays it. */}
-                      {photoUrl && (
+                      {/* Surface tools — one canvas; the rail switches what overlays it. */}
+                      {photoUrl && (tool === "corners" || tool === "mask" || tool === "reflect") && (
                         <div className="space-y-2 bg-zinc-800/40 rounded-xl border border-zinc-700/40 p-2">
-                          <div className="grid grid-cols-5 gap-1">
-                            {([
-                              ["corners", "Cantos"],
-                              ["segment", "Recorte"],
-                              ["pen", "Caneta"],
-                              ["reflect", "Reflexo"],
-                              ["result", "Render"],
-                            ] as [EditorTool, string][]).map(([t, label]) => (
-                              <button key={t} onClick={() => setTool(t)}
-                                className={["px-0.5 py-1.5 rounded-lg text-[9px] font-medium leading-tight transition-colors border",
-                                  tool === t ? "bg-acc2 text-zinc-950 border-acc2"
-                                             : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                          {tool === "corners" && <p className="text-[10px] text-zinc-600">Arraste os cantos pra ajustar a superfície; losangos curvam as bordas.</p>}
-                          {tool === "segment" && (
-                            <div className="space-y-1.5">
-                              <div className="grid grid-cols-2 gap-1">
-                                {([["smart", "Varinha"], ["sam", "SAM"]] as const).map(([m, l]) => (
-                                  <button key={m} onClick={() => setSegMode(m)}
-                                    className={["py-1 rounded-lg text-[10px] font-medium border transition-colors",
-                                      segMode === m ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>{l}</button>
-                                ))}
-                              </div>
-                              {segMode === "sam"
-                                ? <p className="text-[10px] text-zinc-600">Clique na <span className="text-acc2">superfície</span>; direito nos <span className="text-acc">objetos na frente</span>.</p>
-                                : <p className="text-[10px] text-zinc-600 flex items-center gap-1">Clique na superfície pra selecionar a cor{segSwatch && <span className="inline-block w-3 h-3 rounded-sm border border-zinc-600 align-middle" style={{ background: `rgb(${segSwatch[0]},${segSwatch[1]},${segSwatch[2]})` }} />}</p>}
-                              {segMode === "smart" && (<>
-                                <label className="text-[10px] text-zinc-400 flex justify-between"><span>Tolerância</span><span className="font-mono text-zinc-500">{segTol}</span></label>
-                                <input type="range" min={1} max={80} value={segTol} onChange={(e) => setSegTol(+e.target.value)} className="w-full accent-acc h-1" />
-                                <label className="text-[10px] text-zinc-400 flex justify-between"><span>Limpar borda <span className="text-zinc-700">· tira franja</span></span><span className="font-mono text-zinc-500">{segContract}px</span></label>
-                                <input type="range" min={0} max={8} value={segContract} onChange={(e) => setSegContract(+e.target.value)} className="w-full accent-acc h-1" />
-                                <button onClick={() => setSegMatte(v => !v)}
-                                  className={["w-full py-1 rounded-lg text-[10px] font-medium border transition-colors",
-                                    segMatte ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>Refinar borda (matte) {segMatte ? "on" : "off"}</button>
-                              </>)}
-                              <label className="text-[10px] text-zinc-400 flex justify-between"><span>Suavizar borda</span><span className="font-mono text-zinc-500">{segFeather}px</span></label>
-                              <input type="range" min={0} max={20} value={segFeather} onChange={(e) => setSegFeather(+e.target.value)} className="w-full accent-acc h-1" />
-                              <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-                                <button onClick={() => segApiRef.current?.apply("surface")} disabled={!segHasMask}
-                                  className={["py-1.5 rounded-lg text-[10px] font-medium transition-colors", segApplied.surface ? "bg-acc2 text-zinc-950" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40"].join(" ")}>{segApplied.surface ? "Superfície ✓" : "Usar superfície"}</button>
-                                <button onClick={() => segApiRef.current?.apply("occluder")} disabled={!segHasMask}
-                                  className={["py-1.5 rounded-lg text-[10px] font-medium transition-colors", segApplied.occluder ? "bg-acc2 text-zinc-950" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40"].join(" ")}>{segApplied.occluder ? "Oclusão ✓" : "Usar oclusão"}</button>
-                              </div>
-                              <button onClick={() => segApiRef.current?.clear()} disabled={!segHasMask} className="w-full text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">Limpar seleção</button>
-                              {segStatus.status !== "ready" && segMode === "sam" && <p className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 size={9} className="animate-spin" /> {segStatus.msg}</p>}
-                            </div>
-                          )}
-                          {tool === "pen" && (
-                            <div className="space-y-1.5">
-                              <p className="text-[10px] text-zinc-600">{penStatus || "clique = canto · clique-arraste = curva"}</p>
-                              <label className="text-[10px] text-zinc-400 flex justify-between"><span>Suavizar borda</span><span className="font-mono text-zinc-500">{penFeather}px</span></label>
-                              <input type="range" min={0} max={20} value={penFeather} onChange={(e) => setPenFeather(+e.target.value)} className="w-full accent-acc h-1" />
-                              <div className="grid grid-cols-2 gap-1.5">
-                                <button onClick={() => penApiRef.current?.undo()} className="py-1.5 rounded-lg text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors">Desfazer ponto</button>
-                                <button onClick={() => penApiRef.current?.clear()} className="py-1.5 rounded-lg text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors">Limpar traço</button>
-                              </div>
-                              <div className="grid grid-cols-2 gap-1.5">
-                                <button onClick={() => penApiRef.current?.apply("surface")} disabled={!penHasMask} className="py-1.5 rounded-lg text-[10px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40 transition-colors">Usar superfície</button>
-                                <button onClick={() => penApiRef.current?.apply("occluder")} disabled={!penHasMask} className="py-1.5 rounded-lg text-[10px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40 transition-colors">Usar oclusão</button>
-                              </div>
-                            </div>
+                          {tool === "corners" && <CornersPanel />}
+                          {tool === "mask" && (
+                            <MaskPanel
+                              target={maskTarget} setTarget={setMaskTarget}
+                              instrument={maskMethod} setInstrument={setMaskMethod}
+                              mode={maskMode} setMode={setMaskMode}
+                              segTol={segTol} setSegTol={setSegTol}
+                              segContract={segContract} setSegContract={setSegContract}
+                              segMatte={segMatte} setSegMatte={setSegMatte}
+                              segFeather={segFeather} setSegFeather={setSegFeather}
+                              segSwatch={segSwatch} segStatus={segStatus} segHasMask={segHasMask}
+                              penFeather={penFeather} setPenFeather={setPenFeather} penStatus={penStatus} penHasMask={penHasMask}
+                              brushSize={brushSize} setBrushSize={setBrushSize}
+                              imgDims={imgDims}
+                              onApply={applyActiveInstrument}
+                              onInvert={invertMaskTarget}
+                              onClear={clearMaskTarget}
+                              onUndo={undoMaskTarget}
+                              hasTargetMask={!!maskUrlFor(maskTarget)}
+                            />
                           )}
                           {tool === "reflect" && (
-                            <div className="space-y-1.5">
-                              <p className="text-[10px] text-zinc-600">Pinte onde a arte deve <span className="text-acc">refletir</span> (chão molhado, vidro). Botão direito apaga.</p>
-                              <div className="grid grid-cols-2 gap-1">
-                                <button onClick={() => setBrushErase(false)} className={["py-1 rounded-lg text-[10px] font-medium border transition-colors", !brushErase ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>Pintar</button>
-                                <button onClick={() => setBrushErase(true)} className={["py-1 rounded-lg text-[10px] font-medium border transition-colors", brushErase ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>Apagar</button>
-                              </div>
-                              <label className="text-[10px] text-zinc-400 flex justify-between"><span>Tamanho do pincel</span><span className="font-mono text-zinc-500">{brushSize}px</span></label>
-                              <input type="range" min={Math.max(2, Math.round(Math.max(imgDims.w, imgDims.h) * 0.005))} max={Math.max(20, Math.round(Math.max(imgDims.w, imgDims.h) * 0.12))} value={brushSize} onChange={(e) => setBrushSize(+e.target.value)} className="w-full accent-acc h-1" />
-                              <button onClick={() => brushApiRef.current?.clear()} className="w-full text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">Limpar reflexo</button>
-                            </div>
+                            <ReflexoPanel
+                              brushErase={brushErase} setBrushErase={setBrushErase}
+                              brushSize={brushSize} setBrushSize={setBrushSize}
+                              brushApiRef={brushApiRef} imgDims={imgDims}
+                            />
                           )}
                           {/* Apply edits → render. Lives in the editing tabs (intuitive),
                               not in the Render tab. Highlights when there are pending changes. */}
-                          {tool !== "result" && artFile && quad && (
+                          {artFile && quad && (
                             <button onClick={() => handleProcess()} disabled={processState === "loading"}
                               className={["w-full py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5",
                                 processState === "loading" ? "bg-zinc-700 text-zinc-400"
@@ -1384,356 +1561,126 @@ function PhotoMockupPageInner() {
                         </div>
                       )}
 
-                      {/* Art section — only for the rendered Resultado; hidden while in
-                          the process tools (corners / segment / reflect). */}
-                      {tool === "result" && (<>
-                      {/* Art upload + fit-mode controls (shared SSOT panel) */}
-                      <input id="art-input-fs" type="file" accept="image/*" className="hidden"
-                        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleArtFile(f); }} />
-                      {artPreview ? (
-                        <div className="bg-zinc-800/40 rounded-xl border border-zinc-700/40 p-2">
-                          <ArtFramePanel
-                            artPreview={artPreview}
-                            artDims={artDims}
-                            frame={frame}
-                            onFrameChange={setFrame}
-                            soWidth={surfaceSize.w}
-                            soHeight={surfaceSize.h}
-                            fileName={artFile?.name}
-                            onClear={clearArt}
-                            previewHeightClass="h-32"
-                            compact
-                          />
-                          <button
-                            onClick={() => document.getElementById("art-input-fs")?.click()}
-                            className="mt-1.5 w-full text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors"
-                          >
-                            Trocar arte
-                          </button>
-                        </div>
-                      ) : (
-                        <ArtDropZone onFile={handleArtFile} dragOver={false} size="panel" />
-                      )}
-                      </>)}
-
-                      {/* Scene info row */}
-                      <div className="flex items-center gap-2 bg-zinc-800/40 rounded-xl p-2.5 border border-zinc-700/30">
-                        {photoUrl && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={photoUrl} alt="scene" className="w-12 h-12 object-cover rounded-lg flex-none border border-zinc-700/60" />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[10px] font-medium text-zinc-300 truncate capitalize">{analysis?.surfaceType ?? "Foto"} · {analysis?.material}</p>
-                          <p className="text-[9px] text-zinc-600">{imgDims.w}×{imgDims.h}px</p>
-                          <button onClick={() => handleAnalyze(true)} disabled={analyzeState === "loading"}
-                            className="text-[9px] text-zinc-500 hover:text-acc flex items-center gap-0.5 transition-colors mt-0.5">
-                            <Zap size={7} /> Re-detectar superfície
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Render params — only for the rendered result; hidden while
-                          editing corners / segment / reflect (those don't use them). */}
-                      {tool === "result" && (<>
-                      {/* Lighting — shadow (multiply) · ambient (screen) · color cast */}
-                      <div className="space-y-2">
-                        <div className="space-y-0.5">
-                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span className="flex items-center gap-1"><Sliders size={9} /> Sombra</span>
-                            <span className="font-mono text-zinc-500">{Math.round(shadowOpacity * 100)}%</span>
-                          </label>
-                          <input type="range" min={0} max={1} step={0.05} value={shadowOpacity}
-                            onChange={(e) => setShadowOpacity(Number(e.target.value))}
-                            className="w-full accent-acc h-1" />
-                        </div>
-                        {/* Realismo — single knob (primary). Drives the 3 realism passes. */}
-                        <div className="space-y-0.5">
-                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span className="flex items-center gap-1"><Wand2 size={9} /> Realismo <span className="text-zinc-700">· luz + sombra + grão</span></span>
-                            <span className="font-mono text-zinc-500">{Math.round(realism * 100)}%</span>
-                          </label>
-                          <input type="range" min={0} max={1} step={0.05} value={realism}
-                            onChange={(e) => setRealism(Number(e.target.value))}
-                            className="w-full accent-acc2 h-1" />
-                        </div>
-                        <button onClick={() => setShowAdvanced(v => !v)}
-                          className="w-full flex items-center justify-between text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors pt-0.5">
-                          <span>Ajustes avançados</span>
-                          <ChevronRight size={11} className={["transition-transform", showAdvanced ? "rotate-90" : ""].join(" ")} />
-                        </button>
-                        {showAdvanced && (<>
-                        <div className="space-y-0.5">
-                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Luz ambiente</span>
-                            <span className="font-mono text-zinc-500">{Math.round(highlightOpacity * 100)}%</span>
-                          </label>
-                          <input type="range" min={0} max={1} step={0.05} value={highlightOpacity}
-                            onChange={(e) => setHighlightOpacity(Number(e.target.value))}
-                            className="w-full accent-acc h-1" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Matiz <span className="text-zinc-700">· tom da cena</span></span>
-                            <span className="font-mono text-zinc-500">{Math.round(castOpacity * 100)}%</span>
-                          </label>
-                          <input type="range" min={0} max={0.5} step={0.02} value={castOpacity}
-                            onChange={(e) => setCastOpacity(Number(e.target.value))}
-                            className="w-full accent-acc h-1" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Suavizar borda</span>
-                            <span className="font-mono text-zinc-500">{maskFeather}px</span>
-                          </label>
-                          <input type="range" min={0} max={30} step={1} value={maskFeather}
-                            onChange={(e) => setMaskFeather(Number(e.target.value))}
-                            className="w-full accent-acc h-1" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Reflexo <span className="text-zinc-700">· tinge reflexos com a arte</span></span>
-                            <span className="font-mono text-zinc-500">{Math.round(reflectionOpacity * 100)}%</span>
-                          </label>
-                          <input type="range" min={0} max={1} step={0.05} value={reflectionOpacity}
-                            onChange={(e) => setReflectionOpacity(Number(e.target.value))}
-                            className="w-full accent-acc h-1" />
-                          {reflectionOpacity > 0 && (
-                            <div className="flex items-center gap-2 pt-1">
-                              <span className="text-[9px] text-zinc-600 shrink-0">Espalhar</span>
-                              <input type="range" min={4} max={60} step={2} value={reflectionBlur}
-                                onChange={(e) => setReflectionBlur(Number(e.target.value))}
-                                className="w-full accent-acc h-1" />
-                            </div>
-                          )}
-                        </div>
-                        <div className="space-y-0.5">
-                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Light wrap <span className="text-zinc-700">· luz do ambiente na borda</span></span>
-                            <span className="font-mono text-zinc-500">{Math.round(lightWrap * 100)}%</span>
-                          </label>
-                          <input type="range" min={0} max={1} step={0.05} value={lightWrap}
-                            onChange={(e) => setLightWrap(Number(e.target.value))}
-                            className="w-full accent-acc h-1" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Casar cena <span className="text-zinc-700">· grão + temperatura</span></span>
-                            <span className="font-mono text-zinc-500">{Math.round(matchScene * 100)}%</span>
-                          </label>
-                          <input type="range" min={0} max={1} step={0.05} value={matchScene}
-                            onChange={(e) => setMatchScene(Number(e.target.value))}
-                            className="w-full accent-acc h-1" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Sombra de contato <span className="text-zinc-700">· aterra a superfície</span></span>
-                            <span className="font-mono text-zinc-500">{Math.round(contactShadow * 100)}%</span>
-                          </label>
-                          <input type="range" min={0} max={1} step={0.05} value={contactShadow}
-                            onChange={(e) => setContactShadow(Number(e.target.value))}
-                            className="w-full accent-acc h-1" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Textura <span className="text-zinc-700">· arte segue o relevo</span></span>
-                            <span className="font-mono text-zinc-500">{Math.round(textureAmount * 100)}%</span>
-                          </label>
-                          <input type="range" min={0} max={1} step={0.05} value={textureAmount}
-                            onChange={(e) => setTextureAmount(Number(e.target.value))}
-                            className="w-full accent-acc h-1" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                            <span>Brilho <span className="text-zinc-700">· specular (vidro/tela)</span></span>
-                            <span className="font-mono text-zinc-500">{Math.round(specularOpacity * 100)}%</span>
-                          </label>
-                          <input type="range" min={0} max={1} step={0.05} value={specularOpacity}
-                            onChange={(e) => setSpecularOpacity(Number(e.target.value))}
-                            className="w-full accent-acc h-1" />
-                        </div>
-                        <div className="flex items-center gap-2 text-[10px] text-zinc-500">
-                          <span className="shrink-0">Cilindro <span className="text-zinc-700">· curvar</span></span>
-                          <input type="range" min={0} max={1} step={0.02} value={cylinder}
-                            onChange={(e) => { setCylinder(Number(e.target.value)); setRenderUrl(null); }}
-                            className="flex-1 accent-acc h-1" />
-                          <span className="font-mono w-7 text-right">{Math.round(cylinder * 100)}%</span>
-                        </div>
-                        </>)}
-                      </div>
-
-                      {/* Look presets */}
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-zinc-400">Visual</span>
-                          <button onClick={() => setShowCustomFX(v => !v)}
-                            className="text-[9px] text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1">
-                            <Sliders size={8} /> {showCustomFX ? "Ocultar" : "Personalizar"}
-                          </button>
-                        </div>
-                        <div className="flex gap-1 flex-wrap">
-                          {LOOK_PRESETS.map(p => (
-                            <button key={p.name}
-                              onClick={() => { setActiveLook(p.name); setFxGrain(p.grain); setFxWarmth(p.warmth); setFxSaturation(p.saturation); setFxBrightness(p.brightness); setFxContrast(100); }}
-                              className={["px-2 py-0.5 rounded-full text-[10px] transition-colors",
-                                activeLook === p.name
-                                  ? "bg-zinc-200 text-zinc-900 font-medium"
-                                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"].join(" ")}>
-                              {p.name}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Custom FX */}
-                      {showCustomFX && (
-                        <div className="border-t border-zinc-800 pt-2 space-y-2">
-                          {([
-                            { label: "Grão",      value: fxGrain,      set: setFxGrain,      min: 0,    max: 100, step: 1,  accent: "accent-zinc-400",   fmt: (v: number) => `${v}%` },
-                            { label: "Calor",     value: fxWarmth,     set: setFxWarmth,     min: -100, max: 100, step: 5,  accent: "accent-acc", fmt: (v: number) => v > 0 ? `+${v}` : `${v}` },
-                            { label: "Saturação", value: fxSaturation, set: setFxSaturation, min: 0,    max: 200, step: 5,  accent: "accent-acc", fmt: (v: number) => `${v}%` },
-                            { label: "Claridade", value: fxBrightness, set: setFxBrightness, min: 50,   max: 150, step: 5,  accent: "accent-acc", fmt: (v: number) => `${v}%` },
-                            { label: "Contraste",   value: fxContrast,   set: setFxContrast,   min: 50,   max: 150, step: 5,  accent: "accent-acc", fmt: (v: number) => `${v}%` },
-                          ] as const).map(({ label, value, set, min, max, step, accent, fmt }) => (
-                            <div key={label} className="space-y-0.5">
-                              <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                                <span>{label}</span>
-                                <span className="font-mono text-zinc-500">{fmt(value)}</span>
-                              </label>
-                              <input type="range" min={min} max={max} step={step} value={value}
-                                onChange={(e) => { setActiveLook("Custom"); (set as (v: number) => void)(Number(e.target.value)); }}
-                                className={["w-full h-1", accent].join(" ")} />
-                            </div>
-                          ))}
-                        </div>
+                      {/* Scene thumbnail + surface (shared across tools) */}
+                      {photoUrl && (
+                        <SceneInfo photoUrl={photoUrl} surfaceType={analysis?.surfaceType} material={analysis?.material}
+                          imgDims={imgDims} onReanalyze={() => handleAnalyze(true)} analyzing={analyzeState === "loading"} />
                       )}
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-1.5">
-                        <a href={activeImageUrl ?? "#"} download="mockup.png"
-                          className={["flex-1 py-2 rounded-xl text-[11px] font-medium text-center flex items-center justify-center gap-1.5 transition-colors",
-                            activeImageUrl ? "bg-acc2 hover:bg-acc2/90 text-zinc-950" : "bg-zinc-800 text-zinc-500 pointer-events-none"].join(" ")}>
-                          <Download size={11} /> Salvar PNG
-                        </a>
-                        <button onClick={handlePublish} disabled={!renderUrl || publishState === "loading"}
-                          className={["px-3 py-2 rounded-xl text-[11px] transition-colors flex items-center gap-1.5",
-                            publishState === "done" ? "bg-acc2 text-zinc-950" :
-                            "bg-zinc-800 hover:bg-zinc-700 text-zinc-400 disabled:text-zinc-600"].join(" ")}>
-                          {publishState === "done" ? <><CheckCircle2 size={11} /> Salvo!</> :
-                           publishState === "loading" ? <><Loader2 size={11} className="animate-spin" /> Salvando…</> :
-                           "Biblioteca"}
-                        </button>
-                        <button onClick={handleRender} disabled={!artFile || renderState === "loading"}
-                          className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors" title="Renderizar de novo">
-                          <RefreshCw size={11} />
-                        </button>
-                      </div>
-                      {publishErr && <p className="text-red-400 text-[9px]">{publishErr}</p>}
-                      {renderErr && <p className="text-red-400 text-[9px] flex items-center gap-1"><AlertTriangle size={8} /> {renderErr}</p>}
-                      {processErr && <p className="text-red-400 text-[9px] flex items-center gap-1"><AlertTriangle size={8} /> {processErr}</p>}
-
-                      {/* Cost tally */}
-                      {renderState === "done" && ((): React.ReactNode => {
-                        const aiDetectCost = (analysis?.surfaceType === "manual" || !analysis?.confidence) ? 0 : analysis?.cached ? 0 : 0.01;
-                        const aiBlendCost = aiBlendState === "done"
-                          ? (aiQuality === "fast" ? 0.005 : aiQuality === "balanced" ? 0.015 : 0.045) : 0;
-                        const total = aiDetectCost + aiBlendCost;
-                        return (
-                          <div className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-600">
-                            {aiDetectCost > 0 ? <span>detect ~${aiDetectCost.toFixed(3)}</span> : <span>manual·$0</span>}
-                            {aiBlendCost > 0 && <><span>+</span><span>blend ~${aiBlendCost.toFixed(3)}</span></>}
-                            <span className="text-zinc-500 ml-auto">~${total.toFixed(3)}</span>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Shadow map preview — dev (extract params live in the Extract step) */}
-                      {shadowPreview && (
-                        <div className="rounded-lg border border-zinc-800 overflow-hidden">
-                          <button onClick={() => setShowShadowMap(v => !v)}
-                            className="w-full flex items-center justify-between px-2.5 py-1.5 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
-                            <span className="flex items-center gap-1">
-                              <Eye size={9} /> Mapa de sombra
-                              <span className="bg-zinc-800 text-zinc-500 px-1 rounded text-[9px]">dev</span>
-                            </span>
-                            <ChevronRight size={9} className={["transition-transform", showShadowMap ? "rotate-90" : ""].join(" ")} />
-                          </button>
-                          {showShadowMap && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={shadowPreview} alt="shadow map" className="w-full border-t border-dashed border-zinc-800 opacity-60" />
-                          )}
-                        </div>
+                      {tool === "crop" && photoUrl && (
+                        <CropPanel
+                          aspect={cropAspect}
+                          setAspect={setCropAspect}
+                          zoom={cropZoom}
+                          setZoom={setCropZoom}
+                          onApply={handleApplyCrop}
+                          applying={cropApplying}
+                          canApply={!!cropArea}
+                          expanding={cropExpanding}
+                          prompt={cropPrompt}
+                          setPrompt={setCropPrompt}
+                        />
                       )}
-                      </>)}
 
-                      {/* AI Enhance */}
-                      {tool === "result" && renderUrl && (
-                        <div className={["rounded-xl border transition-all overflow-hidden",
-                          showAiBlend ? "border-acc/40 bg-acc/5" : "border-zinc-800"].join(" ")}>
-                          <button onClick={() => setShowAiBlend(v => !v)} className="w-full flex items-center justify-between px-3 py-2">
-                            <span className={["flex items-center gap-1.5 text-[11px] font-medium", showAiBlend ? "text-acc" : "text-zinc-400"].join(" ")}>
-                              <Wand2 size={10} className={showAiBlend ? "text-acc" : "text-zinc-500"} />
-                              Melhorar com IA
-                              {analysis && AI_BLEND_DEFAULTS[analysis.surfaceType]?.enabled && !showAiBlend && (
-                                <span className="text-[9px] px-1 py-0 rounded-full bg-acc/20 text-acc">rec</span>
-                              )}
-                            </span>
-                            <ChevronRight size={9} className={["text-zinc-600 transition-transform", showAiBlend ? "rotate-90" : ""].join(" ")} />
-                          </button>
+                      {tool === "aiedit" && photoUrl && (
+                        <AIEditPanel
+                          prompt={aiEditPrompt}
+                          setPrompt={setAiEditPrompt}
+                          mode={aiEditMode}
+                          setMode={setAiEditMode}
+                          resolution={aiEditRes}
+                          setResolution={setAiEditRes}
+                          hasMask={!!surfaceMaskUrl}
+                          onApply={handleAiEdit}
+                          applying={aiEditing}
+                          err={aiEditErr}
+                          via={aiEditVia}
+                        />
+                      )}
 
-                          {showAiBlend && (
-                            <div className="px-3 pb-3 space-y-2.5 border-t border-zinc-800 pt-2.5">
-                              <div className="grid grid-cols-3 gap-1">
-                                {(["fast", "balanced", "quality"] as const).map(q => (
-                                  <button key={q} onClick={() => setAiQuality(q)}
-                                    className={["py-1 rounded-lg text-[10px] font-medium transition-colors",
-                                      aiQuality === q ? "bg-acc text-zinc-950" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"].join(" ")}>
-                                    <span>{q === "fast" ? "Rápido" : q === "balanced" ? "Equilíbrio" : "Alta"}</span>
-                                    <span className={["block text-[9px] font-normal", aiQuality === q ? "text-acc" : "text-zinc-600"].join(" ")}>
-                                      {q === "fast" ? "$0.005" : q === "balanced" ? "$0.015" : "$0.045"}
-                                    </span>
-                                  </button>
-                                ))}
-                              </div>
-                              <div className="space-y-0.5">
-                                <label className="text-[10px] text-zinc-400 flex items-center justify-between">
-                                  <span>Intensidade</span>
-                                  <span className="text-zinc-300 font-mono">{Math.round(aiStrength * 100)}%</span>
-                                </label>
-                                <input type="range" min={0.05} max={0.70} step={0.05} value={aiStrength}
-                                  onChange={e => setAiStrength(Number(e.target.value))}
-                                  className="w-full accent-acc h-1" />
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-zinc-400">Texture</span>
-                                <div className="flex items-center gap-2">
-                                  {aiTexture && <span className="text-[9px] text-zinc-500 font-mono">{Math.round(aiTextureOpacity * 100)}%</span>}
-                                  <button onClick={() => setAiTexture(v => !v)}
-                                    className={["relative w-7 h-3.5 rounded-full transition-colors flex-none", aiTexture ? "bg-acc" : "bg-zinc-700"].join(" ")}>
-                                    <span className={["absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow transition-transform",
-                                      aiTexture ? "translate-x-3.5" : "translate-x-0.5"].join(" ")} />
-                                  </button>
-                                </div>
-                              </div>
-                              {aiTexture && (
-                                <input type="range" min={0} max={0.6} step={0.05} value={aiTextureOpacity}
-                                  onChange={e => setAiTextureOpacity(Number(e.target.value))}
-                                  className="w-full accent-acc h-1" />
-                              )}
-                              <button onClick={handleAIBlend} disabled={aiBlendState === "loading"}
-                                className="w-full py-2 rounded-xl bg-acc hover:bg-acc disabled:bg-zinc-700 disabled:text-zinc-500 text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5">
-                                {aiBlendState === "loading"
-                                  ? <><Loader2 size={10} className="animate-spin" /> Blending…</>
-                                  : <><Zap size={10} /> {aiBlendState === "done" ? "Re-apply" : "Apply"} AI Blend</>}
-                              </button>
-                              {aiBlendErr && <p className="text-red-400 text-[9px] flex items-center gap-1"><AlertTriangle size={8} /> {aiBlendErr}</p>}
-                            </div>
-                          )}
-                        </div>
+                      {tool === "upscale" && photoUrl && (
+                        <UpscalePanel
+                          target={upTarget}
+                          setTarget={setUpTarget}
+                          mode={upMode}
+                          setMode={setUpMode}
+                          factor={upFactor}
+                          setFactor={setUpFactor}
+                          size={upSize}
+                          setSize={setUpSize}
+                          currentDims={upTarget === "art" ? (artDims ? { w: artDims.width, h: artDims.height } : null) : imgDims}
+                          hasArt={!!artFile}
+                          onApply={handleUpscale}
+                          applying={upscaling}
+                          err={upscaleErr}
+                        />
+                      )}
+
+                      {tool === "luz" && photoUrl && (
+                        <LuzPanel
+                          layers={luzLayers}
+                          active={luzActive}
+                          setActive={setLuzActive}
+                          update={(patch) => updateLuz(luzActive, patch)}
+                          toggleVisible={(id) => updateLuz(id, { visible: !luzLayers.find((l) => l.id === id)!.visible })}
+                          onImport={() => setLuzModalOpen(true)}
+                          onUploadFile={(f) => setLuzAssetFromFile(luzActive, f)}
+                          onClear={() => updateLuz(luzActive, { src: null, srcPath: null, srcBase64: null })}
+                          onReset={() => resetLuzLayer(luzActive)}
+                        />
+                      )}
+
+                      {tool === "render" && (
+                        <RenderPanel
+                          artPreview={artPreview} artDims={artDims} frame={frame} setFrame={setFrame} surfaceSize={surfaceSize}
+                          artFile={artFile} clearArt={clearArt} handleArtFile={handleArtFile}
+                          shadowOpacity={shadowOpacity} setShadowOpacity={setShadowOpacity}
+                          realism={realism} setRealism={setRealism}
+                          showAdvanced={showAdvanced} setShowAdvanced={setShowAdvanced}
+                          highlightOpacity={highlightOpacity} setHighlightOpacity={setHighlightOpacity}
+                          castOpacity={castOpacity} setCastOpacity={setCastOpacity}
+                          maskContract={maskContract} setMaskContract={setMaskContract}
+                          maskFeather={maskFeather} setMaskFeather={setMaskFeather}
+                          reflectionOpacity={reflectionOpacity} setReflectionOpacity={setReflectionOpacity}
+                          reflectionBlur={reflectionBlur} setReflectionBlur={setReflectionBlur}
+                          lightWrap={lightWrap} setLightWrap={setLightWrap}
+                          matchScene={matchScene} setMatchScene={setMatchScene}
+                          contactShadow={contactShadow} setContactShadow={setContactShadow}
+                          textureAmount={textureAmount} setTextureAmount={setTextureAmount}
+                          specularOpacity={specularOpacity} setSpecularOpacity={setSpecularOpacity}
+                          cylinder={cylinder} setCylinder={setCylinder} setRenderUrl={setRenderUrl}
+                          showCustomFX={showCustomFX} setShowCustomFX={setShowCustomFX}
+                          activeLook={activeLook} setActiveLook={setActiveLook}
+                          fxGrain={fxGrain} setFxGrain={setFxGrain}
+                          fxWarmth={fxWarmth} setFxWarmth={setFxWarmth}
+                          fxSaturation={fxSaturation} setFxSaturation={setFxSaturation}
+                          fxBrightness={fxBrightness} setFxBrightness={setFxBrightness}
+                          fxContrast={fxContrast} setFxContrast={setFxContrast}
+                          activeImageUrl={activeImageUrl} renderUrl={renderUrl}
+                          handlePublish={handlePublish} publishState={publishState}
+                          handleRender={handleRender} renderState={renderState}
+                          publishErr={publishErr} renderErr={renderErr} processErr={processErr}
+                          analysis={analysis} aiBlendState={aiBlendState}
+                          aiQuality={aiQuality} setAiQuality={setAiQuality}
+                          shadowPreview={shadowPreview} showShadowMap={showShadowMap} setShowShadowMap={setShowShadowMap}
+                          showAiBlend={showAiBlend} setShowAiBlend={setShowAiBlend}
+                          aiStrength={aiStrength} setAiStrength={setAiStrength}
+                          aiTexture={aiTexture} setAiTexture={setAiTexture}
+                          aiTextureOpacity={aiTextureOpacity} setAiTextureOpacity={setAiTextureOpacity}
+                          handleAIBlend={handleAIBlend} aiBlendErr={aiBlendErr}
+                        />
                       )}
 
                     </div>
-                  </div>
-                </Draggable>
+                </ToolRail>
+
+                <LuzAssetModal
+                  open={luzModalOpen}
+                  layerLabel={luzLayers.find((l) => l.id === luzActive)!.label}
+                  onClose={() => setLuzModalOpen(false)}
+                  onPick={(path) => { setLuzAssetFromPath(luzActive, path); setLuzModalOpen(false); }}
+                  onUploadFile={(f) => { setLuzAssetFromFile(luzActive, f); setLuzModalOpen(false); }}
+                />
 
           </div>
         </div>

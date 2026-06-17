@@ -11,7 +11,7 @@ import { useEffect, useRef, useCallback } from "react";
 export type BrushApi = { clear: () => void };
 
 export default function BrushCanvas({
-  imageUrl, imageW, imageH, onChange, brush, eraseMode, tint = "34,211,238", apiRef,
+  imageUrl, imageW, imageH, onChange, brush, eraseMode, tint = "34,211,238", apiRef, transparentImg, patchMode,
 }: {
   imageUrl: string;
   imageW: number;
@@ -21,6 +21,11 @@ export default function BrushCanvas({
   eraseMode: boolean;
   tint?: string;
   apiRef?: React.MutableRefObject<BrushApi | null>;
+  /** Hide this img (opacity 0) — a shared base img underneath shows the pixels. */
+  transparentImg?: boolean;
+  /** Mask-editor mode: emit each stroke as an alpha PATCH then clear, so the page
+   *  composites it (add/subtract) into the persistent target mask. */
+  patchMode?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -83,6 +88,14 @@ export default function BrushCanvas({
   const onMove = (e: React.MouseEvent) => { if (painting.current) paintAt(e.clientX, e.clientY); };
   const emit = () => {
     const mask = maskRef.current!;
+    if (patchMode) {
+      // Emit this stroke as an alpha patch, then clear so the next stroke is fresh —
+      // the page composites each patch (add/subtract) into the target mask.
+      if (dirty.current) onChange(mask.toDataURL("image/png"));
+      mask.getContext("2d")!.clearRect(0, 0, imageW, imageH);
+      dirty.current = false; redraw();
+      return;
+    }
     const flat = document.createElement("canvas");
     flat.width = imageW; flat.height = imageH;
     const fx = flat.getContext("2d")!;
@@ -106,7 +119,7 @@ export default function BrushCanvas({
         onLoad={redraw}
         onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
         onContextMenu={(e) => e.preventDefault()}
-        style={{ cursor: "crosshair" }} />
+        style={{ cursor: "crosshair", ...(transparentImg ? { opacity: 0 } : null) }} />
       <canvas ref={overlayRef} className="absolute inset-0 pointer-events-none" />
     </div>
   );

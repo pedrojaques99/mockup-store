@@ -10,6 +10,19 @@ import type { AssetMap, ArtMap } from "@visant/psd-engine";
 const TMP_DIR  = join(process.cwd(), ".tmp",  "photo-scenes");
 const DATA_DIR = join(process.cwd(), "data", "photo-scenes");
 
+// Blend dos overlays Luz/Sombra → modos do libvips (Sharp). Mesmos nomes do CSS
+// mix-blend-mode usado no preview, exceto "normal" → "over".
+const LUZ_SHARP_BLEND: Record<string, "over" | "multiply" | "screen" | "overlay" | "soft-light" | "hard-light" | "darken" | "lighten"> = {
+  normal: "over",
+  multiply: "multiply",
+  screen: "screen",
+  overlay: "overlay",
+  "soft-light": "soft-light",
+  "hard-light": "hard-light",
+  darken: "darken",
+  lighten: "lighten",
+};
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -37,7 +50,7 @@ export async function POST(
   }
 
   const body = await req.json();
-  const { artBase64, shadowOpacity, highlightOpacity, castOpacity, maskFeather, fx, warp, textureAmount, specularOpacity } = body;
+  const { artBase64, shadowOpacity, highlightOpacity, castOpacity, maskFeather, maskContract, fx, warp, textureAmount, specularOpacity, luzOverlays } = body;
 
   if (!artBase64 || typeof artBase64 !== "string") {
     return NextResponse.json({ error: "artBase64 required" }, { status: 400 });
@@ -94,11 +107,43 @@ export async function POST(
     }
   }
 
+  // Defringe — contract the mask so the antialiased boundary band never lets the
+  // underlying photo (frame/gray) bleed through as a halo on the art edge.
+  // Driven by the "Limpar borda" slider (px); default 1.
+  const contractPx = typeof maskContract === "number" ? Math.max(0, Math.min(8, Math.round(maskContract))) : 1;
+  if (contractPx > 0) {
+    const { contractMask } = await import("@/lib/photo-shadow");
+    maskRaw = await contractMask(maskRaw, contractPx);
+  }
+
+  // SSoT for the full-image mask used by every post-FX pass (specular, light wrap,
+  // grain, contact shadow, FX clip). Same maskRaw at the same quad offset every time —
+  // build once, lazily, and reuse.
+  let _fullMask: Buffer | null = null;
+  const getFullMask = async (): Promise<Buffer> =>
+    (_fullMask ??= await sharp({
+      create: { width: analysis.imageWidth, height: analysis.imageHeight, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+    })
+      .composite([{ input: maskRaw, left: qMinX, top: qMinY }])
+      .png()
+      .toBuffer());
+
+  // SSAA — compose at S× then downscale (lanczos3). The render canvas is locked to the
+  // photo size (doc.width/height), so edges (mask + warp grid) only get as many samples
+  // as the photo has pixels. Supersampling gives smooth edges; lossless for the photo
+  // (upscale S× → downscale S× ≈ original). Adaptive: skip for already-large photos.
+  const S = Math.max(analysis.imageWidth, analysis.imageHeight) > 3000 ? 1 : 2;
+  const upscale = async (b: Buffer): Promise<Buffer> => {
+    if (S <= 1) return b;
+    const m = await sharp(b).metadata();
+    return sharp(b).resize({ width: Math.round((m.width ?? 1) * S), kernel: "lanczos3" }).png().toBuffer();
+  };
+
   const [photoImg, multiplyImg, maskImg, screenImg] = await Promise.all([
-    loadImage(await readFile(photoPath)),
-    loadImage(await readFile(shadowPath)),
-    loadImage(maskRaw),
-    existsSync(screenPath) ? loadImage(await readFile(screenPath)) : Promise.resolve(null),
+    upscale(await readFile(photoPath)).then(loadImage),
+    upscale(await readFile(shadowPath)).then(loadImage),
+    upscale(maskRaw).then(loadImage),
+    existsSync(screenPath) ? upscale(await readFile(screenPath)).then(loadImage) : Promise.resolve(null),
   ]);
 
   const assets: AssetMap = {
@@ -135,18 +180,37 @@ export async function POST(
   if (typeof highlightOpacity === "number") sceneOpts.screenOpacity = Math.max(0, Math.min(1, highlightOpacity));
   if (typeof castOpacity === "number") sceneOpts.castOpacity = Math.max(0, Math.min(1, castOpacity));
 
-  const doc = buildPhotoSceneDoc(analysis, sceneOpts);
+  // Scale the scene geometry by S so the quad/mask line up with the upscaled assets.
+  const docAnalysis = S > 1
+    ? {
+        ...analysis,
+        imageWidth: analysis.imageWidth * S,
+        imageHeight: analysis.imageHeight * S,
+        quad: {
+          tl: { x: q.tl.x * S, y: q.tl.y * S }, tr: { x: q.tr.x * S, y: q.tr.y * S },
+          br: { x: q.br.x * S, y: q.br.y * S }, bl: { x: q.bl.x * S, y: q.bl.y * S },
+        },
+      }
+    : analysis;
+  const doc = buildPhotoSceneDoc(docAnalysis, sceneOpts);
 
   // Inject the displacement (the mask was already displaced to match above).
+  // dispScale is in px of the face → scale with S since the face is now S× larger.
   if (warpDisp) {
     const face: any = doc.faces[0];
     (assets as any).displacement = await loadImage(warpDisp.buffer);
     face.dispRef = "displacement";
-    face.dispScale = warpDisp.scale;
+    face.dispScale = warpDisp.scale * S;
   }
 
   const canvas = renderScene(doc, assets, arts as any, createCanvas as any);
   let png = toBuffer(canvas as any, "image/png") as Buffer;
+
+  // Downscale back to native resolution (lanczos3) before the post-FX passes, which all
+  // operate at native size against the original analysis/mask.
+  if (S > 1) {
+    png = await sharp(png).resize(analysis.imageWidth, analysis.imageHeight, { kernel: "lanczos3" }).png().toBuffer();
+  }
 
   // Reflexo — tint the scene's reflection regions with the artwork's colours
   // (Photoshop "Color" blend). Lives under the occluder so plants stay on top.
@@ -165,36 +229,28 @@ export async function POST(
   const specOp = typeof specularOpacity === "number" ? specularOpacity : 0;
   if (specOp > 0) {
     const { applySpecular } = await import("@/lib/photo-fx");
-    const fullMask = await sharp({ create: { width: analysis.imageWidth, height: analysis.imageHeight, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-      .composite([{ input: maskRaw, left: qMinX, top: qMinY }]).png().toBuffer();
-    png = await applySpecular(png, await readFile(rawPhotoPath), fullMask, analysis.imageWidth, analysis.imageHeight, specOp);
+    png = await applySpecular(png, await readFile(rawPhotoPath), await getFullMask(), analysis.imageWidth, analysis.imageHeight, specOp);
   }
 
   // Light wrap — ambient scene light bleeding onto the art's inner edge (under occluders).
   const lightWrap = typeof body.lightWrap === "number" ? body.lightWrap : 0;
   if (lightWrap > 0) {
     const { applyLightWrap } = await import("@/lib/photo-fx");
-    const fullMask = await sharp({ create: { width: analysis.imageWidth, height: analysis.imageHeight, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-      .composite([{ input: maskRaw, left: qMinX, top: qMinY }]).png().toBuffer();
-    png = await applyLightWrap(png, await readFile(rawPhotoPath), fullMask, analysis.imageWidth, analysis.imageHeight, lightWrap, 18);
+    png = await applyLightWrap(png, await readFile(rawPhotoPath), await getFullMask(), analysis.imageWidth, analysis.imageHeight, lightWrap, 18);
   }
 
   // Grain + colour match — make the art belong to the scene (temperature + noise).
   const matchScene = typeof body.matchScene === "number" ? body.matchScene : 0;
   if (matchScene > 0) {
     const { applyGrainColorMatch } = await import("@/lib/photo-fx");
-    const fullMask = await sharp({ create: { width: analysis.imageWidth, height: analysis.imageHeight, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-      .composite([{ input: maskRaw, left: qMinX, top: qMinY }]).png().toBuffer();
-    png = await applyGrainColorMatch(png, await readFile(rawPhotoPath), fullMask, analysis.imageWidth, analysis.imageHeight, matchScene);
+    png = await applyGrainColorMatch(png, await readFile(rawPhotoPath), await getFullMask(), analysis.imageWidth, analysis.imageHeight, matchScene);
   }
 
   // Contact shadow — ground the surface with a soft cast shadow below its edge.
   const contactShadow = typeof body.contactShadow === "number" ? body.contactShadow : 0;
   if (contactShadow > 0) {
     const { applyContactShadow } = await import("@/lib/photo-fx");
-    const fullMask = await sharp({ create: { width: analysis.imageWidth, height: analysis.imageHeight, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-      .composite([{ input: maskRaw, left: qMinX, top: qMinY }]).png().toBuffer();
-    png = await applyContactShadow(png, fullMask, analysis.imageWidth, analysis.imageHeight, contactShadow);
+    png = await applyContactShadow(png, await getFullMask(), analysis.imageWidth, analysis.imageHeight, contactShadow);
   }
 
   // Composite foreground occluder on top (e.g. plant in front of surface)
@@ -220,23 +276,9 @@ export async function POST(
       const original = png;
       const fxFull   = await applyRenderFX(png, fxObj);
 
-      // Expand bounding-box mask to full image size at quad offset
-      const q   = analysis.quad as { tl: {x:number;y:number}; tr: {x:number;y:number}; br: {x:number;y:number}; bl: {x:number;y:number} };
-      const xs  = [q.tl.x, q.tr.x, q.br.x, q.bl.x];
-      const ys  = [q.tl.y, q.tr.y, q.br.y, q.bl.y];
-      const minX = Math.max(0, Math.floor(Math.min(...xs)));
-      const minY = Math.max(0, Math.floor(Math.min(...ys)));
-
-      const fullMask = await sharp({
-        create: { width: analysis.imageWidth, height: analysis.imageHeight, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
-      })
-        .composite([{ input: maskRaw, left: minX, top: minY }])
-        .png()
-        .toBuffer();
-
-      // Clip FX to mask area, then overlay on original
+      // Clip FX to the surface mask, then overlay on original
       const fxMasked = await sharp(fxFull)
-        .composite([{ input: fullMask, blend: "dest-in" }])
+        .composite([{ input: await getFullMask(), blend: "dest-in" }])
         .png()
         .toBuffer();
 
@@ -244,6 +286,56 @@ export async function POST(
         .composite([{ input: fxMasked, blend: "over" }])
         .png()
         .toBuffer();
+    }
+  }
+
+  // Luz/Sombra — overlays do usuário compostos sobre TODO o canvas final, no topo
+  // (espelha o LuzOverlay do preview: mesma fórmula de contraste/opacidade/blend).
+  // Feito com Sharp em resolução nativa → sem mexer no engine nem no fator SSAA.
+  if (Array.isArray(luzOverlays) && luzOverlays.length) {
+    const W = analysis.imageWidth, H = analysis.imageHeight;
+    const clamp255 = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : Math.round(v));
+    for (const ov of luzOverlays.slice(0, 4)) {
+      try {
+        let buf: Buffer | null = null;
+        if (typeof ov.srcBase64 === "string" && ov.srcBase64) {
+          buf = Buffer.from(ov.srcBase64.replace(/^data:image\/\w+;base64,/, ""), "base64");
+        } else if (typeof ov.srcPath === "string" && ov.srcPath && !ov.srcPath.includes("..") && existsSync(ov.srcPath)) {
+          buf = await readFile(ov.srcPath);
+        }
+        if (!buf) continue;
+
+        const scale = typeof ov.scale === "number" ? Math.max(0.05, Math.min(5, ov.scale)) : 1;
+        const rotation = typeof ov.rotation === "number" ? ov.rotation : 0;
+        const opacity = typeof ov.opacity === "number" ? Math.max(0, Math.min(1, ov.opacity)) : 1;
+        const contrast = typeof ov.contrast === "number" ? Math.max(10, Math.min(300, ov.contrast)) : 100;
+        const px = ov.position && typeof ov.position.x === "number" ? ov.position.x : 0.5;
+        const py = ov.position && typeof ov.position.y === "number" ? ov.position.y : 0.5;
+        const blend = LUZ_SHARP_BLEND[ov.blendMode as string] ?? "over";
+
+        // rotate (bbox cresce) → resize p/ largura relativa ao canvas → raw p/ aplicar
+        // contraste (só RGB) + opacidade (alpha) num passe.
+        let s = sharp(buf).ensureAlpha();
+        if (rotation) s = s.rotate(rotation, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
+        s = s.resize({ width: Math.max(1, Math.round(scale * W)) });
+        const { data, info } = await s.raw().toBuffer({ resolveWithObject: true });
+        const a = contrast / 100, b = 128 * (1 - a);
+        for (let i = 0; i < data.length; i += 4) {
+          data[i] = clamp255(a * data[i] + b);
+          data[i + 1] = clamp255(a * data[i + 1] + b);
+          data[i + 2] = clamp255(a * data[i + 2] + b);
+          data[i + 3] = Math.round(data[i + 3] * opacity);
+        }
+        const layer = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
+
+        // posiciona centralizado em (px,py) num canvas do tamanho da base, depois
+        // compõe com o blend escolhido (transparência é alpha-aware no libvips).
+        const placed = await sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+          .composite([{ input: layer, left: Math.round(px * W - info.width / 2), top: Math.round(py * H - info.height / 2) }])
+          .png()
+          .toBuffer();
+        png = await sharp(png).composite([{ input: placed, blend }]).png().toBuffer();
+      } catch { /* overlay inválido — ignora, não derruba o render */ }
     }
   }
 

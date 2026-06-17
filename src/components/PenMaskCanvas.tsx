@@ -36,7 +36,7 @@ function tracePath(ctx: CanvasRenderingContext2D, a: Anchor[], closed: boolean, 
 }
 
 export default function PenMaskCanvas({
-  imageUrl, imageW, imageH, onApply, feather, onMaskChange, onStatus, apiRef,
+  imageUrl, imageW, imageH, onApply, feather, onMaskChange, onStatus, apiRef, transparentImg,
 }: {
   imageUrl: string;
   imageW: number;
@@ -46,6 +46,8 @@ export default function PenMaskCanvas({
   onMaskChange?: (hasMask: boolean) => void;
   onStatus?: (s: string) => void;
   apiRef?: React.MutableRefObject<PenApi | null>;
+  /** Hide this img (opacity 0) — a shared base img underneath shows the pixels. */
+  transparentImg?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -158,7 +160,7 @@ export default function PenMaskCanvas({
   return (
     <div ref={wrapRef} className="relative select-none rounded-xl overflow-hidden touch-none">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img ref={imgRef} src={imageUrl} alt="scene" draggable={false} className="w-full block" style={{ cursor: "crosshair" }} />
+      <img ref={imgRef} src={imageUrl} alt="scene" draggable={false} className="w-full block" style={{ cursor: "crosshair", ...(transparentImg ? { opacity: 0 } : null) }} />
       <canvas
         ref={overlayRef}
         className="absolute inset-0"

@@ -24,7 +24,7 @@ export type SegApi = { apply: (r: Role) => void; clear: () => void };
 export default function SegmentCanvas({
   imageUrl, sampleUrl, imageW, imageH, onApply,
   mode, tolerance, contract, matte, feather,
-  onMaskChange, onStatusChange, onSwatch, apiRef,
+  onMaskChange, onStatusChange, onSwatch, apiRef, transparentImg,
 }: {
   imageUrl: string;
   sampleUrl?: string;
@@ -40,6 +40,8 @@ export default function SegmentCanvas({
   onStatusChange?: (s: { status: string; msg: string; device: string | null }) => void;
   onSwatch?: (rgb: [number, number, number] | null) => void;
   apiRef?: React.MutableRefObject<SegApi | null>;
+  /** Hide this img (opacity 0) — a shared base img underneath shows the pixels. */
+  transparentImg?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -288,7 +290,7 @@ export default function SegmentCanvas({
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={imgRef} src={imageUrl} alt="scene" draggable={false} className="w-full block touch-none"
-        style={{ cursor: "crosshair" }}
+        style={{ cursor: "crosshair", ...(transparentImg ? { opacity: 0 } : null) }}
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp} onContextMenu={onImageContext}
       />
