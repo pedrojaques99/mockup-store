@@ -1,15 +1,19 @@
 "use client";
 
 /**
- * MaskPanel — Photoshop-style mask editor. You pick a TARGET (Superfície/Oclusão),
- * an INSTRUMENT (Pen/Brush/Varinha/SAM), and a MODE (Add/Sub). Every instrument
- * adds to or subtracts from the SAME persistent mask — none replaces it. Pen is an
- * instrument here, not a category.
+ * MaskPanel — editor de máscara modelo Photoshop, redesenhado para tornar a
+ * arquitetura óbvia:  MÁSCARA (qual camada) → FERRAMENTA (como selecionar) →
+ * MODO (somar/subtrair) → APLICAR → AÇÕES. Pen/Brush/Varinha/SAM são apenas
+ * instrumentos: TODOS pintam na MESMA máscara do alvo ativo, somando ou
+ * subtraindo. Nenhum substitui a máscara. Lógica/props inalteradas — só a UI.
  */
-import { Loader2, Plus, Minus, Undo2, FlipHorizontal2, Trash2 } from "lucide-react";
+import { Loader2, Plus, Minus, Undo2, FlipHorizontal2, Trash2, PenTool, Paintbrush, Wand2, Sparkles, Layers, Radio, Eye, Contrast } from "lucide-react";
 import { Slider } from "@/components/ui/Slider";
-import { Segmented } from "@/components/ui/Segmented";
 import type { MaskInstrument, MaskTarget, MaskMode } from "@/components/photo-tools/registry";
+
+/** Como a máscara é exibida no canvas: overlay colorido (vê o resultado) ou
+ *  grayscale isolado 0/1 (foca no vetor da máscara, igual Photoshop). */
+export type MaskView = "overlay" | "mask";
 
 export interface MaskPanelProps {
   target: MaskTarget; setTarget: (t: MaskTarget) => void;
@@ -34,69 +38,190 @@ export interface MaskPanelProps {
   onClear: () => void;
   onUndo: () => void;
   hasTargetMask: boolean;
+  // visualização da máscara no canvas
+  view: MaskView; setView: (v: MaskView) => void;
 }
 
+const INSTRUMENTS: { value: MaskInstrument; label: string; icon: typeof PenTool; tip: string }[] = [
+  { value: "pen", label: "Caneta", icon: PenTool, tip: "Vetor: cantos e curvas bézier" },
+  { value: "brush", label: "Pincel", icon: Paintbrush, tip: "Pinta à mão livre, ao vivo" },
+  { value: "wand", label: "Varinha", icon: Wand2, tip: "Seleção por cor (clique)" },
+  { value: "sam", label: "SAM", icon: Sparkles, tip: "Seleção por IA (clique)" },
+];
+
 export function MaskPanel(p: MaskPanelProps) {
-  const addLabel = p.mode === "add" ? "Adicionar à máscara" : "Subtrair da máscara";
+  const isAdd = p.mode === "add";
+  const live = p.instrument === "brush";
   const canApply = p.instrument === "pen" ? p.penHasMask : (p.instrument === "wand" || p.instrument === "sam") ? p.segHasMask : false;
   const maxDim = Math.max(p.imgDims.w, p.imgDims.h);
+  const activeTool = INSTRUMENTS.find((i) => i.value === p.instrument)!;
+
+  const Section = ({ icon: Icon, children }: { icon: typeof PenTool; children: React.ReactNode }) => (
+    <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-wider text-zinc-600">
+      <Icon size={10} /> {children}
+    </div>
+  );
 
   return (
-    <div className="space-y-2">
-      {/* Target + mode */}
-      <Segmented value={p.target} onChange={p.setTarget}
-        options={[{ value: "surface", label: "Superfície" }, { value: "occluder", label: "Oclusão" }]} />
-      <Segmented value={p.mode} onChange={p.setMode}
-        options={[
-          { value: "add", label: <span className="flex items-center justify-center gap-1"><Plus size={10} /> Add</span> },
-          { value: "sub", label: <span className="flex items-center justify-center gap-1"><Minus size={10} /> Sub</span> },
-        ]} />
+    <div className="space-y-2.5">
+      {/* ── MÁSCARA (alvo / camada) ───────────────────────────────────── */}
+      <div className="space-y-1.5">
+        <Section icon={Layers}>Máscara</Section>
+        <div className="grid grid-cols-2 gap-1">
+          {([
+            { value: "surface", label: "Superfície", color: "acc2" },
+            { value: "occluder", label: "Oclusão", color: "acc" },
+          ] as const).map((t) => {
+            const on = p.target === t.value;
+            return (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => p.setTarget(t.value)}
+                className={[
+                  "py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1.5",
+                  on
+                    ? t.color === "acc2" ? "bg-acc2 text-zinc-950 border-acc2" : "bg-acc text-zinc-950 border-acc"
+                    : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
+                ].join(" ")}
+              >
+                {t.label}
+                {on && (
+                  <span className="text-[8px] font-normal opacity-80">{p.hasTargetMask ? "● ativa" : "○ vazia"}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-zinc-600 leading-snug">
+          As ferramentas abaixo pintam <span className="text-zinc-400">nesta mesma máscara</span> (modelo Photoshop).
+        </p>
 
-      <div className="h-px bg-zinc-800/70" />
+        {/* Visualização da máscara no canvas */}
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            onClick={() => p.setView("overlay")}
+            title="Vê a região selecionada sobre a imagem"
+            className={["py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1",
+              p.view === "overlay" ? "bg-zinc-100 text-zinc-950 border-zinc-100" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}
+          >
+            <Eye size={11} /> Overlay
+          </button>
+          <button
+            type="button"
+            onClick={() => p.setView("mask")}
+            title="Máscara isolada em preto/branco (foca no vetor)"
+            className={["py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1",
+              p.view === "mask" ? "bg-zinc-100 text-zinc-950 border-zinc-100" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}
+          >
+            <Contrast size={11} /> Máscara
+          </button>
+        </div>
+      </div>
 
-      {/* Instrument */}
-      <Segmented value={p.instrument} onChange={p.setInstrument}
-        options={[{ value: "pen", label: "Pen" }, { value: "brush", label: "Brush" }, { value: "wand", label: "Varinha" }, { value: "sam", label: "SAM" }]} />
+      {/* ── FERRAMENTA (instrumento) ──────────────────────────────────── */}
+      <div className="space-y-1.5">
+        <Section icon={activeTool.icon}>Ferramenta · <span className="text-zinc-500 normal-case tracking-normal">{activeTool.tip}</span></Section>
+        <div className="grid grid-cols-4 gap-1">
+          {INSTRUMENTS.map((it) => {
+            const on = p.instrument === it.value;
+            const Icon = it.icon;
+            return (
+              <button
+                key={it.value}
+                type="button"
+                onClick={() => p.setInstrument(it.value)}
+                title={it.tip}
+                className={[
+                  "py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex flex-col items-center gap-0.5",
+                  on ? "bg-zinc-100 text-zinc-950 border-zinc-100" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
+                ].join(" ")}
+              >
+                <Icon size={13} />
+                {it.label}
+              </button>
+            );
+          })}
+        </div>
 
-      {/* Instrument-specific controls + hint */}
-      {p.instrument === "pen" && (<>
-        <p className="text-[10px] text-zinc-600">{p.penStatus || "clique = canto · clique-arraste = curva · clique no 1º ponto = fechar"}</p>
-        <Slider label="Suavizar borda" value={p.penFeather} onChange={p.setPenFeather} min={0} max={20} suffix="px" />
-      </>)}
-      {p.instrument === "brush" && (
-        <p className="text-[10px] text-zinc-600">Pinte na imagem — {p.mode === "add" ? "adiciona" : "remove"} da máscara a cada traço.</p>
-      )}
-      {p.instrument === "brush" && (
-        <Slider label="Tamanho do pincel" value={p.brushSize} onChange={p.setBrushSize}
-          min={Math.max(2, Math.round(maxDim * 0.005))} max={Math.max(20, Math.round(maxDim * 0.12))} suffix="px" />
-      )}
-      {p.instrument === "wand" && (<>
-        <p className="text-[10px] text-zinc-600 flex items-center gap-1">Clique na superfície pra selecionar a cor{p.segSwatch && <span className="inline-block w-3 h-3 rounded-sm border border-zinc-600 align-middle" style={{ background: `rgb(${p.segSwatch[0]},${p.segSwatch[1]},${p.segSwatch[2]})` }} />}</p>
-        <Slider label="Tolerância" value={p.segTol} onChange={p.setSegTol} min={1} max={80} />
-        <Slider label="Limpar borda" hint="tira franja" value={p.segContract} onChange={p.setSegContract} min={0} max={8} suffix="px" />
-        <button onClick={() => p.setSegMatte((v) => !v)}
-          className={["w-full py-1 rounded-lg text-[10px] font-medium border transition-colors",
-            p.segMatte ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>Refinar borda (matte) {p.segMatte ? "on" : "off"}</button>
-        <Slider label="Suavizar borda" value={p.segFeather} onChange={p.setSegFeather} min={0} max={20} suffix="px" />
-      </>)}
-      {p.instrument === "sam" && (<>
-        <p className="text-[10px] text-zinc-600">Clique na região (IA); direito exclui.</p>
-        <Slider label="Suavizar borda" value={p.segFeather} onChange={p.setSegFeather} min={0} max={20} suffix="px" />
-        {p.segStatus.status !== "ready" && <p className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 size={9} className="animate-spin" /> {p.segStatus.msg}</p>}
-      </>)}
+        {/* opções do instrumento ativo — agrupadas */}
+        <div className="rounded-lg bg-zinc-900/40 border border-zinc-800/60 p-2 space-y-1.5">
+          {p.instrument === "pen" && (<>
+            <p className="text-[10px] text-zinc-500">{p.penStatus || "clique = canto · arraste = curva · 1º ponto = fechar"}</p>
+            <Slider label="Suavizar borda" value={p.penFeather} onChange={p.setPenFeather} min={0} max={20} suffix="px" />
+          </>)}
+          {p.instrument === "brush" && (<>
+            <p className="text-[10px] text-zinc-500">Pinte na imagem — aplica {isAdd ? "somando" : "subtraindo"} a cada traço.</p>
+            <Slider label="Tamanho do pincel" value={p.brushSize} onChange={p.setBrushSize}
+              min={Math.max(2, Math.round(maxDim * 0.005))} max={Math.max(20, Math.round(maxDim * 0.12))} suffix="px" />
+          </>)}
+          {p.instrument === "wand" && (<>
+            <p className="text-[10px] text-zinc-500 flex items-center gap-1">
+              Clique na superfície pra pegar a cor
+              {p.segSwatch && <span className="inline-block w-3 h-3 rounded-sm border border-zinc-600 align-middle" style={{ background: `rgb(${p.segSwatch[0]},${p.segSwatch[1]},${p.segSwatch[2]})` }} />}
+            </p>
+            <Slider label="Tolerância" value={p.segTol} onChange={p.setSegTol} min={1} max={80} />
+            <Slider label="Limpar borda" hint="tira franja" value={p.segContract} onChange={p.setSegContract} min={0} max={8} suffix="px" />
+            <button onClick={() => p.setSegMatte((v) => !v)}
+              className={["w-full py-1 rounded-lg text-[10px] font-medium border transition-colors",
+                p.segMatte ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>
+              Refinar borda (matte) · {p.segMatte ? "on" : "off"}
+            </button>
+            <Slider label="Suavizar borda" value={p.segFeather} onChange={p.setSegFeather} min={0} max={20} suffix="px" />
+          </>)}
+          {p.instrument === "sam" && (<>
+            <p className="text-[10px] text-zinc-500">Clique na região (IA) · botão direito exclui.</p>
+            <Slider label="Suavizar borda" value={p.segFeather} onChange={p.setSegFeather} min={0} max={20} suffix="px" />
+            {p.segStatus.status !== "ready" && <p className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 size={9} className="animate-spin" /> {p.segStatus.msg}</p>}
+          </>)}
+        </div>
+      </div>
 
-      {/* Apply (pen / wand / sam — brush applies live) */}
-      {p.instrument !== "brush" && (
-        <button onClick={p.onApply} disabled={!canApply}
-          className={["w-full py-1.5 rounded-lg text-[10px] font-medium transition-colors flex items-center justify-center gap-1",
-            canApply ? "bg-acc2 text-zinc-950 hover:bg-acc2/90" : "bg-zinc-800 text-zinc-500"].join(" ")}>
-          {p.mode === "add" ? <Plus size={11} /> : <Minus size={11} />} {addLabel}
+      {/* ── MODO (somar / subtrair) — vale pra todas as ferramentas ────── */}
+      <div className="space-y-1.5">
+        <Section icon={Radio}>Modo</Section>
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            onClick={() => p.setMode("add")}
+            className={["py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1",
+              isAdd ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}
+          >
+            <Plus size={11} /> Adicionar
+          </button>
+          <button
+            type="button"
+            onClick={() => p.setMode("sub")}
+            className={["py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1",
+              !isAdd ? "bg-rose-500 text-white border-rose-500" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}
+          >
+            <Minus size={11} /> Subtrair
+          </button>
+        </div>
+      </div>
+
+      {/* Aplicar (pen/wand/sam) — brush é ao vivo */}
+      {live ? (
+        <p className="text-[10px] text-acc2 flex items-center justify-center gap-1 py-1">
+          <Radio size={10} className="animate-pulse" /> Pincel aplica ao vivo
+        </p>
+      ) : (
+        <button
+          onClick={p.onApply}
+          disabled={!canApply}
+          className={["w-full py-2 rounded-lg text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5",
+            !canApply ? "bg-zinc-800 text-zinc-500"
+              : isAdd ? "bg-acc2 text-zinc-950 hover:bg-acc2/90" : "bg-rose-500 text-white hover:bg-rose-500/90"].join(" ")}
+        >
+          {isAdd ? <Plus size={12} /> : <Minus size={12} />}
+          {isAdd ? "Adicionar à máscara" : "Subtrair da máscara"}
         </button>
       )}
 
       <div className="h-px bg-zinc-800/70" />
 
-      {/* Mask actions */}
+      {/* ── AÇÕES da máscara ──────────────────────────────────────────── */}
       <div className="grid grid-cols-3 gap-1.5">
         <button onClick={p.onUndo} className="py-1.5 rounded-lg text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors flex items-center justify-center gap-1"><Undo2 size={11} /> Desfazer</button>
         <button onClick={p.onInvert} disabled={!p.hasTargetMask} className="py-1.5 rounded-lg text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40 transition-colors flex items-center justify-center gap-1"><FlipHorizontal2 size={11} /> Inverter</button>

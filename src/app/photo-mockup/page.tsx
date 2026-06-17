@@ -14,7 +14,7 @@ import BrushCanvas, { type BrushApi } from "@/components/BrushCanvas";
 import { ToolRail } from "@/components/photo-tools/ToolRail";
 import { PHOTO_TOOLS, PHOTO_TOOL_KEYS, type PhotoTool, type MaskInstrument, type MaskTarget, type MaskMode } from "@/components/photo-tools/registry";
 import { CornersPanel } from "@/components/photo-tools/panels/CornersPanel";
-import { MaskPanel } from "@/components/photo-tools/panels/MaskPanel";
+import { MaskPanel, type MaskView } from "@/components/photo-tools/panels/MaskPanel";
 import { ReflexoPanel } from "@/components/photo-tools/panels/ReflexoPanel";
 import { SceneInfo } from "@/components/photo-tools/panels/SceneInfo";
 import { RenderPanel } from "@/components/photo-tools/panels/RenderPanel";
@@ -418,6 +418,7 @@ function PhotoMockupPageInner() {
   // Mask editor (Photoshop model): one persistent mask per target; instruments
   // add/subtract into it. Undo keeps a per-target snapshot stack.
   const [maskTarget, setMaskTarget] = useState<MaskTarget>("surface");
+  const [maskView, setMaskView] = useState<MaskView>("overlay"); // overlay colorido vs máscara grayscale isolada
   const [maskMode, setMaskMode] = useState<MaskMode>("add");
   const maskHistory = useRef<{ surface: (string | null)[]; occluder: (string | null)[] }>({ surface: [], occluder: [] });
 
@@ -1338,14 +1339,28 @@ function PhotoMockupPageInner() {
                                 bend={bend} onBendChange={setBend} />
                             </div>
                           )}
-                          {/* Mask editor — current target mask shown faintly under the active
-                              instrument so you SEE what's accumulated (Photoshop-style). */}
-                          {tool === "mask" && maskUrlFor(maskTarget) && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={maskUrlFor(maskTarget)!} alt="" aria-hidden draggable={false}
-                              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "fill",
-                                pointerEvents: "none", opacity: 0.4, mixBlendMode: "screen",
-                                filter: maskTarget === "surface" ? "none" : "hue-rotate(150deg)" }} />
+                          {/* Mask preview — centralizado em dois modos (Photoshop):
+                              · overlay: região colorida sobre a imagem (vê o resultado)
+                              · mask: grayscale 0/1 isolado em fundo preto (foca no vetor) */}
+                          {tool === "mask" && maskView === "mask" && (
+                            <>
+                              <div aria-hidden style={{ position: "absolute", inset: 0, background: "#000", pointerEvents: "none" }} />
+                              {maskUrlFor(maskTarget) && (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={maskUrlFor(maskTarget)!} alt="" aria-hidden draggable={false}
+                                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "fill", pointerEvents: "none" }} />
+                              )}
+                            </>
+                          )}
+                          {tool === "mask" && maskView === "overlay" && maskUrlFor(maskTarget) && (
+                            <div aria-hidden
+                              style={{
+                                position: "absolute", inset: 0, pointerEvents: "none", opacity: 0.5,
+                                backgroundColor: maskTarget === "surface" ? "#3df27e" : "#22d3ee",
+                                WebkitMaskImage: `url(${maskUrlFor(maskTarget)!})`, maskImage: `url(${maskUrlFor(maskTarget)!})`,
+                                WebkitMaskSize: "100% 100%", maskSize: "100% 100%",
+                                WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat",
+                              }} />
                           )}
                           {tool === "mask" && (maskMethod === "wand" || maskMethod === "sam") && (
                             <div className="absolute inset-0">
@@ -1503,6 +1518,7 @@ function PhotoMockupPageInner() {
                               onClear={clearMaskTarget}
                               onUndo={undoMaskTarget}
                               hasTargetMask={!!maskUrlFor(maskTarget)}
+                              view={maskView} setView={setMaskView}
                             />
                           )}
                           {tool === "reflect" && (
