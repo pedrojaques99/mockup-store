@@ -5,7 +5,14 @@ import { ZoomIn, Loader2, Sparkles } from "lucide-react";
 import { Segmented } from "@/components/ui/Segmented";
 
 export type UpscaleTarget = "photo" | "art";
-export type UpscaleMode = "bicubic" | "ai";
+export type UpscaleMode = "bicubic" | "pruna" | "google" | "ai";
+
+const METHOD_META: Record<UpscaleMode, { label: string; hint: string; factorBased: boolean }> = {
+  bicubic: { label: "Rápido",  hint: "Reamostragem local — grátis, sem inventar detalhe.", factorBased: true },
+  pruna:   { label: "Turbo",   hint: "Upscale por IA, rápido — até 128 MP.", factorBased: true },
+  google:  { label: "Nítido",  hint: "IA com mais detalhe — 2× ou 4×.", factorBased: true },
+  ai:      { label: "Visant",  hint: "Máxima qualidade — usa créditos da conta.", factorBased: false },
+};
 
 export function UpscalePanel({
   target,
@@ -58,16 +65,13 @@ export function UpscalePanel({
         <Segmented<UpscaleMode>
           value={mode}
           onChange={setMode}
-          options={[
-            { value: "bicubic", label: "Bicubic" },
-            { value: "ai", label: "IA · crédito" },
-          ]}
+          options={(["bicubic", "pruna", "google", "ai"] as UpscaleMode[]).map((m) => ({ value: m, label: METHOD_META[m].label }))}
         />
       </div>
 
       <div className="space-y-0.5">
-        <label className="text-[10px] text-zinc-400">{mode === "bicubic" ? "Escala" : "Tamanho"}</label>
-        {mode === "bicubic" ? (
+        <label className="text-[10px] text-zinc-400">{METHOD_META[mode].factorBased ? "Escala" : "Tamanho"}</label>
+        {METHOD_META[mode].factorBased ? (
           <Segmented<string>
             value={String(factor)}
             onChange={(v) => setFactor(Number(v))}
@@ -92,7 +96,8 @@ export function UpscalePanel({
       {currentDims && (
         <p className="text-[10px] text-zinc-600">
           Atual: {currentDims.w}×{currentDims.h}px
-          {mode === "bicubic" && ` → ${currentDims.w * factor}×${currentDims.h * factor}px`}
+          {METHOD_META[mode].factorBased && mode !== "google" && ` → ${currentDims.w * factor}×${currentDims.h * factor}px`}
+          {mode === "google" && " → resolução máxima do método"}
         </p>
       )}
 
@@ -104,14 +109,14 @@ export function UpscalePanel({
       >
         {applying ? (
           <><Loader2 size={12} className="animate-spin" /> Aumentando…</>
-        ) : mode === "ai" ? (
-          <><Sparkles size={12} /> Aumentar (IA)</>
-        ) : (
+        ) : mode === "bicubic" ? (
           <><ZoomIn size={12} /> Aumentar</>
+        ) : (
+          <><Sparkles size={12} /> Aumentar ({METHOD_META[mode].label})</>
         )}
       </button>
 
-      {mode === "ai" && <p className="text-[10px] text-acc/80">Usa créditos da Visant (Gemini).</p>}
+      <p className="text-[10px] text-acc/80">{METHOD_META[mode].hint}</p>
       {err && <p className="text-[10px] text-red-400">{err}</p>}
     </div>
   );

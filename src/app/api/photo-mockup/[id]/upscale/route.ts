@@ -15,11 +15,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "base64 required" }, { status: 400 });
   }
 
-  const mode: "bicubic" | "ai" = body.mode === "ai" ? "ai" : "bicubic";
+  const ALLOWED = ["bicubic", "ai", "pruna", "google"] as const;
+  const mode = (ALLOWED as readonly string[]).includes(body.mode) ? body.mode : "bicubic";
   const raw = body.base64.replace(/^data:image\/\w+;base64,/, "");
   const buf = Buffer.from(raw, "base64");
 
   try {
+    if (mode === "pruna" || mode === "google") {
+      const { replicateUpscale, hasReplicate } = await import("@/lib/replicate-upscale");
+      if (!hasReplicate()) {
+        return NextResponse.json({ error: "REPLICATE_API_TOKEN ausente no servidor" }, { status: 400 });
+      }
+      const factor = Math.max(2, Math.min(4, Number(body.factor) || 2));
+      const r = await replicateUpscale({ model: mode, imageDataUrl: `data:image/png;base64,${raw}`, factor });
+      const outBuf = Buffer.from(r.base64.replace(/^data:image\/\w+;base64,/, ""), "base64");
+      const m2 = await sharp(outBuf).metadata();
+      return NextResponse.json({ base64: r.base64, width: m2.width, height: m2.height, mode });
+    }
+
     if (mode === "bicubic") {
       const factor = Math.max(1, Math.min(4, Number(body.factor) || 2));
       const meta = await sharp(buf).metadata();

@@ -141,7 +141,7 @@ function parseJson(raw: string): any {
  * - Wall surfaces at image edge: trim right to avoid watermarks/borders
  */
 function postProcessQuad(quad: QuadPoints, surfaceType: string, w: number, h: number): QuadPoints {
-  let q = { ...quad };
+  const q = { ...quad };
 
   // For walls detected at full image width, trim 14% from right edge (watermarks, borders, trees)
   if (surfaceType === "wall" || surfaceType === "billboard") {

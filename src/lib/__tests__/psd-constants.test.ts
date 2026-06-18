@@ -9,6 +9,7 @@ describe("SO_TARGET regex", () => {
     "Place Here",
     "Smart Object Artwork",
     "Design Here",
+    "Your Image",          // your.(design|image|art|logo) — placeholder de SO, é alvo editável
     "Edite aqui",
     "(Edite)",
     "(Editar)",
@@ -25,7 +26,6 @@ describe("SO_TARGET regex", () => {
     "[BOXY] Watermark",
     "Color Balance 1",
     "Layer 42",
-    "Your Image",
   ];
 
   for (const name of shouldMatch) {

@@ -22,6 +22,8 @@ export interface RailTool<T extends string = string> {
   icon: LucideIcon;
   /** Consecutive tools sharing a group render together; a divider separates groups. */
   group?: string;
+  /** Atalho de teclado (mostrado no tooltip). */
+  shortcut?: string;
 }
 
 export function ToolRail<T extends string>({
@@ -70,7 +72,7 @@ export function ToolRail<T extends string>({
               const isActive = t.id === active;
               const Icon = t.icon;
               return (
-                <Tooltip key={t.id} label={t.label}>
+                <Tooltip key={t.id} label={t.shortcut ? `${t.label} · ${t.shortcut}` : t.label}>
                   <button
                     type="button"
                     aria-label={t.label}

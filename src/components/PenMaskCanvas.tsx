@@ -53,6 +53,7 @@ export default function PenMaskCanvas({
   const imgRef = useRef<HTMLImageElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const drag = useRef<Drag | null>(null);
+  const hover = useRef<Pt | null>(null); // posição do cursor (img) p/ a linha-guia
   const [anchors, setAnchors] = useState<Anchor[]>([]);
   const [closed, setClosed] = useState(false);
 
@@ -71,6 +72,18 @@ export default function PenMaskCanvas({
     ctx.clearRect(0, 0, w, h);
     const s = w / imageW;
     if (anchors.length === 0) return;
+    // Linha-guia tracejada — preview do próximo segmento (último anchor → cursor).
+    if (!closed && hover.current && !drag.current) {
+      const last = anchors[anchors.length - 1];
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(34,211,238,0.55)";
+      ctx.beginPath();
+      ctx.moveTo(last.x * s, last.y * s);
+      ctx.lineTo(hover.current.x * s, hover.current.y * s);
+      ctx.stroke();
+      ctx.restore();
+    }
     tracePath(ctx, anchors, closed, s);
     if (closed) { ctx.fillStyle = "rgba(34,211,238,0.18)"; ctx.fill(); }
     ctx.lineWidth = 2; ctx.strokeStyle = "#22d3ee"; ctx.stroke();
@@ -130,7 +143,9 @@ export default function PenMaskCanvas({
     if (!closed) setAnchors((prev) => { drag.current = { kind: "new", i: prev.length }; return [...prev, { x: p.x, y: p.y }]; });
   };
   const onPointerMove = (e: React.PointerEvent) => {
-    const d = drag.current; if (!d) return;
+    hover.current = toImg(e);
+    const d = drag.current;
+    if (!d) { draw(); return; } // sem arrastar → só atualiza a linha-guia
     const p = toImg(e);
     setAnchors((prev) => prev.map((a, i) => {
       if (i !== d.i) return a;
@@ -169,6 +184,7 @@ export default function PenMaskCanvas({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onPointerLeave={() => { hover.current = null; draw(); }}
         onDoubleClick={() => { if (!closed && anchors.length >= 2) setClosed(true); }}
       />
     </div>

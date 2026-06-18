@@ -160,9 +160,15 @@ export default function SegmentCanvas({
     if (mode === "sam") {
       const sx = w / imageW, sy = h / imageH;
       for (const p of points) {
-        ctx.beginPath(); ctx.arc(p.x * sx, p.y * sy, 6, 0, Math.PI * 2);
-        ctx.fillStyle = p.label === 1 ? "#3df27e" : "#ef4444"; ctx.fill();
+        const cx = p.x * sx, cy = p.y * sy, inc = p.label === 1;
+        ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+        ctx.fillStyle = inc ? "#3df27e" : "#ef4444"; ctx.fill();
         ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; ctx.stroke();
+        // Glifo +/− (incluir / excluir)
+        ctx.strokeStyle = "#0a0a0a"; ctx.lineWidth = 1.6; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(cx - 3, cy); ctx.lineTo(cx + 3, cy);
+        if (inc) { ctx.moveTo(cx, cy - 3); ctx.lineTo(cx, cy + 3); }
+        ctx.stroke();
       }
     }
   }, [mode, mask, points, imageW, imageH, ver]);
@@ -230,6 +236,24 @@ export default function SegmentCanvas({
   };
   const onImageContext = (e: React.MouseEvent) => { e.preventDefault(); };
 
+  // Anel de amostragem (varinha/smart) — segue o cursor mostrando a cor sob o ponteiro.
+  const ringRef = useRef<HTMLDivElement>(null);
+  const updateWandRing = (e: React.PointerEvent) => {
+    if (mode !== "smart" || !imgRef.current || !ringRef.current) return;
+    const img = imgRef.current, ring = ringRef.current;
+    const r = img.getBoundingClientRect();
+    if (!r.width) return;
+    ring.style.left = `${((e.clientX - r.left) / r.width) * img.offsetWidth}px`;
+    ring.style.top = `${((e.clientY - r.top) / r.height) * img.offsetHeight}px`;
+    ensureSample();
+    const px = samplePixels.current;
+    if (px) {
+      const { x, y } = imgCoords(e); const j = (y * imageW + x) * 4;
+      ring.style.background = `rgb(${px[j]},${px[j + 1]},${px[j + 2]})`;
+    }
+  };
+  const showWandRing = (v: boolean) => { if (ringRef.current) ringRef.current.style.display = v && mode === "smart" ? "block" : "none"; };
+
   // Ctrl+Z removes the last SAM point (the page yields Ctrl+Z while in this tool).
   useEffect(() => {
     if (mode !== "sam") return;
@@ -290,11 +314,22 @@ export default function SegmentCanvas({
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={imgRef} src={imageUrl} alt="scene" draggable={false} className="w-full block touch-none"
-        style={{ cursor: "crosshair", ...(transparentImg ? { opacity: 0 } : null) }}
-        onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+        style={{ cursor: mode === "smart" ? "none" : "crosshair", ...(transparentImg ? { opacity: 0 } : null) }}
+        onPointerDown={onPointerDown}
+        onPointerMove={(e) => { updateWandRing(e); onPointerMove(e); }}
+        onPointerEnter={() => showWandRing(true)}
+        onPointerLeave={() => showWandRing(false)}
+        onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp} onContextMenu={onImageContext}
       />
       <canvas ref={overlayRef} className="absolute inset-0 pointer-events-none" />
+      {/* Anel de amostragem da varinha (cor sob o cursor) */}
+      <div ref={ringRef} aria-hidden
+        style={{
+          position: "absolute", display: "none", left: 0, top: 0, width: 18, height: 18,
+          transform: "translate(-50%, -50%)", borderRadius: "9999px", border: "2px solid #fff",
+          boxShadow: "0 0 0 1px rgba(0,0,0,0.6)", pointerEvents: "none",
+        }} />
       {status !== "ready" && mode === "sam" && (
         <div className="absolute inset-0 bg-zinc-950/70 backdrop-blur-sm flex flex-col items-center justify-center gap-2 text-center px-6">
           {status === "error"

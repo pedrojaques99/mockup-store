@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
 
 const MIN_SCALE = 0.4; // 40% min
-const MAX_SCALE = 3; // 300% max
+const MAX_SCALE = 32; // até 3200% — pixel peeping sem trava prática
 const WHEEL_STEP = 0.0015; // per deltaY unit
 const BTN_STEP = 0.6;      // per button press
 
@@ -21,6 +21,7 @@ export default function ZoomPanViewer({
   className = "",
   requireSpaceToPan = false,
   dims,
+  minimapSrc,
 }: {
   children: React.ReactNode;
   className?: string;
@@ -29,6 +30,8 @@ export default function ZoomPanViewer({
   requireSpaceToPan?: boolean;
   /** Tamanho da imagem em px — exibido na HUD junto do zoom. */
   dims?: { w: number; h: number };
+  /** Thumbnail pro mini-map (navegador) que aparece com zoom > 150%. */
+  minimapSrc?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -217,6 +220,27 @@ export default function ZoomPanViewer({
           <Maximize size={12} />
         </button>
       </div>
+
+      {/* Mini-map (navegador) — aparece com zoom > 150%; retângulo = região visível. */}
+      {minimapSrc && scale > 1.5 && (() => {
+        const content = contentRef.current, cont = containerRef.current;
+        if (!content || !cont) return null;
+        const W0 = content.offsetWidth, H0 = content.offsetHeight;
+        const cw = cont.clientWidth, ch = cont.clientHeight;
+        if (!W0 || !H0) return null;
+        const leftPx = cw / 2 + tx - (W0 * scale) / 2;
+        const topPx = ch / 2 + ty - (H0 * scale) / 2;
+        const fx0 = clamp((0 - leftPx) / (W0 * scale), 0, 1), fx1 = clamp((cw - leftPx) / (W0 * scale), 0, 1);
+        const fy0 = clamp((0 - topPx) / (H0 * scale), 0, 1), fy1 = clamp((ch - topPx) / (H0 * scale), 0, 1);
+        const mmW = 104, mmH = Math.round(mmW * (H0 / W0));
+        return (
+          <div className="absolute bottom-6 right-6 z-20 rounded-lg overflow-hidden border border-zinc-700/60 shadow-lg" style={{ width: mmW, height: mmH }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={minimapSrc} alt="" aria-hidden draggable={false} className="w-full h-full object-contain opacity-80" />
+            <div style={{ position: "absolute", left: `${fx0 * 100}%`, top: `${fy0 * 100}%`, width: `${(fx1 - fx0) * 100}%`, height: `${(fy1 - fy0) * 100}%`, border: "1.5px solid #3df27e", boxShadow: "0 0 0 9999px rgba(0,0,0,0.4)" }} />
+          </div>
+        );
+      })()}
     </div>
   );
 }

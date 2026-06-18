@@ -34,6 +34,32 @@ export default function BrushCanvas({
   const painting = useRef(false);
   const erasing = useRef(false);
   const dirty = useRef(false);
+  // Anel do cursor — mostra o tamanho real do pincel (em px de layout, escala com o zoom).
+  const ringRef = useRef<HTMLDivElement>(null);
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
+
+  const updateRing = useCallback((clientX: number, clientY: number) => {
+    const img = imgRef.current, ring = ringRef.current;
+    if (!img || !ring) return;
+    const r = img.getBoundingClientRect();
+    const lw = img.offsetWidth, lh = img.offsetHeight;
+    if (!r.width || !r.height) return;
+    const lx = ((clientX - r.left) / r.width) * lw;
+    const ly = ((clientY - r.top) / r.height) * lh;
+    const d = brush * (lw / imageW) * 2; // diâmetro em px de layout
+    ring.style.left = `${lx}px`;
+    ring.style.top = `${ly}px`;
+    ring.style.width = `${d}px`;
+    ring.style.height = `${d}px`;
+    lastPos.current = { x: clientX, y: clientY };
+  }, [brush, imageW]);
+
+  // Mudou o tamanho/modo no slider → atualiza o anel na última posição (sem precisar mexer).
+  useEffect(() => {
+    if (lastPos.current) updateRing(lastPos.current.x, lastPos.current.y);
+    const ring = ringRef.current;
+    if (ring) ring.style.borderColor = eraseMode ? "rgba(248,113,113,0.95)" : `rgb(${tint})`;
+  }, [brush, eraseMode, tint, updateRing]);
 
   useEffect(() => {
     const c = document.createElement("canvas");
@@ -85,7 +111,8 @@ export default function BrushCanvas({
     erasing.current = eraseMode || e.button === 2;
     paintAt(e.clientX, e.clientY);
   };
-  const onMove = (e: React.MouseEvent) => { if (painting.current) paintAt(e.clientX, e.clientY); };
+  const onMove = (e: React.MouseEvent) => { updateRing(e.clientX, e.clientY); if (painting.current) paintAt(e.clientX, e.clientY); };
+  const showRing = (v: boolean) => { if (ringRef.current) ringRef.current.style.display = v ? "block" : "none"; };
   const emit = () => {
     const mask = maskRef.current!;
     if (patchMode) {
@@ -117,10 +144,21 @@ export default function BrushCanvas({
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img ref={imgRef} src={imageUrl} alt="scene" draggable={false} className="w-full block"
         onLoad={redraw}
-        onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+        onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
+        onMouseEnter={() => showRing(true)}
+        onMouseLeave={() => { showRing(false); onUp(); }}
         onContextMenu={(e) => e.preventDefault()}
-        style={{ cursor: "crosshair", ...(transparentImg ? { opacity: 0 } : null) }} />
+        style={{ cursor: "none", ...(transparentImg ? { opacity: 0 } : null) }} />
       <canvas ref={overlayRef} className="absolute inset-0 pointer-events-none" />
+      {/* Anel do cursor (tamanho real do pincel) */}
+      <div ref={ringRef} aria-hidden
+        style={{
+          position: "absolute", display: "none", left: 0, top: 0, width: 0, height: 0,
+          transform: "translate(-50%, -50%)", borderRadius: "9999px",
+          border: `1.5px solid ${eraseMode ? "rgba(248,113,113,0.95)" : `rgb(${tint})`}`,
+          boxShadow: "0 0 0 1px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(0,0,0,0.35)",
+          pointerEvents: "none", willChange: "left, top, width, height",
+        }} />
     </div>
   );
 }

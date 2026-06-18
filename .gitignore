@@ -53,3 +53,7 @@ next-env.d.ts
 
 # bun lockfile — project uses npm (see AGENTS.md)
 bun.lock
+
+# dev logs
+*.log
+.next-dev-*.log

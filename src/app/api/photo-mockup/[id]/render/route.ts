@@ -59,7 +59,7 @@ export async function POST(
   const { ext } = JSON.parse(await readFile(metaPath, "utf-8"));
   const analysis = JSON.parse(await readFile(analysisPath, "utf-8"));
 
-  const { createNodeAdapter, renderScene } = await import("@visant/psd-engine");
+  const { createNodeAdapter, renderScene, perspectiveWarp } = await import("@visant/psd-engine");
   const { createCanvas, loadImage, toBuffer } = await createNodeAdapter();
 
   const rawPhotoPath = join(dir, `photo.${ext}`);
@@ -305,6 +305,24 @@ export async function POST(
         }
         if (!buf) continue;
 
+        // Recorte da textura (espaço próprio, pré-transform). Mantém a caixa cheia:
+        // extrai o crop e re-posiciona num canvas do tamanho natural com o resto
+        // transparente → espelha o clip-path:inset do preview (posição/escala intactas).
+        const cr = ov.crop;
+        if (cr && (cr.x > 0.001 || cr.y > 0.001 || cr.w < 0.999 || cr.h < 0.999)) {
+          const meta = await sharp(buf).metadata();
+          const nw = meta.width ?? 0, nh = meta.height ?? 0;
+          if (nw && nh) {
+            const cx = Math.max(0, Math.min(nw - 1, Math.round(cr.x * nw)));
+            const cy = Math.max(0, Math.min(nh - 1, Math.round(cr.y * nh)));
+            const cw = Math.max(1, Math.min(nw - cx, Math.round(cr.w * nw)));
+            const ch = Math.max(1, Math.min(nh - cy, Math.round(cr.h * nh)));
+            const cropped = await sharp(buf).ensureAlpha().extract({ left: cx, top: cy, width: cw, height: ch }).png().toBuffer();
+            buf = await sharp({ create: { width: nw, height: nh, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+              .composite([{ input: cropped, left: cx, top: cy }]).png().toBuffer();
+          }
+        }
+
         const scale = typeof ov.scale === "number" ? Math.max(0.05, Math.min(5, ov.scale)) : 1;
         const rotation = typeof ov.rotation === "number" ? ov.rotation : 0;
         const opacity = typeof ov.opacity === "number" ? Math.max(0, Math.min(1, ov.opacity)) : 1;
@@ -312,6 +330,30 @@ export async function POST(
         const px = ov.position && typeof ov.position.x === "number" ? ov.position.x : 0.5;
         const py = ov.position && typeof ov.position.y === "number" ? ov.position.y : 0.5;
         const blend = LUZ_SHARP_BLEND[ov.blendMode as string] ?? "over";
+
+        // ── Warp de perspectiva (4 cantos) — MESMA homografia DLT da arte
+        //    (engine perspectiveWarp). Substitui o caminho afim. Contraste+opacidade
+        //    aplicados na textura natural (pós-crop), depois warp pros cantos da cena. ──
+        const wq = ov.warpQuad;
+        if (wq && wq.tl && wq.tr && wq.br && wq.bl) {
+          const { data: td, info: ti } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+          const ca = contrast / 100, cb = 128 * (1 - ca);
+          for (let i = 0; i < td.length; i += 4) {
+            td[i] = clamp255(ca * td[i] + cb);
+            td[i + 1] = clamp255(ca * td[i + 1] + cb);
+            td[i + 2] = clamp255(ca * td[i + 2] + cb);
+            td[i + 3] = Math.round(td[i + 3] * opacity);
+          }
+          const texPng = await sharp(td, { raw: { width: ti.width, height: ti.height, channels: 4 } }).png().toBuffer();
+          const src = await loadImage(texPng);
+          const cv = createCanvas(W, H);
+          const cx2 = cv.getContext("2d");
+          const corners = [wq.tl, wq.tr, wq.br, wq.bl].map((p) => ({ x: p.x * W, y: p.y * H })); // TL,TR,BR,BL em px
+          perspectiveWarp(cx2 as unknown as Parameters<typeof perspectiveWarp>[0], src, ti.width, ti.height, corners);
+          const placed = toBuffer(cv as any, "image/png") as Buffer;
+          png = await sharp(png).composite([{ input: placed, blend }]).png().toBuffer();
+          continue;
+        }
 
         // rotate (bbox cresce) → resize p/ largura relativa ao canvas → raw p/ aplicar
         // contraste (só RGB) + opacidade (alpha) num passe.

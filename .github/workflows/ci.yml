@@ -1,0 +1,44 @@
+name: CI
+
+# Gate de qualidade — todo push/PR passa por tsc + lint + test + build.
+# Falhou aqui, não entra na main.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+# Cancela runs antigas do mesmo branch quando chega push novo.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # .npmrc já tem legacy-peer-deps=true (conflito ag-psd 30 vs peer ^28, aceito de propósito).
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"

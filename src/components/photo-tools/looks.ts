@@ -1,5 +1,13 @@
 /** SSoT for look presets + per-surface AI-blend defaults (shared page ↔ panels). */
 
+/** Filtro CSS aproximado de um look — pro PREVIEW ao passar o mouse (sem re-render). */
+export function lookCssFilter(p: { warmth: number; saturation: number; brightness: number }): string {
+  const parts = [`saturate(${p.saturation}%)`, `brightness(${p.brightness}%)`];
+  if (p.warmth > 0) parts.push(`sepia(${(p.warmth / 100 * 0.35).toFixed(2)})`);
+  else if (p.warmth < 0) parts.push(`hue-rotate(${Math.round(p.warmth / 100 * 18)}deg)`, "saturate(108%)");
+  return parts.join(" ");
+}
+
 export const LOOK_PRESETS = [
   { name: "Natural", grain: 0,  warmth: 0,   saturation: 100, brightness: 100 },
   { name: "Quente",  grain: 5,  warmth: 30,  saturation: 110, brightness: 102 },

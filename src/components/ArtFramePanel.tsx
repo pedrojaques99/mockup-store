@@ -29,6 +29,8 @@ export interface ArtFramePanelProps {
   previewHeightClass?: string;
   /** Compact mode shrinks the type scale for the floating panel. */
   compact?: boolean;
+  /** Arte tem transparência (PNG/logo) → mostra o aviso pra escolher um fundo. */
+  artHasAlpha?: boolean;
 }
 
 export default function ArtFramePanel({
@@ -42,6 +44,7 @@ export default function ArtFramePanel({
   onClear,
   previewHeightClass = "h-44",
   compact = false,
+  artHasAlpha = false,
 }: ArtFramePanelProps) {
   const [cropPos, setCropPos] = useState({ x: 0, y: 0 });
   const [cropZoom, setCropZoom] = useState(1);
@@ -125,7 +128,7 @@ export default function ArtFramePanel({
           {artDims && (
             <p className={`${dimsSize} text-neutral-500`}>
               {artDims.width}×{artDims.height}px
-              {soWidth && soHeight ? ` · SO ${Math.round(soWidth)}×${Math.round(soHeight)}` : ""}
+              {soWidth && soHeight ? ` · superfície ${Math.round(soWidth)}×${Math.round(soHeight)}` : ""}
             </p>
           )}
         </div>
@@ -168,6 +171,40 @@ export default function ArtFramePanel({
           </button>
         )}
       </div>
+
+      {/* Fundo da arte — pra logo/PNG transparente: preenche atrás (tira o rosa). */}
+      <div className="flex items-center gap-2 pt-1.5 mt-0.5 border-t border-neutral-800/60">
+        <span className="text-[10px] text-neutral-500 shrink-0">Fundo</span>
+        <div className="flex items-center gap-1.5">
+          {([
+            { v: null, title: "Transparente (mostra o placeholder)", style: { backgroundImage: "linear-gradient(45deg,#555 25%,transparent 25%,transparent 75%,#555 75%),linear-gradient(45deg,#555 25%,#222 25%,#222 75%,#555 75%)", backgroundSize: "6px 6px", backgroundPosition: "0 0,3px 3px" } as React.CSSProperties },
+            { v: "#ffffff", title: "Branco", style: { background: "#fff" } },
+            { v: "#000000", title: "Preto", style: { background: "#000" } },
+          ] as const).map((o) => {
+            const on = (frame.bg ?? null) === o.v;
+            return (
+              <button key={String(o.v)} type="button" title={o.title}
+                onClick={() => onFrameChange((f) => ({ ...f, bg: o.v }))}
+                className={`w-5 h-5 rounded-full border transition-all ${on ? "ring-2 ring-acc2 border-acc2" : "border-neutral-700 hover:border-neutral-500"}`}
+                style={o.style} />
+            );
+          })}
+          {/* Cor personalizada */}
+          <label className={`w-5 h-5 rounded-full border grid place-items-center cursor-pointer overflow-hidden transition-all ${frame.bg && !["#ffffff", "#000000"].includes(frame.bg.toLowerCase()) ? "ring-2 ring-acc2 border-acc2" : "border-neutral-700 hover:border-neutral-500"}`}
+            title="Cor personalizada"
+            style={{ background: frame.bg && !["#ffffff", "#000000"].includes(frame.bg.toLowerCase()) ? frame.bg : "conic-gradient(red,orange,yellow,lime,cyan,blue,magenta,red)" }}>
+            <input type="color" value={frame.bg ?? "#ffffff"} onChange={(e) => onFrameChange((f) => ({ ...f, bg: e.target.value }))}
+              className="opacity-0 w-full h-full cursor-pointer" />
+          </label>
+        </div>
+      </div>
+      {artHasAlpha && (frame.bg ?? null) === null && (
+        <button type="button"
+          onClick={() => onFrameChange((f) => ({ ...f, bg: "#ffffff" }))}
+          className="w-full mt-1 flex items-center justify-center gap-1.5 text-[10px] text-acc bg-acc/10 hover:bg-acc/20 border border-acc/30 rounded-lg py-1.5 transition-colors">
+          <AlertTriangle className="w-3 h-3 shrink-0" /> PNG transparente — clique pra pôr fundo branco e tirar o rosa
+        </button>
+      )}
     </div>
   );
 }

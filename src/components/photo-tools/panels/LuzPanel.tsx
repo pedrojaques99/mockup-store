@@ -6,10 +6,10 @@
  * Estado vive no page.tsx (SSoT); este painel só lê e dispara updates.
  */
 import { useRef } from "react";
-import { Image as ImageIcon, Eye, RotateCcw, X } from "lucide-react";
+import { Image as ImageIcon, Eye, RotateCcw, X, Crop, Frame } from "lucide-react";
 import { Slider } from "@/components/ui/Slider";
 import { Segmented } from "@/components/ui/Segmented";
-import { LUZ_BLEND_OPTIONS, type LuzLayer, type LuzLayerId } from "@/types/luz";
+import { LUZ_BLEND_OPTIONS, LUZ_DEFAULTS, isFullCrop, type LuzLayer, type LuzLayerId } from "@/types/luz";
 
 export function LuzPanel({
   layers,
@@ -21,6 +21,12 @@ export function LuzPanel({
   onUploadFile,
   onClear,
   onReset,
+  cropMode,
+  setCropMode,
+  onResetCrop,
+  hasWarp,
+  warpActive,
+  onResetWarp,
 }: {
   layers: LuzLayer[];
   active: LuzLayerId;
@@ -31,9 +37,16 @@ export function LuzPanel({
   onUploadFile: (f: File) => void;
   onClear: () => void;
   onReset: () => void;
+  cropMode: boolean;
+  setCropMode: (v: boolean) => void;
+  onResetCrop: () => void;
+  hasWarp: boolean;
+  warpActive: boolean;
+  onResetWarp: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const layer = layers.find((l) => l.id === active)!;
+  const oDef = LUZ_DEFAULTS.find((d) => d.id === active)?.opacity ?? 0.5;
 
   return (
     <div className="space-y-2 bg-zinc-800/40 rounded-xl border border-zinc-700/40 p-2">
@@ -100,6 +113,7 @@ export function LuzPanel({
           max={1}
           step={0.05}
           display={`${Math.round(layer.opacity * 100)}%`}
+          defaultValue={oDef}
         />
         <Slider
           label="Contraste"
@@ -109,6 +123,7 @@ export function LuzPanel({
           max={150}
           step={1}
           display={`${layer.contrast}%`}
+          defaultValue={100}
         />
         <Slider
           label="Escala"
@@ -118,6 +133,7 @@ export function LuzPanel({
           max={3}
           step={0.05}
           display={`${layer.scale.toFixed(2)}×`}
+          defaultValue={1}
         />
         <Slider
           label="Rotação"
@@ -127,9 +143,55 @@ export function LuzPanel({
           max={180}
           step={1}
           display={`${layer.rotation}°`}
+          defaultValue={0}
         />
+
+        {/* Recorte da textura — alças âmbar no canvas (modo crop) */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setCropMode(!cropMode)}
+            className={[
+              "flex-1 py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1",
+              cropMode ? "bg-amber-400 text-zinc-950 border-amber-400" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
+            ].join(" ")}
+          >
+            <Crop size={11} /> {cropMode ? "Recortando…" : "Recortar"}
+          </button>
+          {!isFullCrop(layer.crop) && (
+            <button
+              type="button"
+              onClick={onResetCrop}
+              title="Limpar recorte"
+              className="py-1.5 px-2 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors"
+            >
+              <RotateCcw size={10} />
+            </button>
+          )}
+        </div>
+
+        {/* Warp de perspectiva — segure Ctrl no canvas (alças = QuadEditor do Cantos) */}
+        <div className="flex items-center gap-1">
+          <div className={[
+            "flex-1 py-1.5 rounded-lg text-[10px] font-medium border flex items-center justify-center gap-1",
+            warpActive ? "bg-acc/20 text-acc border-acc/40" : hasWarp ? "bg-zinc-800/60 text-zinc-300 border-zinc-700/50" : "bg-zinc-800/40 text-zinc-500 border-zinc-700/40",
+          ].join(" ")}>
+            <Frame size={11} /> {warpActive ? "Deformando… (Ctrl)" : hasWarp ? "Perspectiva ativa" : "Segure Ctrl → perspectiva"}
+          </div>
+          {hasWarp && (
+            <button
+              type="button"
+              onClick={onResetWarp}
+              title="Remover perspectiva (volta ao normal)"
+              className="py-1.5 px-2 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors"
+            >
+              <RotateCcw size={10} />
+            </button>
+          )}
+        </div>
+
         <div className="space-y-0.5">
-          <label className="text-[10px] text-zinc-400">Blend</label>
+          <label className="text-[10px] text-zinc-400">Mistura</label>
           <div className="grid grid-cols-4 gap-1">
             {LUZ_BLEND_OPTIONS.map((o) => (
               <button

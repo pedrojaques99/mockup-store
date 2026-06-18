@@ -30,6 +30,11 @@ export const LUZ_BLEND_OPTIONS: { value: LuzBlend; label: string }[] = [
 
 export type LuzLayerId = "shadow" | "light";
 
+export interface LuzPt { x: number; y: number }
+/** Quad de perspectiva (4 cantos) em espaço normalizado 0..1 da CENA. Quando setado,
+ *  substitui o posicionamento afim (position/scale/rotation). TL, TR, BR, BL. */
+export interface LuzQuad { tl: LuzPt; tr: LuzPt; br: LuzPt; bl: LuzPt }
+
 export interface LuzLayer {
   id: LuzLayerId;
   label: string;
@@ -45,7 +50,18 @@ export interface LuzLayer {
   scale: number; // 0.2..3 (relativo à largura do canvas)
   rotation: number; // -180..180 (graus)
   position: { x: number; y: number }; // 0..1 (centro do overlay no canvas)
+  /** Recorte da textura em espaço próprio (pré-transform), normalizado 0..1.
+   *  Full = {x:0,y:0,w:1,h:1} (sem recorte). */
+  crop: { x: number; y: number; w: number; h: number };
+  /** Warp de perspectiva (4 cantos, espaço da cena 0..1). null = posicionamento afim. */
+  warpQuad: LuzQuad | null;
   blendMode: LuzBlend;
+}
+
+export const LUZ_CROP_FULL = { x: 0, y: 0, w: 1, h: 1 } as const;
+/** true quando o recorte cobre a textura inteira (pode pular extract). */
+export function isFullCrop(c?: { x: number; y: number; w: number; h: number } | null): boolean {
+  return !c || (c.x <= 0.001 && c.y <= 0.001 && c.w >= 0.999 && c.h >= 0.999);
 }
 
 export const LUZ_DEFAULTS: LuzLayer[] = [
@@ -61,6 +77,8 @@ export const LUZ_DEFAULTS: LuzLayer[] = [
     scale: 1,
     rotation: 0,
     position: { x: 0.5, y: 0.5 },
+    crop: { x: 0, y: 0, w: 1, h: 1 },
+    warpQuad: null,
     blendMode: "multiply",
   },
   {
@@ -75,6 +93,8 @@ export const LUZ_DEFAULTS: LuzLayer[] = [
     scale: 1,
     rotation: 0,
     position: { x: 0.5, y: 0.5 },
+    crop: { x: 0, y: 0, w: 1, h: 1 },
+    warpQuad: null,
     blendMode: "screen",
   },
 ];
@@ -88,6 +108,8 @@ export interface LuzRenderLayer {
   scale: number;
   rotation: number;
   position: { x: number; y: number };
+  crop: { x: number; y: number; w: number; h: number };
+  warpQuad: LuzQuad | null;
   blendMode: LuzBlend;
 }
 
@@ -102,6 +124,8 @@ export function toLuzRenderLayers(layers: LuzLayer[]): LuzRenderLayer[] {
       scale: l.scale,
       rotation: l.rotation,
       position: l.position,
+      crop: l.crop ?? { x: 0, y: 0, w: 1, h: 1 },
+      warpQuad: l.warpQuad ?? null,
       blendMode: l.blendMode,
     }));
 }

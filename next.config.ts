@@ -26,7 +26,10 @@ const nextConfig: NextConfig = {
     // canvas is a native Node module. When psd-engine is resolved via a monorepo
     // junction, serverExternalPackages won't intercept it (path resolves to the
     // real disk location, not the package name). Use an externals function instead.
-    const canvasExternal = ({ request }: { request?: string }, callback: Function) => {
+    const canvasExternal = (
+      { request }: { request?: string },
+      callback: (err?: Error | null, result?: string) => void,
+    ) => {
       if (request === 'canvas' || request?.includes('canvas/index') || request?.includes('canvas/lib')) {
         // Server: load at runtime via require(); client/worker: stub as empty object.
         return callback(null, isServer ? 'commonjs canvas' : 'var {}');

@@ -46,7 +46,7 @@ const INSTRUMENTS: { value: MaskInstrument; label: string; icon: typeof PenTool;
   { value: "pen", label: "Caneta", icon: PenTool, tip: "Vetor: cantos e curvas bézier" },
   { value: "brush", label: "Pincel", icon: Paintbrush, tip: "Pinta à mão livre, ao vivo" },
   { value: "wand", label: "Varinha", icon: Wand2, tip: "Seleção por cor (clique)" },
-  { value: "sam", label: "SAM", icon: Sparkles, tip: "Seleção por IA (clique)" },
+  { value: "sam", label: "IA", icon: Sparkles, tip: "Seleção por IA (clique)" },
 ];
 
 export function MaskPanel(p: MaskPanelProps) {
@@ -67,10 +67,11 @@ export function MaskPanel(p: MaskPanelProps) {
       {/* ── MÁSCARA (alvo / camada) ───────────────────────────────────── */}
       <div className="space-y-1.5">
         <Section icon={Layers}>Máscara</Section>
-        <div className="grid grid-cols-2 gap-1">
+        <div className="grid grid-cols-3 gap-1">
           {([
-            { value: "surface", label: "Superfície", color: "acc2" },
-            { value: "occluder", label: "Oclusão", color: "acc" },
+            { value: "surface", label: "Superfície", on: "bg-acc2 text-zinc-950 border-acc2" },
+            { value: "occluder", label: "Oclusão", on: "bg-acc text-zinc-950 border-acc" },
+            { value: "aiedit", label: "IA", on: "bg-violet-500 text-white border-violet-500" },
           ] as const).map((t) => {
             const on = p.target === t.value;
             return (
@@ -79,22 +80,22 @@ export function MaskPanel(p: MaskPanelProps) {
                 type="button"
                 onClick={() => p.setTarget(t.value)}
                 className={[
-                  "py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1.5",
-                  on
-                    ? t.color === "acc2" ? "bg-acc2 text-zinc-950 border-acc2" : "bg-acc text-zinc-950 border-acc"
-                    : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
+                  "py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1",
+                  on ? t.on : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
                 ].join(" ")}
               >
                 {t.label}
                 {on && (
-                  <span className="text-[8px] font-normal opacity-80">{p.hasTargetMask ? "● ativa" : "○ vazia"}</span>
+                  <span className="text-[8px] font-normal opacity-80">{p.hasTargetMask ? "●" : "○"}</span>
                 )}
               </button>
             );
           })}
         </div>
         <p className="text-[10px] text-zinc-600 leading-snug">
-          As ferramentas abaixo pintam <span className="text-zinc-400">nesta mesma máscara</span> (modelo Photoshop).
+          {p.target === "aiedit"
+            ? <>Máscara <span className="text-violet-300">independente da IA</span> — não afeta o render.</>
+            : <>As ferramentas abaixo pintam <span className="text-zinc-400">nesta mesma máscara</span> (modelo Photoshop).</>}
         </p>
 
         {/* Visualização da máscara no canvas */}

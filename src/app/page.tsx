@@ -1820,7 +1820,7 @@ export default function Home() {
 
                 {selected.description && (
                   <div className="bg-neutral-900/20 p-4 rounded-2xl border border-neutral-900">
-                    <p className="text-[11px] text-neutral-500 leading-relaxed italic line-clamp-4">"{selected.description}"</p>
+                    <p className="text-[11px] text-neutral-500 leading-relaxed italic line-clamp-4">&ldquo;{selected.description}&rdquo;</p>
                   </div>
                 )}
                 

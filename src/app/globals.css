@@ -3,6 +3,19 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Motion tokens — durações/easing padronizados pra tudo "respirar" igual. */
+  --motion-fast: 140ms;
+  --motion: 180ms;
+  --motion-slow: 260ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Tudo que anima por cor/opacidade/transform usa o mesmo easing — consistência. */
+.transition-colors,
+.transition-transform,
+.transition-opacity,
+.transition-all {
+  transition-timing-function: var(--ease);
 }
 
 @theme inline {

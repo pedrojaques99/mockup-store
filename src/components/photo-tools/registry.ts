@@ -12,20 +12,21 @@ export type PhotoTool = "corners" | "mask" | "reflect" | "luz" | "aiedit" | "cro
 export type MaskInstrument = "pen" | "brush" | "wand" | "sam";
 /** @deprecated use MaskInstrument */
 export type MaskMethod = MaskInstrument;
-/** Which mask a mask edit targets. */
-export type MaskTarget = "surface" | "occluder";
+/** Which mask a mask edit targets. `aiedit` is independent from the render
+ *  (surface/occluder) — it only drives the IA (inpaint) selection. */
+export type MaskTarget = "surface" | "occluder" | "aiedit";
 /** Composite mode for every instrument. */
 export type MaskMode = "add" | "sub";
 
 export const PHOTO_TOOLS: RailTool<PhotoTool>[] = [
-  { id: "corners", label: "Cantos", icon: Frame, group: "edit" },
-  { id: "mask", label: "Máscara", icon: Lasso, group: "edit" },
-  { id: "reflect", label: "Reflexo", icon: Droplets, group: "edit" },
-  { id: "luz", label: "Luz", icon: Sun, group: "edit" },
-  { id: "aiedit", label: "IA", icon: Wand2, group: "edit" },
-  { id: "crop", label: "Cortar", icon: Crop, group: "process" },
-  { id: "upscale", label: "Aumentar", icon: ZoomIn, group: "process" },
-  { id: "render", label: "Render", icon: ImageIcon, group: "output" },
+  { id: "corners", label: "Cantos", icon: Frame, group: "edit", shortcut: "C" },
+  { id: "mask", label: "Máscara", icon: Lasso, group: "edit", shortcut: "M" },
+  { id: "reflect", label: "Reflexo", icon: Droplets, group: "edit", shortcut: "R" },
+  { id: "luz", label: "Luz", icon: Sun, group: "edit", shortcut: "L" },
+  { id: "aiedit", label: "IA", icon: Wand2, group: "edit", shortcut: "I" },
+  { id: "crop", label: "Cortar", icon: Crop, group: "process", shortcut: "P" },
+  { id: "upscale", label: "Aumentar", icon: ZoomIn, group: "process", shortcut: "U" },
+  { id: "render", label: "Render", icon: ImageIcon, group: "output", shortcut: "V" },
 ];
 
 /** Single-key shortcuts → tool. */
