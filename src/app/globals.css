@@ -76,6 +76,18 @@ body {
   background: rgba(255 255 255 / 0.2);
 }
 
+/* Scene Maker — anel de foco ÚNICO (acessibilidade por teclado). Escopado na página
+ * (.scene-maker) → consistente em todo controle (botões, pills, sliders, inputs) sem
+ * tocar cada um. Só em :focus-visible → não aparece no clique de mouse. O outline
+ * segue o border-radius do elemento automaticamente. */
+.scene-maker :is(button, [role="button"], a[href], input, textarea, summary):focus-visible {
+  outline: 2px solid var(--color-acc2);
+  outline-offset: 2px;
+}
+.scene-maker :is(button, [role="button"]):focus-visible {
+  outline-offset: 1px;
+}
+
 /* Scene Maker — indeterminate top loading bar (sweeps left→right) */
 @keyframes scene-loadbar {
   0%   { transform: translateX(-100%); }

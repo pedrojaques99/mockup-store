@@ -295,6 +295,38 @@ export async function POST(
   if (Array.isArray(luzOverlays) && luzOverlays.length) {
     const W = analysis.imageWidth, H = analysis.imageHeight;
     const clamp255 = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : Math.round(v));
+
+    // Máscaras de clip da Luz (maskMode), em px nativos (W×H), alpha = cobertura.
+    // surface = quad preenchido (casa 1:1 com a mask.png do render e o preview);
+    // art = arte warpada nos cantos do quad (mesma homografia da arte). Lazy + cache.
+    let _luzSurfMask: Buffer | null = null, _luzArtMask: Buffer | null = null;
+    const luzMaskBuf = (mode: unknown): Buffer | null => {
+      if (mode === "surface") {
+        if (!_luzSurfMask) {
+          const cv = createCanvas(W, H); const c = cv.getContext("2d");
+          c.fillStyle = "#fff"; c.beginPath();
+          c.moveTo(q.tl.x, q.tl.y); c.lineTo(q.tr.x, q.tr.y); c.lineTo(q.br.x, q.br.y); c.lineTo(q.bl.x, q.bl.y);
+          c.closePath(); c.fill();
+          _luzSurfMask = toBuffer(cv as any, "image/png") as Buffer;
+        }
+        return _luzSurfMask;
+      }
+      if (mode === "art") {
+        if (!_luzArtMask) {
+          const cv = createCanvas(W, H); const c = cv.getContext("2d");
+          const corners = [q.tl, q.tr, q.br, q.bl].map((p) => ({ x: p.x, y: p.y }));
+          perspectiveWarp(c as unknown as Parameters<typeof perspectiveWarp>[0], artImg, (artImg as any).width, (artImg as any).height, corners);
+          _luzArtMask = toBuffer(cv as any, "image/png") as Buffer;
+        }
+        return _luzArtMask;
+      }
+      return null;
+    };
+    // Aplica o clip (dest-in) num layer já posicionado (W×H) antes do blend final.
+    const clipLuz = async (placed: Buffer, mode: unknown): Promise<Buffer> => {
+      const m = luzMaskBuf(mode);
+      return m ? await sharp(placed).composite([{ input: m, blend: "dest-in" }]).png().toBuffer() : placed;
+    };
     for (const ov of luzOverlays.slice(0, 4)) {
       try {
         let buf: Buffer | null = null;
@@ -350,7 +382,7 @@ export async function POST(
           const cx2 = cv.getContext("2d");
           const corners = [wq.tl, wq.tr, wq.br, wq.bl].map((p) => ({ x: p.x * W, y: p.y * H })); // TL,TR,BR,BL em px
           perspectiveWarp(cx2 as unknown as Parameters<typeof perspectiveWarp>[0], src, ti.width, ti.height, corners);
-          const placed = toBuffer(cv as any, "image/png") as Buffer;
+          const placed = await clipLuz(toBuffer(cv as any, "image/png") as Buffer, ov.maskMode);
           png = await sharp(png).composite([{ input: placed, blend }]).png().toBuffer();
           continue;
         }
@@ -372,10 +404,11 @@ export async function POST(
 
         // posiciona centralizado em (px,py) num canvas do tamanho da base, depois
         // compõe com o blend escolhido (transparência é alpha-aware no libvips).
-        const placed = await sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+        const placedRaw = await sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
           .composite([{ input: layer, left: Math.round(px * W - info.width / 2), top: Math.round(py * H - info.height / 2) }])
           .png()
           .toBuffer();
+        const placed = await clipLuz(placedRaw, ov.maskMode);
         png = await sharp(png).composite([{ input: placed, blend }]).png().toBuffer();
       } catch { /* overlay inválido — ignora, não derruba o render */ }
     }

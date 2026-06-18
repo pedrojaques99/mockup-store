@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
+import { ViewerZoomContext } from "./viewer-zoom";
 
 const MIN_SCALE = 0.4; // 40% min
 const MAX_SCALE = 32; // até 3200% — pixel peeping sem trava prática
@@ -101,7 +102,11 @@ export default function ZoomPanViewer({
 
   const onPointerDown = (e: React.PointerEvent) => {
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    const canPan = requireSpaceToPan ? spaceHeld : scale > 1;
+    // Botão do meio (scroll) = pan em QUALQUER aba (igual Figma/Photoshop): não depende
+    // de Espaço nem de zoom e nunca conflita com o arraste da ferramenta (que é o esquerdo).
+    const middlePan = e.button === 1;
+    if (middlePan) e.preventDefault(); // mata o auto-scroll nativo do browser
+    const canPan = middlePan || (requireSpaceToPan ? spaceHeld : scale > 1);
     if (pointers.current.size === 2) {
       (e.target as Element).setPointerCapture?.(e.pointerId);
       const [a, b] = [...pointers.current.values()];
@@ -160,7 +165,7 @@ export default function ZoomPanViewer({
       <div
         ref={containerRef}
         className="w-full h-full flex items-center justify-center touch-none"
-        style={{ cursor: (requireSpaceToPan ? spaceHeld : scale > 1) ? (drag.current ? "grabbing" : "grab") : "default" }}
+        style={{ cursor: drag.current ? "grabbing" : (requireSpaceToPan ? spaceHeld : scale > 1) ? "grab" : "default" }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -176,7 +181,7 @@ export default function ZoomPanViewer({
             willChange: "transform",
           }}
         >
-          {children}
+          <ViewerZoomContext.Provider value={scale}>{children}</ViewerZoomContext.Provider>
         </div>
       </div>
 

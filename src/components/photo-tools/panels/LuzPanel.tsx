@@ -1,14 +1,18 @@
 "use client";
 
 /**
- * LuzPanel — controles das duas camadas de overlay (Sombra / Luz).
- * Reusa os primitivos do design system (Slider, Segmented) e os tokens acc/acc2/zinc.
- * Estado vive no page.tsx (SSoT); este painel só lê e dispara updates.
+ * LuzPanel — adicionar uma Sombra ou Luz projetada sobre a cena pra dar realismo.
+ * Presetado e enxuto: o padrão mostra só Intensidade + Contraste; escala/rotação são
+ * feitas nas alças da cena (LuzOverlay); Mistura/Recortar/Perspectiva ficam num
+ * disclosure "Ajustes finos". Visibilidade por camada vive no olho da própria aba.
+ *
+ * Reusa Slider do design system. Estado vive no page.tsx (SSoT); aqui só lê e dispara.
  */
-import { useRef } from "react";
-import { Image as ImageIcon, Eye, RotateCcw, X, Crop, Frame } from "lucide-react";
+import { useRef, useState } from "react";
+import { ImagePlus, Eye, RotateCcw, X, Crop, Frame, ChevronRight, Sliders } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Slider } from "@/components/ui/Slider";
-import { Segmented } from "@/components/ui/Segmented";
+import { IconButton } from "@/components/ui/IconButton";
 import { LUZ_BLEND_OPTIONS, LUZ_DEFAULTS, isFullCrop, type LuzLayer, type LuzLayerId } from "@/types/luz";
 
 export function LuzPanel({
@@ -21,8 +25,6 @@ export function LuzPanel({
   onUploadFile,
   onClear,
   onReset,
-  cropMode,
-  setCropMode,
   onResetCrop,
   hasWarp,
   warpActive,
@@ -37,223 +39,218 @@ export function LuzPanel({
   onUploadFile: (f: File) => void;
   onClear: () => void;
   onReset: () => void;
-  cropMode: boolean;
-  setCropMode: (v: boolean) => void;
   onResetCrop: () => void;
   hasWarp: boolean;
   warpActive: boolean;
   onResetWarp: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [advanced, setAdvanced] = useState(false);
   const layer = layers.find((l) => l.id === active)!;
   const oDef = LUZ_DEFAULTS.find((d) => d.id === active)?.opacity ?? 0.5;
+
+  const pickFile = () => fileRef.current?.click();
 
   return (
     <div className="space-y-2 bg-zinc-800/40 rounded-xl border border-zinc-700/40 p-2">
       <p className="text-[9px] uppercase tracking-wider text-zinc-600">Luz &amp; Sombra</p>
 
-      {/* Camada ativa */}
-      <Segmented<LuzLayerId>
-        value={active}
-        onChange={setActive}
-        options={layers.map((l) => ({ value: l.id, label: l.label }))}
+      {/* Abas Sombra/Luz — o olho de cada aba liga/desliga a camada (substitui "Camadas") */}
+      <div className="grid grid-cols-2 gap-1">
+        {layers.map((l) => {
+          const isActive = l.id === active;
+          return (
+            <button
+              key={l.id}
+              type="button"
+              onClick={() => setActive(l.id)}
+              className={cn(
+                "relative py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1.5",
+                isActive
+                  ? "bg-acc2 text-zinc-950 border-acc2"
+                  : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
+              )}
+            >
+              {l.label}
+              {l.src && (
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  title={l.visible ? "Ocultar" : "Mostrar"}
+                  onClick={(e) => { e.stopPropagation(); toggleVisible(l.id); }}
+                  className={cn("transition-opacity", isActive ? "hover:opacity-70" : "hover:text-white")}
+                >
+                  <Eye size={11} className={l.visible ? "" : "opacity-30"} />
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) onUploadFile(f); e.target.value = ""; }}
       />
 
-      {/* Asset da camada ativa */}
-      <div className="flex items-center gap-2">
+      {!layer.src ? (
+        /* ── Sem asset — call-to-action limpo, nada desabilitado ── */
         <button
           type="button"
           onClick={onImport}
-          className="relative w-12 h-12 flex-none rounded-lg border border-zinc-700/60 bg-zinc-900/60 overflow-hidden grid place-items-center hover:border-zinc-500 transition-colors"
-          title="Importar asset"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f?.type.startsWith("image/")) onUploadFile(f); }}
+          className="w-full rounded-xl border border-dashed border-zinc-700 hover:border-acc2/60 hover:bg-zinc-800/40 transition-colors py-5 flex flex-col items-center gap-1.5 text-center"
         >
-          {layer.src ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={layer.src} alt="" className="w-full h-full object-cover" />
-          ) : (
-            <ImageIcon size={16} className="text-zinc-600" />
-          )}
+          <ImagePlus size={18} className="text-zinc-500" />
+          <span className="text-[11px] font-medium text-zinc-300">Escolher {layer.label.toLowerCase()}</span>
+          <span className="text-[9px] text-zinc-600">
+            galeria · ou{" "}
+            <span onClick={(e) => { e.stopPropagation(); pickFile(); }} className="text-acc2 hover:underline">enviar arquivo</span>
+          </span>
         </button>
-        <div className="flex-1 grid grid-cols-2 gap-1">
-          <button
-            type="button"
-            onClick={onImport}
-            className="py-1.5 rounded-lg text-[10px] font-medium bg-acc2 text-zinc-950 hover:bg-acc2/90 transition-colors"
-          >
-            Importar
-          </button>
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className="py-1.5 rounded-lg text-[10px] font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
-          >
-            Upload
-          </button>
-        </div>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onUploadFile(f);
-            e.target.value = "";
-          }}
-        />
-      </div>
-
-      {/* Controles — desabilitados sem asset */}
-      <div className={layer.src ? "space-y-1.5" : "space-y-1.5 opacity-40 pointer-events-none"}>
-        <Slider
-          label="Opacidade"
-          value={layer.opacity}
-          onChange={(v) => update({ opacity: v })}
-          min={0}
-          max={1}
-          step={0.05}
-          display={`${Math.round(layer.opacity * 100)}%`}
-          defaultValue={oDef}
-        />
-        <Slider
-          label="Contraste"
-          value={layer.contrast}
-          onChange={(v) => update({ contrast: v })}
-          min={50}
-          max={150}
-          step={1}
-          display={`${layer.contrast}%`}
-          defaultValue={100}
-        />
-        <Slider
-          label="Escala"
-          value={layer.scale}
-          onChange={(v) => update({ scale: v })}
-          min={0.2}
-          max={3}
-          step={0.05}
-          display={`${layer.scale.toFixed(2)}×`}
-          defaultValue={1}
-        />
-        <Slider
-          label="Rotação"
-          value={layer.rotation}
-          onChange={(v) => update({ rotation: v })}
-          min={-180}
-          max={180}
-          step={1}
-          display={`${layer.rotation}°`}
-          defaultValue={0}
-        />
-
-        {/* Recorte da textura — alças âmbar no canvas (modo crop) */}
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setCropMode(!cropMode)}
-            className={[
-              "flex-1 py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1",
-              cropMode ? "bg-amber-400 text-zinc-950 border-amber-400" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
-            ].join(" ")}
-          >
-            <Crop size={11} /> {cropMode ? "Recortando…" : "Recortar"}
-          </button>
-          {!isFullCrop(layer.crop) && (
+      ) : (
+        <>
+          {/* ── Com asset — thumb + trocar/remover ── */}
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onResetCrop}
-              title="Limpar recorte"
-              className="py-1.5 px-2 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors"
+              onClick={onImport}
+              title="Trocar textura"
+              className="w-11 h-11 flex-none rounded-lg border border-zinc-700/60 bg-zinc-900/60 overflow-hidden grid place-items-center hover:border-zinc-500 transition-colors"
             >
-              <RotateCcw size={10} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={layer.src} alt="" className="w-full h-full object-cover" />
             </button>
-          )}
-        </div>
-
-        {/* Warp de perspectiva — segure Ctrl no canvas (alças = QuadEditor do Cantos) */}
-        <div className="flex items-center gap-1">
-          <div className={[
-            "flex-1 py-1.5 rounded-lg text-[10px] font-medium border flex items-center justify-center gap-1",
-            warpActive ? "bg-acc/20 text-acc border-acc/40" : hasWarp ? "bg-zinc-800/60 text-zinc-300 border-zinc-700/50" : "bg-zinc-800/40 text-zinc-500 border-zinc-700/40",
-          ].join(" ")}>
-            <Frame size={11} /> {warpActive ? "Deformando… (Ctrl)" : hasWarp ? "Perspectiva ativa" : "Segure Ctrl → perspectiva"}
-          </div>
-          {hasWarp && (
             <button
               type="button"
-              onClick={onResetWarp}
-              title="Remover perspectiva (volta ao normal)"
-              className="py-1.5 px-2 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors"
+              onClick={onImport}
+              className="flex-1 py-1.5 rounded-lg text-[10px] font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
             >
-              <RotateCcw size={10} />
+              Trocar
             </button>
-          )}
-        </div>
-
-        <div className="space-y-0.5">
-          <label className="text-[10px] text-zinc-400">Mistura</label>
-          <div className="grid grid-cols-4 gap-1">
-            {LUZ_BLEND_OPTIONS.map((o) => (
-              <button
-                key={o.value}
-                type="button"
-                onClick={() => update({ blendMode: o.value })}
-                className={[
-                  "py-1 rounded-lg text-[10px] font-medium border transition-colors",
-                  layer.blendMode === o.value
-                    ? "bg-acc2 text-zinc-950 border-acc2"
-                    : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
-                ].join(" ")}
-              >
-                {o.label}
-              </button>
-            ))}
+            <IconButton icon={X} label="Remover textura" onClick={onClear} />
           </div>
-        </div>
 
-        <div className="flex items-center gap-1 pt-0.5">
-          <button
-            type="button"
-            onClick={onReset}
-            className="flex-1 py-1 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors flex items-center justify-center gap-1"
-          >
-            <RotateCcw size={10} /> Resetar
-          </button>
-          <button
-            type="button"
-            onClick={onClear}
-            className="flex-1 py-1 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-red-500/20 hover:text-red-400 transition-colors flex items-center justify-center gap-1"
-          >
-            <X size={10} /> Remover asset
-          </button>
-        </div>
-      </div>
+          {/* ── Controles essenciais ── */}
+          <div className="space-y-1.5">
+            <Slider
+              label="Intensidade"
+              value={layer.opacity}
+              onChange={(v) => update({ opacity: v })}
+              min={0} max={1} step={0.05}
+              display={`${Math.round(layer.opacity * 100)}%`}
+              defaultValue={oDef}
+            />
+            <Slider
+              label="Contraste"
+              value={layer.contrast}
+              onChange={(v) => update({ contrast: v })}
+              min={50} max={150} step={1}
+              display={`${layer.contrast}%`}
+              defaultValue={100}
+            />
+            <p className="text-[9px] text-zinc-600 leading-tight pt-0.5">
+              Na cena: arraste pra mover · cantos = escala · topo = girar
+            </p>
+          </div>
 
-      {/* Camadas — toggle de visibilidade (mesmo padrão do RenderPanel) */}
-      <div className="space-y-1 pt-1.5 mt-0.5 border-t border-zinc-800/60">
-        <p className="text-[9px] uppercase tracking-wider text-zinc-600">Camadas</p>
-        {layers.map((l) => (
-          <div key={l.id} className="flex items-center gap-1.5 text-[10px]">
+          {/* ── Ajustes finos (disclosure) — Mistura, Recortar, Perspectiva ── */}
+          <div className="pt-1 border-t border-zinc-800/60">
             <button
               type="button"
-              onClick={() => toggleVisible(l.id)}
-              title="Mostrar/ocultar"
-              className="text-zinc-400 hover:text-white transition-colors"
+              onClick={() => setAdvanced((v) => !v)}
+              className="w-full flex items-center gap-1.5 py-1 text-[10px] text-zinc-400 hover:text-zinc-200 transition-colors"
             >
-              <Eye size={11} className={l.visible ? "" : "opacity-25"} />
+              <ChevronRight size={11} className={cn("transition-transform", advanced && "rotate-90")} />
+              <Sliders size={11} /> Ajustes finos
             </button>
-            <span
-              className={[
-                "flex-1",
-                l.visible ? (l.id === "shadow" ? "text-acc" : "text-acc2") : "text-zinc-600 line-through",
-              ].join(" ")}
-            >
-              {l.label}
-            </span>
-            {!l.src && <span className="text-zinc-700">vazio</span>}
+
+            {advanced && (
+              <div className="space-y-2 pt-1">
+                {/* Mistura — select compacto */}
+                <div className="space-y-0.5">
+                  <label className="text-[10px] text-zinc-400">Mistura</label>
+                  <select
+                    value={layer.blendMode}
+                    onChange={(e) => update({ blendMode: e.target.value as LuzLayer["blendMode"] })}
+                    className="w-full py-1.5 px-2 rounded-lg text-[10px] font-medium bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 hover:bg-zinc-700/60 focus:border-acc2 outline-none transition-colors"
+                  >
+                    {LUZ_BLEND_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value} className="bg-zinc-900 text-zinc-200">{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Status: recorte / perspectiva — só visual (recorte: duplo-clique na
+                    mídia · perspectiva: segurar Ctrl). Ação sutil de limpar quando ativo. */}
+                <div className="space-y-1 text-[9px] leading-tight">
+                  {!isFullCrop(layer.crop) ? (
+                    <div className="flex items-center gap-1.5 text-zinc-400">
+                      <Crop size={10} className="text-amber-400" /> Textura recortada
+                      <button type="button" onClick={onResetCrop} className="text-zinc-500 hover:text-acc2 underline">limpar</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-zinc-600">
+                      <Crop size={10} /> Duplo-clique na mídia = recortar
+                    </div>
+                  )}
+                  {(hasWarp || warpActive) ? (
+                    <div className={cn("flex items-center gap-1.5", warpActive ? "text-acc" : "text-zinc-400")}>
+                      <Frame size={10} /> {warpActive ? "Deformando… (Ctrl)" : "Perspectiva ativa"}
+                      {hasWarp && !warpActive && (
+                        <button type="button" onClick={onResetWarp} className="text-zinc-500 hover:text-acc2 underline">remover</button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-zinc-600">
+                      <Frame size={10} /> Segure Ctrl = perspectiva
+                    </div>
+                  )}
+                </div>
+
+                {/* Máscara — clipa a luz/sombra a uma região da cena */}
+                <div className="space-y-0.5">
+                  <label className="text-[10px] text-zinc-400">Aparecer só em</label>
+                  <div className="grid grid-cols-3 gap-1">
+                    {([
+                      { value: "none", label: "Tudo" },
+                      { value: "art", label: "Arte" },
+                      { value: "surface", label: "Superfície" },
+                    ] as const).map((o) => (
+                      <button
+                        key={o.value}
+                        type="button"
+                        onClick={() => update({ maskMode: o.value })}
+                        className={cn(
+                          "py-1.5 rounded-lg text-[10px] font-medium border transition-colors",
+                          (layer.maskMode ?? "none") === o.value
+                            ? "bg-acc2 text-zinc-950 border-acc2"
+                            : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
+                        )}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Resetar ajustes da camada */}
+                <button
+                  type="button"
+                  onClick={onReset}
+                  className="w-full py-1.5 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors flex items-center justify-center gap-1"
+                >
+                  <RotateCcw size={10} /> Resetar ajustes
+                </button>
+              </div>
+            )}
           </div>
-        ))}
-      </div>
+        </>
+      )}
     </div>
   );
 }

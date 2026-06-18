@@ -11,6 +11,7 @@ import ArtFramePanel from "@/components/ArtFramePanel";
 import { ArtDropZone } from "@/components/photo-tools/ArtDropZone";
 import { ExportBar } from "@/components/photo-tools/ExportBar";
 import { Slider } from "@/components/ui/Slider";
+import { IconButton } from "@/components/ui/IconButton";
 import { LOOK_PRESETS, AI_BLEND_DEFAULTS, lookCssFilter } from "@/components/photo-tools/looks";
 import type { FrameConfig } from "@/lib/art-frame";
 
@@ -35,8 +36,6 @@ export interface RenderPanelProps {
   castOpacity: number; setCastOpacity: Dispatch<number>;
   maskContract: number; setMaskContract: Dispatch<number>;
   maskFeather: number; setMaskFeather: Dispatch<number>;
-  reflectionOpacity: number; setReflectionOpacity: Dispatch<number>;
-  reflectionBlur: number; setReflectionBlur: Dispatch<number>;
   lightWrap: number; setLightWrap: Dispatch<number>;
   matchScene: number; setMatchScene: Dispatch<number>;
   contactShadow: number; setContactShadow: Dispatch<number>;
@@ -95,7 +94,6 @@ export function RenderPanel(p: RenderPanelProps) {
             onClear={p.clearArt}
             previewHeightClass="h-32"
             compact
-            artHasAlpha={p.artHasAlpha}
           />
           <button onClick={() => document.getElementById("art-input-fs")?.click()}
             className="mt-1.5 w-full text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors">
@@ -126,18 +124,7 @@ export function RenderPanel(p: RenderPanelProps) {
             min={0} max={8} step={1} suffix="px" defaultValue={1} />
           <Slider label="Suavizar borda" value={p.maskFeather} onChange={p.setMaskFeather}
             min={0} max={30} step={1} suffix="px" defaultValue={3} />
-          <div>
-            <Slider label="Reflexo" hint="tinge reflexos com a arte" value={p.reflectionOpacity} onChange={p.setReflectionOpacity}
-              min={0} max={1} step={0.05} display={`${Math.round(p.reflectionOpacity * 100)}%`} defaultValue={0} />
-            {p.reflectionOpacity > 0 && (
-              <div className="flex items-center gap-2 pt-1">
-                <span className="text-[9px] text-zinc-600 shrink-0">Espalhar</span>
-                <input type="range" min={4} max={60} step={2} value={p.reflectionBlur}
-                  onChange={(e) => p.setReflectionBlur(Number(e.target.value))}
-                  className="w-full accent-acc h-1" />
-              </div>
-            )}
-          </div>
+          {/* Reflexo (intensidade + espalhar) vive na tab Reflexo — feature auto-contida. */}
           <Slider label="Luz nas bordas" hint="luz do ambiente na borda" value={p.lightWrap} onChange={p.setLightWrap}
             min={0} max={1} step={0.05} display={`${Math.round(p.lightWrap * 100)}%`} defaultValue={0.17} />
           <Slider label="Casar cena" hint="grão + temperatura" value={p.matchScene} onChange={p.setMatchScene}
@@ -210,16 +197,14 @@ export function RenderPanel(p: RenderPanelProps) {
       {/* Actions */}
       <div className="flex items-center gap-1.5">
         <button onClick={p.handlePublish} disabled={!p.renderUrl || p.publishState === "loading"}
-          className={["flex-1 justify-center px-3 py-2 rounded-xl text-[11px] transition-colors flex items-center gap-1.5",
+          className={["flex-1 justify-center px-3 py-2 rounded-xl text-xs transition-colors flex items-center gap-1.5",
             p.publishState === "done" ? "bg-acc2 text-zinc-950" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-400 disabled:text-zinc-600"].join(" ")}>
           {p.publishState === "done" ? <><CheckCircle2 size={11} /> Salvo!</> :
            p.publishState === "loading" ? <><Loader2 size={11} className="animate-spin" /> Salvando…</> :
            "Biblioteca"}
         </button>
-        <button onClick={p.handleRender} disabled={!p.artFile || p.renderState === "loading"}
-          className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors" title="Renderizar de novo">
-          <RefreshCw size={11} />
-        </button>
+        <IconButton icon={RefreshCw} label="Renderizar de novo" onClick={p.handleRender}
+          disabled={!p.artFile || p.renderState === "loading"} className="w-9 h-9 rounded-xl" />
       </div>
       {p.publishErr && <p className="text-red-400 text-[9px]">{p.publishErr}</p>}
       {p.renderErr && <p className="text-red-400 text-[9px] flex items-center gap-1"><AlertTriangle size={8} /> {p.renderErr}</p>}
@@ -234,7 +219,7 @@ export function RenderPanel(p: RenderPanelProps) {
         return (
           <div className="flex items-center gap-1.5 text-[9px] font-mono text-zinc-600">
             {aiDetectCost > 0 ? <span>detecção ~${aiDetectCost.toFixed(3)}</span> : <span>manual·$0</span>}
-            {aiBlendCost > 0 && <><span>+</span><span>IA ~${aiBlendCost.toFixed(3)}</span></>}
+            {aiBlendCost > 0 && <><span>+</span><span>melhorar ~${aiBlendCost.toFixed(3)}</span></>}
             <span className="text-zinc-500 ml-auto">~${total.toFixed(3)}</span>
           </div>
         );
@@ -264,7 +249,7 @@ export function RenderPanel(p: RenderPanelProps) {
           <button onClick={() => p.setShowAiBlend((v) => !v)} className="w-full flex items-center justify-between px-3 py-2">
             <span className={["flex items-center gap-1.5 text-[11px] font-medium", p.showAiBlend ? "text-acc" : "text-zinc-400"].join(" ")}>
               <Wand2 size={10} className={p.showAiBlend ? "text-acc" : "text-zinc-500"} />
-              Melhorar com IA
+              Melhorar
               {p.analysis && AI_BLEND_DEFAULTS[p.analysis.surfaceType]?.enabled && !p.showAiBlend && (
                 <span className="text-[9px] px-1 py-0 rounded-full bg-acc/20 text-acc">rec</span>
               )}
@@ -276,7 +261,7 @@ export function RenderPanel(p: RenderPanelProps) {
               <div className="grid grid-cols-3 gap-1">
                 {(["fast", "balanced", "quality"] as const).map((q) => (
                   <button key={q} onClick={() => p.setAiQuality(q)}
-                    className={["py-1 rounded-lg text-[10px] font-medium transition-colors",
+                    className={["py-1.5 rounded-lg text-[10px] font-medium transition-colors",
                       p.aiQuality === q ? "bg-acc text-zinc-950" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"].join(" ")}>
                     <span>{q === "fast" ? "Rápido" : q === "balanced" ? "Equilíbrio" : "Alta"}</span>
                     <span className={["block text-[9px] font-normal", p.aiQuality === q ? "text-acc" : "text-zinc-600"].join(" ")}>

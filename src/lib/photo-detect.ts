@@ -10,20 +10,9 @@
  */
 import sharp from "sharp";
 import type { QuadPoints } from "./photo-analyze";
-
-function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
-  const rn = r / 255, gn = g / 255, bn = b / 255;
-  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
-  const l = (max + min) / 2;
-  if (max === min) return [0, 0, l];
-  const d = max - min;
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-  let h = 0;
-  if (max === rn) h = (gn - bn) / d + (gn < bn ? 6 : 0);
-  else if (max === gn) h = (bn - rn) / d + 2;
-  else h = (rn - gn) / d + 4;
-  return [h / 6, s, l];
-}
+import {
+  rgbToHsl, isKeyColor, fitQuadFromBlob, blobFillRatio, DETECTOR_VERSION,
+} from "./key-color-core";
 
 export interface SurfaceDetectionResult {
   quad: QuadPoints;
@@ -163,64 +152,20 @@ export async function detectDominantVividHue(
   return maxVal > 2 ? peakDeg : null;
 }
 
-/**
- * Detects a neon-colored surface and returns its exact quad corners via
- * convex-hull corner extraction.
- *
- * hueCenter defaults to auto-detect (detectDominantVividHue in H=220-360° range)
- * so it works with any LLM-generated shade: magenta, hot-pink, fuchsia, violet-pink.
- *
- * Use when generating blank mockup images with a neon key color instead of white:
- *   - Auto-detects dominant vivid hue → no hardcoded 300° needed
- *   - Connected-component filter removes glow halos and reflected neon pixels
- *   - Exact corner extraction gives perspective-accurate trapezoid quad
- *
- * Returns null if fewer than minPixels neon pixels found.
- */
-export async function findNeonQuad(
-  imagePath: string,
-  width: number,
-  height: number,
-  hueCenter?: number,  // auto-detect dominant vivid hue when undefined
-  hueRange  = 40,      // ±degrees around detected/provided hueCenter
-  minSat    = 0.45,
-  minPixels = 500,
-): Promise<QuadPoints | null> {
-  // Auto-detect dominant vivid hue if not specified
-  if (hueCenter === undefined) {
-    const detected = await detectDominantVividHue(imagePath, width, height);
-    if (detected === null) return null;
-    hueCenter = detected;
-    console.log(`    🎨 Auto-detected vivid hue: ${hueCenter}° (H=${Math.round(hueCenter - hueRange)}-${Math.round(hueCenter + hueRange)}°)`);
-  }
+export interface KeyColorResult {
+  quad: QuadPoints;
+  /** Hue dominante detectado em graus (−1 quando só o ramo RGB-diff disparou). */
+  hue: number;
+  /** 0..1 — fração do blob dentro do quad ajustado (quão retangular/cheio). */
+  confidence: number;
+  /** Método de origem do quad (para o store genérico de calibração). */
+  method: "key-color";
+  /** Versão do detector que gerou este quad. */
+  detectorVersion: number;
+}
 
-  const raw = await sharp(imagePath).raw().toBuffer();
-  const ch  = 3; // sharp outputs RGB
-  const pts: Array<[number, number]> = [];
-
-  const hLo = ((hueCenter - hueRange + 360) % 360) / 360;
-  const hHi = ((hueCenter + hueRange      ) % 360) / 360;
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = (y * width + x) * ch;
-      const [h, s] = rgbToHsl(raw[i], raw[i + 1], raw[i + 2]);
-      const hMatch = hLo <= hHi
-        ? h >= hLo && h <= hHi
-        : h >= hLo || h <= hHi; // wraps around 0/1
-      if (hMatch && s >= minSat) pts.push([x, y]);
-    }
-  }
-
-  if (pts.length < minPixels) return null;
-
-  // Keep only the largest contiguous neon blob — eliminates glow/reflections
-  const filtered = largestConnectedBlob(pts, width, height);
-  if (filtered.length < minPixels) return null;
-
-  // Extract the 4 "corner" points from the convex hull extremes:
-  //   TL = min(x+y),  TR = max(x-y),  BR = max(x+y),  BL = min(x-y)
-  // This correctly handles tilted rectangles / trapezoids.
+/** Fallback extremal (método antigo min/max(x±y)) — usado quando o fit hull/DP degenera. */
+function extremalQuad(filtered: Array<[number, number]>): QuadPoints {
   let tl = filtered[0], tr = filtered[0], br = filtered[0], bl = filtered[0];
   for (const [x, y] of filtered) {
     if (x + y < tl[0] + tl[1]) tl = [x, y];
@@ -228,13 +173,80 @@ export async function findNeonQuad(
     if (x + y > br[0] + br[1]) br = [x, y];
     if (x - y < bl[0] - bl[1]) bl = [x, y];
   }
+  return { tl: { x: tl[0], y: tl[1] }, tr: { x: tr[0], y: tr[1] }, br: { x: br[0], y: br[1] }, bl: { x: bl[0], y: bl[1] } };
+}
+
+/**
+ * Detector unificado de key color: predicado RGB-diff OR HSL adaptativo
+ * (`isKeyColor`), filtro de maior blob (mata glow/reflexo) e cantos via hull+DP
+ * (`fitQuadFromBlob`, com fallback extremal). Retorna quad + confiança + hue.
+ *
+ * É o núcleo único — `findNeonQuad` é um wrapper fino deste.
+ */
+export async function detectKeyColorQuad(
+  imagePath: string | Buffer,
+  width: number,
+  height: number,
+  opts: { hueCenter?: number; hueRange?: number; minSat?: number; minPixels?: number } = {},
+): Promise<KeyColorResult | null> {
+  const { hueCenter, hueRange = 40, minSat = 0.45, minPixels = 500 } = opts;
+
+  // Auto-detect do tom dominante (só pro ramo HSL; o RGB-diff funciona sem ele).
+  let center = hueCenter;
+  if (center === undefined) {
+    const detected = await detectDominantVividHue(imagePath, width, height);
+    if (detected !== null) {
+      center = detected;
+      console.log(`    🎨 Auto-detected vivid hue: ${center}° (H=${Math.round(center - hueRange)}-${Math.round(center + hueRange)}°)`);
+    }
+  }
+
+  const hueOn = center !== undefined;
+  const hLo = hueOn ? ((center! - hueRange + 360) % 360) / 360 : NaN; // NaN = desliga ramo HSL
+  const hHi = hueOn ? ((center! + hueRange) % 360) / 360 : NaN;
+
+  const { data, info } = await sharp(imagePath).raw().toBuffer({ resolveWithObject: true });
+  const ch = info.channels; // robusto a RGB(3) e RGBA(4)
+  const pts: Array<[number, number]> = [];
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * ch;
+      if (isKeyColor(data[i], data[i + 1], data[i + 2], hLo, hHi, minSat)) pts.push([x, y]);
+    }
+  }
+  if (pts.length < minPixels) return null;
+
+  const filtered = largestConnectedBlob(pts, width, height);
+  if (filtered.length < minPixels) return null;
+
+  const fitted = fitQuadFromBlob(filtered);
+  const quad: QuadPoints = fitted ?? extremalQuad(filtered);
 
   return {
-    tl: { x: tl[0], y: tl[1] },
-    tr: { x: tr[0], y: tr[1] },
-    br: { x: br[0], y: br[1] },
-    bl: { x: bl[0], y: bl[1] },
+    quad,
+    hue: center ?? -1,
+    confidence: blobFillRatio(filtered, quad),
+    method: "key-color",
+    detectorVersion: DETECTOR_VERSION,
   };
+}
+
+/**
+ * Wrapper de compatibilidade — assinatura preservada para callers existentes
+ * (test-pipeline-cv.ts, prepare-hockey.ts, photo-shadow.ts). Delega ao núcleo.
+ */
+export async function findNeonQuad(
+  imagePath: string,
+  width: number,
+  height: number,
+  hueCenter?: number,
+  hueRange  = 40,
+  minSat    = 0.45,
+  minPixels = 500,
+): Promise<QuadPoints | null> {
+  const r = await detectKeyColorQuad(imagePath, width, height, { hueCenter, hueRange, minSat, minPixels });
+  return r?.quad ?? null;
 }
 
 export async function detectWhiteSurface(

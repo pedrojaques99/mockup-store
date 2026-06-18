@@ -7,6 +7,7 @@
  * erases. Emits the mask PNG on release.
  */
 import { useEffect, useRef, useCallback } from "react";
+import { useViewerZoom } from "@/components/viewer-zoom";
 
 export type BrushApi = { clear: () => void };
 
@@ -35,7 +36,9 @@ export default function BrushCanvas({
   const erasing = useRef(false);
   const dirty = useRef(false);
   // Anel do cursor — mostra o tamanho real do pincel (em px de layout, escala com o zoom).
+  // A borda do anel, porém, fica com espessura de TELA constante (÷ zoom).
   const ringRef = useRef<HTMLDivElement>(null);
+  const zoom = useViewerZoom();
   const lastPos = useRef<{ x: number; y: number } | null>(null);
 
   const updateRing = useCallback((clientX: number, clientY: number) => {
@@ -106,6 +109,7 @@ export default function BrushCanvas({
     redraw();
   };
   const onDown = (e: React.MouseEvent) => {
+    if (e.button === 1) return; // botão do meio = pan (ZoomPanViewer); não pinta
     e.preventDefault();
     painting.current = true;
     erasing.current = eraseMode || e.button === 2;
@@ -155,8 +159,8 @@ export default function BrushCanvas({
         style={{
           position: "absolute", display: "none", left: 0, top: 0, width: 0, height: 0,
           transform: "translate(-50%, -50%)", borderRadius: "9999px",
-          border: `1.5px solid ${eraseMode ? "rgba(248,113,113,0.95)" : `rgb(${tint})`}`,
-          boxShadow: "0 0 0 1px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(0,0,0,0.35)",
+          border: `${1.5 / zoom}px solid ${eraseMode ? "rgba(248,113,113,0.95)" : `rgb(${tint})`}`,
+          boxShadow: `0 0 0 ${1 / zoom}px rgba(0,0,0,0.45), inset 0 0 0 ${1 / zoom}px rgba(0,0,0,0.35)`,
           pointerEvents: "none", willChange: "left, top, width, height",
         }} />
     </div>

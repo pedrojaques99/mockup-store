@@ -34,6 +34,7 @@
     "react-dom": "^19.2.7",
     "react-draggable": "^4.6.0",
     "react-easy-crop": "^5.5.7",
+    "react-moveable": "^0.56.0",
     "react-resizable-panels": "^4.11.2",
     "react-zoom-pan-pinch": "^4.0.3",
     "sharp": "^0.34.5",

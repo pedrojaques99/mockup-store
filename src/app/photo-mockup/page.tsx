@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, Suspense } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   Upload, Loader2, AlertTriangle, CheckCircle2, RefreshCw,
-  ChevronRight, Eye, Wand2, Camera, X, Sparkles,
+  Eye, Wand2, Camera, X, Sparkles, Keyboard,
 } from "lucide-react";
 import ZoomPanViewer from "@/components/ZoomPanViewer";
 import SegmentCanvas from "@/components/SegmentCanvas";
@@ -15,6 +15,7 @@ import { ToolRail } from "@/components/photo-tools/ToolRail";
 import { PHOTO_TOOLS, PHOTO_TOOL_KEYS, type PhotoTool } from "@/components/photo-tools/registry";
 import { CornersPanel } from "@/components/photo-tools/panels/CornersPanel";
 import { MaskPanel } from "@/components/photo-tools/panels/MaskPanel";
+import { EditSelectionPanel } from "@/components/photo-tools/panels/EditSelectionPanel";
 import { ReflexoPanel } from "@/components/photo-tools/panels/ReflexoPanel";
 import { SceneInfo } from "@/components/photo-tools/panels/SceneInfo";
 import { RenderPanel } from "@/components/photo-tools/panels/RenderPanel";
@@ -30,6 +31,8 @@ import { ArtDropZone } from "@/components/photo-tools/ArtDropZone";
 import { AI_BLEND_DEFAULTS } from "@/components/photo-tools/looks";
 import { DEFAULT_FRAME, renderFramedArt } from "@/lib/art-frame";
 import { QuadEditor } from "@/components/photo-tools/QuadEditor";
+import { CanvasContextChip } from "@/components/photo-tools/CanvasContextChip";
+import { ShortcutsHelp } from "@/components/photo-tools/ShortcutsHelp";
 import { useMaskEditor } from "./hooks/useMaskEditor";
 import { toBase64File, urlToDataUrl, dataUrlToFile, fetchJSON } from "@/lib/photo-mockup-io";
 import { useDocField, editorHistory, useTemporal, useEditorDoc } from "@/stores/editorDoc";
@@ -60,24 +63,30 @@ interface Analysis {
 type StepId = "upload" | "analyze" | "process" | "render";
 type StepState = "idle" | "loading" | "done" | "error";
 
-
-// ── Compact pipeline dot ─────────────────────────────────────────────────────
-
-function StepPip({ label, state, active }: { label: string; state: StepState; active: boolean }) {
-  const dot = state === "done"    ? "bg-acc2"
-            : state === "loading" ? "bg-acc animate-pulse"
-            : state === "error"   ? "bg-red-500"
-            : active              ? "bg-zinc-400"
-            :                       "bg-zinc-700";
-  const text = active || state === "loading" ? "text-zinc-200"
-             : state === "done"              ? "text-zinc-500"
-             :                                 "text-zinc-700";
+// ── Surface pulse (SSoT) ──────────────────────────────────────────────────────
+// Pulso de blur sobre a região que está sendo processada — feedback "trabalhando AQUI".
+// Fonte única: usado pelo loading do render (clip = quad), pela edição da imagem
+// (mask = seleção, ou imagem toda quando sem seleção) e pelo limpar faixa rosa (quad).
+// A animação `art-blur-pulse` vive no globals.css.
+function SurfacePulse({ src, clipPath, maskUrl }: { src: string; clipPath?: string; maskUrl?: string | null }) {
+  const region: React.CSSProperties = maskUrl
+    ? { WebkitMaskImage: `url(${maskUrl})`, maskImage: `url(${maskUrl})`, WebkitMaskSize: "100% 100%", maskSize: "100% 100%", WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat" }
+    : { clipPath, WebkitClipPath: clipPath };
   return (
-    <div className="flex items-center gap-1.5">
-      <span className={["w-1.5 h-1.5 rounded-full flex-none", dot].join(" ")} />
-      <span className={["text-xs", text].join(" ")}>{label}</span>
-      {state === "loading" && <Loader2 size={9} className="animate-spin text-acc flex-none" />}
-    </div>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      aria-hidden
+      draggable={false}
+      className="animate-[art-blur-pulse_1.4s_ease-in-out_infinite]"
+      style={{
+        position: "absolute", inset: 0, width: "100%", height: "100%",
+        objectFit: "contain", pointerEvents: "none",
+        filter: "blur(7px) brightness(0.97)", willChange: "opacity",
+        ...region,
+      }}
+    />
   );
 }
 
@@ -197,6 +206,7 @@ function PhotoMockupPageInner() {
   const [tool, setTool] = useState<PhotoTool>("render");
   const toolRef = useRef<PhotoTool>("render"); toolRef.current = tool;
   const [panelOpen, setPanelOpen] = useState(true); // tool panel popover open?
+  const [shortcutsOpen, setShortcutsOpen] = useState(false); // cheatsheet de atalhos (?)
 
   // ── Luz — duas camadas de overlay (Sombra / Luz) ────────────────────────────
   const [luzLayers, setLuzLayers] = useDocField("luzLayers");
@@ -207,12 +217,18 @@ function PhotoMockupPageInner() {
   const updateLuz = useCallback((id: LuzLayerId, patch: Partial<LuzLayer>) => {
     setLuzLayers((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   }, []);
+  // Preset ao escolher um asset de Luz: cai centralizado, full-screen (scale 1 =
+  // 100% da largura da cena), sem rotação/recorte/warp — e já em modo transform
+  // (sai do crop) pra arrastar/redimensionar pro lugar certo na hora.
+  const LUZ_ASSET_PRESET = { position: { x: 0.5, y: 0.5 }, scale: 1, rotation: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, warpQuad: null } as const;
   const setLuzAssetFromPath = useCallback((id: LuzLayerId, path: string) => {
-    updateLuz(id, { src: `/api/local-image?path=${encodeURIComponent(path)}`, srcPath: path, srcBase64: null });
+    updateLuz(id, { src: `/api/local-image?path=${encodeURIComponent(path)}`, srcPath: path, srcBase64: null, ...LUZ_ASSET_PRESET });
+    setLuzCropMode(false);
   }, [updateLuz]);
   const setLuzAssetFromFile = useCallback((id: LuzLayerId, file: File) => {
     const fr = new FileReader();
-    fr.onload = () => updateLuz(id, { src: URL.createObjectURL(file), srcPath: null, srcBase64: fr.result as string });
+    fr.onload = () => updateLuz(id, { src: URL.createObjectURL(file), srcPath: null, srcBase64: fr.result as string, ...LUZ_ASSET_PRESET });
+    setLuzCropMode(false);
     fr.readAsDataURL(file);
   }, [updateLuz]);
   const resetLuzLayer = useCallback((id: LuzLayerId) => {
@@ -397,7 +413,7 @@ function PhotoMockupPageInner() {
               signal,
             },
           ),
-          { loading: "Expandindo cena (IA)…", timeoutMs: 150_000 },
+          { loading: "Expandindo cena…", timeoutMs: 150_000 },
         );
         const file = dataUrlToFile(res.base64, "expanded.png");
         setCropResetKey((k) => k + 1); setCropArea(null); setCropPrompt("");
@@ -659,7 +675,7 @@ function PhotoMockupPageInner() {
         for (let i = 3; i < d.length; i += 4) { if (d[i] < 245) { alpha = true; break; } }
         setArtHasAlpha(alpha);
         // PNG transparente fica TRANSPARENTE (revela a superfície). Pra não mostrar a
-        // magenta atrás, use "Limpar faixa rosa (IA)" → recria a superfície real.
+        // magenta atrás, use "Limpar faixa rosa" → recria a superfície real.
       } catch { setArtHasAlpha(false); }
       if (processState === "done") setTimeout(() => handleRenderRef.current(), 80);
     };
@@ -725,7 +741,7 @@ function PhotoMockupPageInner() {
     try {
       const imageBase64 = await urlToDataUrl(photoUrl);
       const maskBase64 = aiEditMaskUrl ? await urlToDataUrl(aiEditMaskUrl) : "";
-      const res = await runAiOp("Edição IA",
+      const res = await runAiOp("Edição",
         (signal) => fetchJSON<{ base64: string; via?: string; fallback?: boolean }>(
           `/api/photo-mockup/${uploadId ?? "x"}/ai-edit`,
           {
@@ -735,7 +751,7 @@ function PhotoMockupPageInner() {
             signal,
           },
         ),
-        { loading: "Editando com IA…", timeoutMs: 150_000 },
+        { loading: "Editando…", timeoutMs: 150_000 },
       );
       if (res.via) setAiEditVia(res.via);
       const file = dataUrlToFile(res.base64, "ai-edited.png");
@@ -743,7 +759,7 @@ function PhotoMockupPageInner() {
       toast.success("Edição aplicada");
     } catch (e: any) {
       if (e instanceof AiOpError) return;
-      setAiEditErr(e?.message ?? "falha na edição IA");
+      setAiEditErr(e?.message ?? "falha na edição");
     } finally {
       setAiEditing(false);
     }
@@ -775,14 +791,14 @@ function PhotoMockupPageInner() {
         const body = await r.json().catch(() => ({} as { error?: string; cleanMaterial?: string; aiCleaned?: boolean }));
         if (!r.ok) throw new Error((body as { error?: string }).error ?? `HTTP ${r.status}`);
         return body as { cleanMaterial?: string; aiCleaned?: boolean };
-      }, { loading: "Recriando a superfície sem a faixa rosa (IA)…", timeoutMs: 150_000 });
+      }, { loading: "Recriando a superfície sem a faixa rosa…", timeoutMs: 150_000 });
 
       setPhotoUrl(`/api/photo-mockup/${uploadId}/asset/photo-clean?t=${Date.now()}`);
       setShadowPreview(`/api/photo-mockup/${uploadId}/asset/shadow?t=${Date.now()}`);
       setProcessState("done");
       if (artFile) setTimeout(() => handleRenderRef.current(), 100);
       if (j.aiCleaned === false) {
-        toast.warning("IA indisponível — usei limpeza simples (pode sobrar um pouco de rosa).");
+        toast.warning("Edição indisponível — usei limpeza simples (pode sobrar um pouco de rosa).");
       } else {
         toast.success(j.cleanMaterial ? `Superfície recriada · ${j.cleanMaterial}` : "Superfície recriada sem o rosa");
       }
@@ -851,7 +867,7 @@ function PhotoMockupPageInner() {
         fr.onerror = rej;
         fr.readAsDataURL(blob);
       });
-      const aiBlob = await runAiOp("Melhorar com IA", async (signal) => {
+      const aiBlob = await runAiOp("Melhorar", async (signal) => {
         const r = await fetch(`/api/photo-mockup/${uploadId}/ai-blend`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -860,7 +876,7 @@ function PhotoMockupPageInner() {
         });
         if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error ?? `HTTP ${r.status}`); }
         return r.blob();
-      }, { loading: "Melhorando com IA…", timeoutMs: 150_000 });
+      }, { loading: "Melhorando…", timeoutMs: 150_000 });
       setAiBlendUrl(URL.createObjectURL(aiBlob));
       setAiBlendMs(Date.now() - t0);
       setAiBlendState("done");
@@ -944,6 +960,7 @@ function PhotoMockupPageInner() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.key === "?") { e.preventDefault(); setShortcutsOpen((v) => !v); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const tt = PHOTO_TOOL_KEYS[e.key.toLowerCase()];
       if (tt) { e.preventDefault(); setTool(tt); setPanelOpen(true); }
@@ -951,6 +968,23 @@ function PhotoMockupPageInner() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Enter = aplicar · Esc = cancelar — nos modos com confirmação (crop, cantos).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (tool === "crop") {
+        if (e.key === "Enter" && cropArea) { e.preventDefault(); handleApplyCrop(); }
+        else if (e.key === "Escape") { e.preventDefault(); setCropResetKey((k) => k + 1); setCropArea(null); }
+      } else if (tool === "corners" && e.key === "Enter") {
+        e.preventDefault(); setTool("render");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tool, cropArea, handleApplyCrop]);
 
   // Realism — knob-macro: escreve lightWrap + contactShadow + matchScene de uma vez.
   // Derivado no onChange (não em effect) pra o undo restaurar os 3 campos sem que um
@@ -1051,20 +1085,31 @@ function PhotoMockupPageInner() {
       })()
     : null;
 
-  const pipelineBar = (
-    <div className="flex items-center gap-2">
-      <StepPip label="Foto"  state={uploadState}  active={active === "upload"} />
-      <ChevronRight size={10} className="text-zinc-800" />
-      <StepPip label="Superfície"  state={analyzeState} active={active === "analyze"} />
-      <ChevronRight size={10} className="text-zinc-800" />
-      <StepPip label="Luz"     state={processState} active={active === "process"} />
-      <ChevronRight size={10} className="text-zinc-800" />
-      <StepPip label="Render"  state={renderState}  active={active === "render"} />
-    </div>
-  );
+  // Máscara de cena pra Luz (clip art/superfície no preview): quad preenchido em
+  // branco sobre transparente, em px da imagem (cap 1024). Casa 1:1 com a mask.png do
+  // render. Memoizada no quad+dims (toDataURL é caro). Aspect-stretch no overlay.
+  const luzSceneMaskUrl = useMemo(() => {
+    if (!quad || !imgDims.w || !imgDims.h || typeof document === "undefined") return null;
+    const cap = 1024, s = Math.min(1, cap / Math.max(imgDims.w, imgDims.h));
+    const cw = Math.max(1, Math.round(imgDims.w * s)), ch = Math.max(1, Math.round(imgDims.h * s));
+    const cv = document.createElement("canvas");
+    cv.width = cw; cv.height = ch;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.moveTo(quad.tl.x * s, quad.tl.y * s);
+    ctx.lineTo(quad.tr.x * s, quad.tr.y * s);
+    ctx.lineTo(quad.br.x * s, quad.br.y * s);
+    ctx.lineTo(quad.bl.x * s, quad.bl.y * s);
+    ctx.closePath();
+    ctx.fill();
+    return cv.toDataURL("image/png");
+  }, [quad, imgDims.w, imgDims.h]);
+
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
+    <div className="scene-maker min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
 
       {/* ── Shell Header ─────────────────────────────────────────────── */}
       <header className="h-14 border-b border-neutral-900 bg-neutral-950/80 backdrop-blur-md flex items-center justify-between px-4 shrink-0 z-50 relative">
@@ -1095,8 +1140,18 @@ function PhotoMockupPageInner() {
           </nav>
         </div>
 
-        {/* Right: undo/redo + pipeline */}
+        {/* Right: novo projeto + undo/redo + pipeline */}
         <div className="flex items-center gap-3">
+          {photoUrl && (
+            <button
+              onClick={resetPhoto}
+              title="Recomeçar — descarta esta cena e sobe uma nova foto"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-all"
+            >
+              <RefreshCw size={11} />
+              Novo projeto
+            </button>
+          )}
           <div className="flex items-center gap-0.5 pr-3 border-r border-neutral-800">
             <button
               onClick={() => editorHistory.undo()} disabled={!canUndo}
@@ -1112,10 +1167,19 @@ function PhotoMockupPageInner() {
             >
               <Redo2 size={14} />
             </button>
+            <button
+              onClick={() => setShortcutsOpen(true)}
+              title="Atalhos (?)"
+              aria-label="Atalhos"
+              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/5 transition-colors"
+            >
+              <Keyboard size={14} />
+            </button>
           </div>
-          {pipelineBar}
         </div>
       </header>
+
+      <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       <Toaster
         theme="dark"
@@ -1223,24 +1287,11 @@ function PhotoMockupPageInner() {
                             draggable={false}
                             style={{ maxWidth: "calc(100vw - 360px)", maxHeight: "calc(100vh - 80px)", objectFit: "contain", display: "block", filter: previewFilter ?? undefined, transition: "filter var(--motion) var(--ease)" }}
                           />
-                          {/* Loading shimmer — blur ONLY the surface (clipped to the quad). */}
-                          {(renderState === "loading" || autoRenderPending) && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={baseSrc}
-                              alt=""
-                              aria-hidden
-                              draggable={false}
-                              className="animate-[art-blur-pulse_1.4s_ease-in-out_infinite]"
-                              style={{
-                                position: "absolute", inset: 0, width: "100%", height: "100%",
-                                objectFit: "contain", pointerEvents: "none",
-                                filter: "blur(7px) brightness(0.97)",
-                                clipPath: surfaceClip, WebkitClipPath: surfaceClip,
-                                willChange: "opacity",
-                              }}
-                            />
-                          )}
+                          {/* Pulso "trabalhando aqui" (SSoT: SurfacePulse). Render → clip no quad;
+                              edição da imagem → mask na seleção (ou imagem toda); limpar rosa → quad. */}
+                          {(renderState === "loading" || autoRenderPending) && <SurfacePulse src={baseSrc} clipPath={surfaceClip} />}
+                          {aiEditing && <SurfacePulse src={baseSrc} maskUrl={aiEditMaskUrl} />}
+                          {cleaningSurface && <SurfacePulse src={baseSrc} clipPath={surfaceClip} />}
 
                           {/* Antes/depois — divisor arrastável: esquerda = foto original, direita = render. */}
                           {compare && tool === "render" && renderUrl && photoUrl && (
@@ -1276,6 +1327,22 @@ function PhotoMockupPageInner() {
                               <QuadEditor transparentImg imageUrl={baseSrc} imageNW={imgDims.w} imageNH={imgDims.h} quad={quad}
                                 onQuadChange={(q) => { setQuad(q); setProcessState("idle"); }}
                                 bend={bend} onBendChange={setBend} />
+                            </div>
+                          )}
+                          {/* Crop — moldura livre (8 alças, estende além da imagem). Overlay
+                              transparente dentro do viewer → herda zoom/pan como os outros tools. */}
+                          {tool === "crop" && imgDims.w > 0 && (
+                            <div className="absolute inset-0">
+                              <CropFrame
+                                transparentImg
+                                imageUrl={baseSrc}
+                                naturalW={imgDims.w}
+                                naturalH={imgDims.h}
+                                aspect={ASPECT_VALUE[cropAspect]}
+                                onChange={setCropArea}
+                                resetKey={cropResetKey}
+                                onApply={handleApplyCrop}
+                              />
                             </div>
                           )}
                           {/* Mask preview — centralizado em dois modos (Photoshop):
@@ -1338,10 +1405,13 @@ function PhotoMockupPageInner() {
                               activeId={luzActive}
                               interactive={tool === "luz"}
                               cropMode={tool === "luz" && luzCropMode}
+                              maskUrls={{ art: luzSceneMaskUrl, surface: luzSceneMaskUrl }}
                               onPosition={(id, pos) => updateLuz(id, { position: pos })}
                               onScale={(id, scale) => updateLuz(id, { scale })}
                               onRotate={(id, rotation) => updateLuz(id, { rotation })}
                               onCrop={(id, crop) => updateLuz(id, { crop })}
+                              onToggleCrop={() => setLuzCropMode((v) => !v)}
+                              onActivate={(id) => setLuzActive(id)}
                             />
                           )}
                           {/* Warp da Luz — Ctrl segurado: reusa o MESMO QuadEditor do Cantos
@@ -1399,19 +1469,25 @@ function PhotoMockupPageInner() {
                   );
                 })()}
 
-                {/* Crop — moldura livre estilo Photoshop (8 alças, estende além da imagem). */}
-                {tool === "crop" && photoUrl && imgDims.w > 0 && (
-                  <div className="absolute inset-0 z-10 bg-zinc-950">
-                    <CropFrame
-                      imageUrl={photoUrl}
-                      naturalW={imgDims.w}
-                      naturalH={imgDims.h}
-                      aspect={ASPECT_VALUE[cropAspect]}
-                      onChange={setCropArea}
-                      resetKey={cropResetKey}
-                    />
-                  </div>
-                )}
+                {/* Chip de contexto — diz QUAL modo está ativo (só nos modos de edição;
+                    no Render some). Fonte única: tool (+ maskTarget pro contexto da máscara). */}
+                {photoUrl && tool !== "render" && (() => {
+                  const t = PHOTO_TOOLS.find((x) => x.id === tool);
+                  if (!t) return null;
+                  if (tool === "mask" && maskTarget === "aiedit")
+                    return <CanvasContextChip icon={Wand2} label="Seleção da edição" sublabel="não afeta o render" tone="violet" />;
+                  if (tool === "mask")
+                    return <CanvasContextChip icon={t.icon} label="Máscara"
+                      sublabel={maskTarget === "surface" ? "Superfície" : "Oclusão"}
+                      tone={maskTarget === "surface" ? "acc2" : "acc"} />;
+                  if (tool === "luz")
+                    return <CanvasContextChip icon={t.icon} label="Luz"
+                      sublabel={luzLayers.find((l) => l.id === luzActive)?.label} />;
+                  if (tool === "crop")
+                    return <CanvasContextChip icon={t.icon} label="Cortar"
+                      sublabel={cropExpanding ? "Expandir" : undefined} tone="amber" />;
+                  return <CanvasContextChip icon={t.icon} label={t.label} />;
+                })()}
 
                 {/* Subtle top progress bar — non-intrusive, image stays visible (blurred) */}
                 {(renderState === "loading" || autoRenderPending) && (
@@ -1474,7 +1550,23 @@ function PhotoMockupPageInner() {
                       {photoUrl && (tool === "corners" || tool === "mask" || tool === "reflect") && (
                         <div className="space-y-2 bg-zinc-800/40 rounded-xl border border-zinc-700/40 p-2">
                           {tool === "corners" && <CornersPanel onConfirm={() => setTool("render")} size={surfaceSize} />}
-                          {tool === "mask" && (
+                          {/* Seleção da edição (aiedit) — painel dedicado, separado da máscara de arte/design. */}
+                          {tool === "mask" && maskTarget === "aiedit" && (
+                            <EditSelectionPanel
+                              instrument={maskMethod} setInstrument={setMaskMethod}
+                              mode={maskMode} setMode={setMaskMode}
+                              brushSize={brushSize} setBrushSize={setBrushSize}
+                              segFeather={segFeather} setSegFeather={setSegFeather}
+                              segStatus={segStatus} segHasMask={segHasMask}
+                              imgDims={imgDims}
+                              hasMask={!!aiEditMaskUrl}
+                              onApply={applyActiveInstrument}
+                              onUndo={undoMaskTarget}
+                              onClear={clearMaskTarget}
+                              onDone={() => setTool("aiedit")}
+                            />
+                          )}
+                          {tool === "mask" && maskTarget !== "aiedit" && (
                             <MaskPanel
                               target={maskTarget} setTarget={setMaskTarget}
                               instrument={maskMethod} setInstrument={setMaskMethod}
@@ -1500,16 +1592,10 @@ function PhotoMockupPageInner() {
                               brushErase={brushErase} setBrushErase={setBrushErase}
                               brushSize={brushSize} setBrushSize={setBrushSize}
                               brushApiRef={brushApiRef} imgDims={imgDims}
+                              reflectionOpacity={reflectionOpacity} setReflectionOpacity={setReflectionOpacity}
+                              reflectionBlur={reflectionBlur} setReflectionBlur={setReflectionBlur}
                             />
                           )}
-                          {/* Máscara da IA: o rodapé de render não se aplica — só voltar pra IA. */}
-                          {tool === "mask" && maskTarget === "aiedit" && (
-                            <button onClick={() => setTool("aiedit")}
-                              className="w-full py-2 rounded-xl text-xs font-medium bg-violet-500 text-white hover:bg-violet-500/90 transition-colors flex items-center justify-center gap-1.5">
-                              <Wand2 size={12} /> Concluir → IA
-                            </button>
-                          )}
-
                           {/* Apply edits → render. Lives in the editing tabs (intuitive),
                               not in the Render tab. Highlights when there are pending changes. */}
                           {!(tool === "mask" && maskTarget === "aiedit") && (<>
@@ -1590,7 +1676,7 @@ function PhotoMockupPageInner() {
                           resolution={aiEditRes}
                           setResolution={setAiEditRes}
                           hasMask={!!aiEditMaskUrl}
-                          onEditMask={() => { setMaskTarget("aiedit"); setTool("mask"); }}
+                          onEditMask={() => { setMaskTarget("aiedit"); setMaskMethod("brush"); setMaskMode("add"); setTool("mask"); }}
                           onClearMask={() => setAiEditMaskUrl(null)}
                           hasMagenta={photoHasMagenta}
                           cleaning={cleaningSurface}
@@ -1631,8 +1717,6 @@ function PhotoMockupPageInner() {
                           onUploadFile={(f) => setLuzAssetFromFile(luzActive, f)}
                           onClear={() => updateLuz(luzActive, { src: null, srcPath: null, srcBase64: null })}
                           onReset={() => resetLuzLayer(luzActive)}
-                          cropMode={luzCropMode}
-                          setCropMode={setLuzCropMode}
                           onResetCrop={() => updateLuz(luzActive, { crop: { x: 0, y: 0, w: 1, h: 1 } })}
                           hasWarp={!!luzLayers.find((l) => l.id === luzActive)?.warpQuad}
                           warpActive={luzCtrl}
@@ -1651,8 +1735,6 @@ function PhotoMockupPageInner() {
                           castOpacity={castOpacity} setCastOpacity={setCastOpacity}
                           maskContract={maskContract} setMaskContract={setMaskContract}
                           maskFeather={maskFeather} setMaskFeather={setMaskFeather}
-                          reflectionOpacity={reflectionOpacity} setReflectionOpacity={setReflectionOpacity}
-                          reflectionBlur={reflectionBlur} setReflectionBlur={setReflectionBlur}
                           lightWrap={lightWrap} setLightWrap={setLightWrap}
                           matchScene={matchScene} setMatchScene={setMatchScene}
                           contactShadow={contactShadow} setContactShadow={setContactShadow}
@@ -1691,7 +1773,7 @@ function PhotoMockupPageInner() {
                     (renderState === "loading" || autoRenderPending) ? "Renderizando"
                     : processState === "loading" ? "Extraindo luz & sombra"
                     : upscaling ? "Aumentando resolução"
-                    : aiEditing ? "Editando com IA"
+                    : aiEditing ? "Editando"
                     : cropApplying ? (cropExpanding ? "Expandindo cena" : "Cortando")
                     : publishState === "loading" ? "Publicando" : null;
                   if (!busy) return null;

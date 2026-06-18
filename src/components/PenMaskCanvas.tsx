@@ -8,6 +8,7 @@
  *     to reshape · click first dot = close. Rasterizes (bezierCurveTo) → alpha mask.
  */
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useViewerZoom } from "@/components/viewer-zoom";
 
 type Role = "surface" | "occluder";
 type Pt = { x: number; y: number };
@@ -56,6 +57,7 @@ export default function PenMaskCanvas({
   const hover = useRef<Pt | null>(null); // posição do cursor (img) p/ a linha-guia
   const [anchors, setAnchors] = useState<Anchor[]>([]);
   const [closed, setClosed] = useState(false);
+  const zoom = useViewerZoom(); // marcadores ÷ zoom = tamanho de tela constante
 
   const sc = useCallback(() => {
     const img = imgRef.current;
@@ -71,13 +73,14 @@ export default function PenMaskCanvas({
     const ctx = canvas.getContext("2d")!;
     ctx.clearRect(0, 0, w, h);
     const s = w / imageW;
+    const k = (px: number) => px / zoom; // tamanho de TELA constante no zoom
     if (anchors.length === 0) return;
     // Linha-guia tracejada — preview do próximo segmento (último anchor → cursor).
     if (!closed && hover.current && !drag.current) {
       const last = anchors[anchors.length - 1];
       ctx.save();
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(34,211,238,0.55)";
+      ctx.setLineDash([k(4), k(4)]);
+      ctx.lineWidth = k(1.5); ctx.strokeStyle = "rgba(34,211,238,0.55)";
       ctx.beginPath();
       ctx.moveTo(last.x * s, last.y * s);
       ctx.lineTo(hover.current.x * s, hover.current.y * s);
@@ -86,23 +89,23 @@ export default function PenMaskCanvas({
     }
     tracePath(ctx, anchors, closed, s);
     if (closed) { ctx.fillStyle = "rgba(34,211,238,0.18)"; ctx.fill(); }
-    ctx.lineWidth = 2; ctx.strokeStyle = "#22d3ee"; ctx.stroke();
-    ctx.lineWidth = 1; ctx.strokeStyle = "#22d3ee";
+    ctx.lineWidth = k(2); ctx.strokeStyle = "#22d3ee"; ctx.stroke();
+    ctx.lineWidth = k(1); ctx.strokeStyle = "#22d3ee";
     anchors.forEach((p) => {
       for (const hp of [p.hIn, p.hOut]) {
         if (!hp) continue;
         ctx.beginPath(); ctx.moveTo(p.x * s, p.y * s); ctx.lineTo(hp.x * s, hp.y * s); ctx.stroke();
-        ctx.fillStyle = "#67e8f9"; ctx.fillRect(hp.x * s - 3, hp.y * s - 3, 6, 6);
+        ctx.fillStyle = "#67e8f9"; ctx.fillRect(hp.x * s - k(3), hp.y * s - k(3), k(6), k(6));
       }
     });
     anchors.forEach((p, i) => {
       ctx.beginPath();
-      ctx.arc(p.x * s, p.y * s, i === 0 && !closed ? 7 : 5, 0, Math.PI * 2);
+      ctx.arc(p.x * s, p.y * s, k(i === 0 && !closed ? 7 : 5), 0, Math.PI * 2);
       ctx.fillStyle = i === 0 && !closed ? "#3df27e" : "#fff";
       ctx.fill();
-      ctx.lineWidth = 2; ctx.strokeStyle = "#0e7490"; ctx.stroke();
+      ctx.lineWidth = k(2); ctx.strokeStyle = "#0e7490"; ctx.stroke();
     });
-  }, [anchors, closed, imageW]);
+  }, [anchors, closed, imageW, zoom]);
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -126,6 +129,7 @@ export default function PenMaskCanvas({
   const near = (a: Pt, b: Pt, s: number) => Math.hypot((a.x - b.x) * s, (a.y - b.y) * s) <= HIT + 2;
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return; // só esquerdo cria/edita âncoras (meio = pan)
     e.preventDefault();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const p = toImg(e); const s = sc();

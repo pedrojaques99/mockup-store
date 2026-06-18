@@ -17,6 +17,7 @@ export function CornersPanel({ onConfirm, size }: { onConfirm?: () => void; size
     <div className="space-y-2">
       <p className="text-[10px] text-zinc-600">
         Arraste os cantos pra ajustar a superfície; losangos curvam as bordas.
+        Duplo-clique num canto encaixa na borda da imagem · Enter vai pro render.
       </p>
       {size && size.w > 0 && size.h > 0 && (
         <div className="flex items-center justify-between rounded-lg bg-zinc-900/50 border border-zinc-800/60 px-2 py-1.5 font-mono text-[10px]">

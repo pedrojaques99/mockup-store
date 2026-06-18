@@ -25,7 +25,7 @@ export function Segmented<T extends string>({
           type="button"
           onClick={() => onChange(o.value)}
           className={cn(
-            "py-1 rounded-lg text-[10px] font-medium border transition-colors",
+            "py-1.5 rounded-lg text-[10px] font-medium border transition-colors",
             value === o.value
               ? "bg-acc2 text-zinc-950 border-acc2"
               : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"

@@ -29,8 +29,6 @@ export interface ArtFramePanelProps {
   previewHeightClass?: string;
   /** Compact mode shrinks the type scale for the floating panel. */
   compact?: boolean;
-  /** Arte tem transparência (PNG/logo) → mostra o aviso pra escolher um fundo. */
-  artHasAlpha?: boolean;
 }
 
 export default function ArtFramePanel({
@@ -44,7 +42,6 @@ export default function ArtFramePanel({
   onClear,
   previewHeightClass = "h-44",
   compact = false,
-  artHasAlpha = false,
 }: ArtFramePanelProps) {
   const [cropPos, setCropPos] = useState({ x: 0, y: 0 });
   const [cropZoom, setCropZoom] = useState(1);
@@ -91,6 +88,9 @@ export default function ArtFramePanel({
               zoom={cropZoom}
               aspect={aspect}
               showGrid={false}
+              minZoom={0.2}
+              maxZoom={4}
+              restrictPosition={false}
               onCropChange={setCropPos}
               onZoomChange={setCropZoom}
               onCropComplete={(_area: Area, px: Area) =>
@@ -102,7 +102,7 @@ export default function ArtFramePanel({
             <span className="text-[10px] text-neutral-600 shrink-0">Zoom</span>
             <input
               type="range"
-              min={1}
+              min={0.2}
               max={4}
               step={0.01}
               value={cropZoom}
@@ -198,13 +198,6 @@ export default function ArtFramePanel({
           </label>
         </div>
       </div>
-      {artHasAlpha && (frame.bg ?? null) === null && (
-        <button type="button"
-          onClick={() => onFrameChange((f) => ({ ...f, bg: "#ffffff" }))}
-          className="w-full mt-1 flex items-center justify-center gap-1.5 text-[10px] text-acc bg-acc/10 hover:bg-acc/20 border border-acc/30 rounded-lg py-1.5 transition-colors">
-          <AlertTriangle className="w-3 h-3 shrink-0" /> PNG transparente — clique pra pôr fundo branco e tirar o rosa
-        </button>
-      )}
     </div>
   );
 }

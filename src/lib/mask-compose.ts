@@ -8,13 +8,38 @@
  * the whole mask anymore.
  */
 
-function loadImg(url: string): Promise<HTMLImageElement> {
+export function loadImg(url: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
     const img = new Image();
     img.onload = () => res(img);
     img.onerror = rej;
     img.src = url;
   });
+}
+
+/**
+ * Resolução máxima (maior lado) com que uma máscara é rasterizada/armazenada.
+ * O render-server faz `resize(W,H,fit:fill)` + blur em toda máscara recebida, então
+ * full-res no cliente é desperdício — capar aqui corta memória (undo/IndexedDB) e
+ * bytes de upload ~4× a 4K, sem diferença visual (a seleção é suave e ainda é borrada).
+ */
+export const MASK_MAX_EDGE = 2048;
+
+/** Dimensões da máscara capadas a `max` no maior lado, preservando o aspect. Nunca amplia. */
+export function capMaskDims(w: number, h: number, max = MASK_MAX_EDGE): [number, number] {
+  if (!w || !h) return [w, h];
+  const longest = Math.max(w, h);
+  if (longest <= max) return [w, h];
+  const s = max / longest;
+  return [Math.round(w * s), Math.round(h * s)];
+}
+
+/** Reamostra um data-URL de máscara para `w×h` (cap). Devolve PNG data-URL. */
+export async function resampleMask(url: string, w: number, h: number): Promise<string> {
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  cv.getContext("2d")!.drawImage(await loadImg(url), 0, 0, w, h);
+  return cv.toDataURL("image/png");
 }
 
 /** Composite `patchUrl` into `baseUrl` with add/subtract. Returns a PNG data URL. */

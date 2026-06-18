@@ -41,7 +41,8 @@ export function CropPanel({
       <p className="text-[9px] uppercase tracking-wider text-zinc-600">Cortar / Expandir</p>
 
       <p className="text-[10px] text-zinc-500 leading-snug">
-        Arraste as <span className="text-zinc-300">8 alças</span> pra ajustar a moldura. Puxe pra <span className="text-acc">fora da imagem</span> → expande com IA.
+        Arraste as <span className="text-zinc-300">8 alças</span> pra ajustar a moldura. Puxe pra <span className="text-acc">fora da imagem</span> → estende a cena.
+        <br /><span className="text-zinc-600">Duplo-clique dentro (ou Enter) aplica · Esc cancela.</span>
       </p>
 
       <div className="space-y-0.5">
@@ -68,7 +69,7 @@ export function CropPanel({
 
       {expanding && (
         <div className="flex items-center gap-1.5 text-[10px] rounded-lg px-2 py-1.5 border text-acc border-acc/30 bg-acc/5">
-          <Maximize size={11} /> Moldura além da imagem → expandir com IA (outpaint)
+          <Maximize size={11} /> Moldura além da imagem → estende a cena (gera a borda nova)
         </div>
       )}
 
@@ -94,13 +95,13 @@ export function CropPanel({
         {applying ? (
           <><Loader2 size={12} className="animate-spin" /> {expanding ? "Expandindo…" : "Cortando…"}</>
         ) : expanding ? (
-          <><Sparkles size={12} /> Expandir com IA</>
+          <><Sparkles size={12} /> Expandir cena</>
         ) : (
           <><CropIcon size={12} /> Aplicar corte</>
         )}
       </button>
       <p className="text-[10px] text-zinc-600">
-        {expanding ? "Gera a borda nova via IA (créditos) e recarrega a cena." : "Recorta e recarrega a cena (re-analisa a superfície)."}
+        {expanding ? "Gera a borda nova (créditos) e recarrega a cena." : "Recorta e recarrega a cena (re-analisa a superfície)."}
       </p>
     </div>
   );

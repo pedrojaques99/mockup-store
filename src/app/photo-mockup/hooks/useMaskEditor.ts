@@ -12,15 +12,29 @@
  * os panels (MaskPanel/ReflexoPanel) e o JSX dos overlays NÃO mudam. O único
  * acoplamento de saída é `onMaskChanged` (hoje: setProcessState("idle") → re-extrai).
  *
- * Extraído de photo-mockup/page.tsx sem mudança de comportamento.
+ * Robustez do compositing (todas as escritas de máscara passam por uma FILA serializada):
+ *  - **Sem lost-update:** a base é lida FRESCA via `useEditorDoc.getState()` no momento
+ *    da execução (não pelo closure), e os composites rodam um de cada vez → traços
+ *    rápidos do pincel não se atropelam (cada um soma sobre o resultado do anterior).
+ *  - **Memória/perf:** rasteriza no máximo a `MASK_MAX_EDGE` (capMaskDims) — base capada
+ *    = decode barato, encode capado = traço rápido, undo/IndexedDB leves. O server
+ *    reescala pra W×H de qualquer forma.
  */
 import { useState, useRef, useCallback } from "react";
-import { useDocField, editorHistory } from "@/stores/editorDoc";
+import { useDocField, editorHistory, useEditorDoc } from "@/stores/editorDoc";
+import { compositeMask, invertMask, capMaskDims, resampleMask } from "@/lib/mask-compose";
 import type { MaskInstrument, MaskTarget, MaskMode } from "@/components/photo-tools/registry";
 import type { MaskView } from "@/components/photo-tools/panels/MaskPanel";
 import type { SegApi } from "@/components/SegmentCanvas";
 import type { PenApi } from "@/components/PenMaskCanvas";
 import type { BrushApi } from "@/components/BrushCanvas";
+
+/** Alvo → campo data-URL no DocState (lido fresco via getState dentro da fila). */
+const MASK_FIELD = {
+  surface: "surfaceMaskUrl",
+  occluder: "occluderMaskUrl",
+  aiedit: "aiEditMaskUrl",
+} as const;
 
 export function useMaskEditor({
   imgDims,
@@ -41,7 +55,7 @@ export function useMaskEditor({
   const [maskView, setMaskView] = useState<MaskView>("overlay"); // overlay colorido vs máscara grayscale isolada
   const [maskMode, setMaskMode] = useState<MaskMode>("add");
 
-  const [reflectionMaskUrl, setReflectionMaskUrl] = useDocField("reflectionMaskUrl"); // brush override
+  const [reflectionMaskUrl, setReflectionMaskUrlRaw] = useDocField("reflectionMaskUrl"); // brush override
   // Non-destructive layer visibility — toggling hides a mask from the bake WITHOUT discarding it.
   const [surfaceOn, setSurfaceOn] = useDocField("surfaceOn");
   const [occluderOn, setOccluderOn] = useDocField("occluderOn");
@@ -74,39 +88,63 @@ export function useMaskEditor({
   const maskUrlFor = (t: MaskTarget) => (t === "surface" ? surfaceMaskUrl : t === "occluder" ? occluderMaskUrl : aiEditMaskUrl);
   const maskSetterFor = (t: MaskTarget) => (t === "surface" ? setSurfaceMaskUrl : t === "occluder" ? setOccluderMaskUrl : setAiEditMaskUrl);
 
-  const applyMaskPatch = useCallback(async (patchUrl: string) => {
-    const { compositeMask } = await import("@/lib/mask-compose");
-    const cur = maskUrlFor(maskTarget);
-    const set = maskSetterFor(maskTarget);
-    set(await compositeMask(cur, patchUrl, maskMode, imgDims.w, imgDims.h));
-    onMaskChanged();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maskTarget, maskMode, surfaceMaskUrl, occluderMaskUrl, aiEditMaskUrl, imgDims.w, imgDims.h, onMaskChanged]);
+  // Fila serializada — toda escrita de máscara entra aqui em ordem. Garante que um
+  // composite só começa após o anterior ter COMMITADO no doc (getState reflete na hora),
+  // matando a corrida onde dois traços liam a mesma base e um sobrescrevia o outro.
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const enqueue = useCallback((fn: () => Promise<void> | void) => {
+    const next = queueRef.current.then(fn, fn);
+    queueRef.current = next.then(() => {}, () => {}); // nunca rejeita → fila não trava
+  }, []);
 
-  const invertMaskTarget = useCallback(async () => {
-    const cur = maskUrlFor(maskTarget);
-    if (!cur) return;
-    const { invertMask } = await import("@/lib/mask-compose");
-    const set = maskSetterFor(maskTarget);
-    set(await invertMask(cur, imgDims.w, imgDims.h));
-    onMaskChanged();
+  const applyMaskPatch = useCallback((patchUrl: string) => {
+    const target = maskTarget;
+    const mode = maskMode;
+    enqueue(async () => {
+      const cur = useEditorDoc.getState().doc[MASK_FIELD[target]]; // base FRESCA, não-stale
+      const [cw, ch] = capMaskDims(imgDims.w, imgDims.h);
+      maskSetterFor(target)(await compositeMask(cur, patchUrl, mode, cw, ch));
+      onMaskChanged();
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maskTarget, surfaceMaskUrl, occluderMaskUrl, aiEditMaskUrl, imgDims.w, imgDims.h, onMaskChanged]);
+  }, [maskTarget, maskMode, imgDims.w, imgDims.h, onMaskChanged, enqueue]);
+
+  const invertMaskTarget = useCallback(() => {
+    const target = maskTarget;
+    enqueue(async () => {
+      const cur = useEditorDoc.getState().doc[MASK_FIELD[target]];
+      if (!cur) return;
+      const [cw, ch] = capMaskDims(imgDims.w, imgDims.h);
+      maskSetterFor(target)(await invertMask(cur, cw, ch));
+      onMaskChanged();
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maskTarget, imgDims.w, imgDims.h, onMaskChanged, enqueue]);
 
   const clearMaskTarget = useCallback(() => {
-    const set = maskSetterFor(maskTarget);
-    set(null);
-    onMaskChanged();
+    const target = maskTarget;
+    enqueue(() => { maskSetterFor(target)(null); onMaskChanged(); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maskTarget, onMaskChanged]);
+  }, [maskTarget, onMaskChanged, enqueue]);
+
+  // Reflexo: o BrushCanvas (não-patchMode) emite a máscara cheia full-res → capa antes
+  // de gravar (mesma razão das outras: memória/undo/upload). null passa direto.
+  const setReflectionMaskUrl = useCallback((url: string | null) => {
+    if (!url) { setReflectionMaskUrlRaw(null); return; }
+    enqueue(async () => {
+      const [cw, ch] = capMaskDims(imgDims.w, imgDims.h);
+      try { setReflectionMaskUrlRaw(await resampleMask(url, cw, ch)); }
+      catch { setReflectionMaskUrlRaw(url); }
+    });
+  }, [imgDims.w, imgDims.h, enqueue, setReflectionMaskUrlRaw]);
 
   // Undo da máscara = histórico global (zundo). As 4 máscaras vivem no DocState, então
   // cada apply/invert/clear já é um passo versionado — sem pilha paralela (evita B1: o
-  // undo-duplo onde a ref e o zundo divergiam e restauravam máscara stale).
+  // undo-duplo onde a ref e o zundo divergiam e restauravam máscara stale). Entra na fila
+  // pra não correr com um composite em voo.
   const undoMaskTarget = useCallback(() => {
-    editorHistory.undo();
-    onMaskChanged(); // re-extrai/renderiza com a máscara restaurada (debounce)
-  }, [onMaskChanged]);
+    enqueue(() => { editorHistory.undo(); onMaskChanged(); });
+  }, [onMaskChanged, enqueue]);
 
   // Push the active instrument's current selection into the mask (pen/wand/sam).
   // The canvas `Role` is surface|occluder only — but it's cosmetic here (onApply

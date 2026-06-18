@@ -82,11 +82,14 @@ export function ToolRail<T extends string>({
                       else { onSelect(t.id); onPanelOpenChange(true); }
                     }}
                     className={cn(
-                      "grid place-items-center w-10 h-10 rounded-xl transition-colors",
-                      isActive ? "bg-acc2 text-zinc-950" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                      "flex flex-col items-center justify-center gap-0.5 w-12 h-12 rounded-xl transition-all active:scale-90",
+                      isActive ? "bg-acc2 text-zinc-950 shadow-md shadow-acc2/20" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
                     )}
                   >
-                    <Icon size={18} strokeWidth={2} />
+                    <Icon size={17} strokeWidth={2} />
+                    <span className={cn("text-[7.5px] font-medium leading-none tracking-tight", isActive ? "text-zinc-900" : "text-zinc-500")}>
+                      {t.label}
+                    </span>
                   </button>
                 </Tooltip>
               );

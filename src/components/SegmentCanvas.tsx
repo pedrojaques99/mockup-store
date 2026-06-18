@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Loader2 } from "lucide-react";
 import MagicWand from "magic-wand-tool";
+import { useViewerZoom } from "@/components/viewer-zoom";
 import { refineAlphaGuided } from "@/lib/guided-filter";
 import { Sam2Client, type DecodedMask } from "@/lib/sam2/client";
 import { maskToImageData, maskToAlphaCanvas } from "@/lib/sam2/imageutils";
@@ -64,6 +65,7 @@ export default function SegmentCanvas({
   const [ver, setVer] = useState(0);
   const dragPt = useRef<{ idx: number; moved: boolean } | null>(null);  // SAM point being dragged
   const pointsRef = useRef<SamPoint[]>([]);
+  const zoom = useViewerZoom(); // marcadores SAM ÷ zoom = tamanho de tela constante
 
   // Boot SAM2 → encode the SAMPLE source (scene), not the displayed render.
   useEffect(() => {
@@ -90,6 +92,11 @@ export default function SegmentCanvas({
     return () => { cancelled = true; client.dispose(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sampleSrc ?? imageUrl]);
+
+  // Invalida o cache de pixels quando a FONTE de amostragem muda (limpar faixa rosa /
+  // cortar / upscale trocam a foto sem remontar o componente). Sem isso a varinha e o
+  // conta-gotas amostrariam a cena ANTIGA. Mesma chave do effect de encode do SAM2.
+  useEffect(() => { samplePixels.current = null; }, [sampleSrc ?? imageUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ensureSample = useCallback(() => {
     if (samplePixels.current) return;
@@ -159,19 +166,20 @@ export default function SegmentCanvas({
     }
     if (mode === "sam") {
       const sx = w / imageW, sy = h / imageH;
+      const k = (px: number) => px / zoom; // tamanho de TELA constante no zoom
       for (const p of points) {
         const cx = p.x * sx, cy = p.y * sy, inc = p.label === 1;
-        ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+        ctx.beginPath(); ctx.arc(cx, cy, k(7), 0, Math.PI * 2);
         ctx.fillStyle = inc ? "#3df27e" : "#ef4444"; ctx.fill();
-        ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; ctx.stroke();
+        ctx.lineWidth = k(2); ctx.strokeStyle = "#fff"; ctx.stroke();
         // Glifo +/− (incluir / excluir)
-        ctx.strokeStyle = "#0a0a0a"; ctx.lineWidth = 1.6; ctx.lineCap = "round";
-        ctx.beginPath(); ctx.moveTo(cx - 3, cy); ctx.lineTo(cx + 3, cy);
-        if (inc) { ctx.moveTo(cx, cy - 3); ctx.lineTo(cx, cy + 3); }
+        ctx.strokeStyle = "#0a0a0a"; ctx.lineWidth = k(1.6); ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(cx - k(3), cy); ctx.lineTo(cx + k(3), cy);
+        if (inc) { ctx.moveTo(cx, cy - k(3)); ctx.lineTo(cx, cy + k(3)); }
         ctx.stroke();
       }
     }
-  }, [mode, mask, points, imageW, imageH, ver]);
+  }, [mode, mask, points, imageW, imageH, ver, zoom]);
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -212,6 +220,7 @@ export default function SegmentCanvas({
     return -1;
   };
   const onPointerDown = (e: React.PointerEvent) => {
+    if (e.button === 1) return; // botão do meio = pan (ZoomPanViewer); não amostra/seleciona
     if (mode === "smart") { pickSeed(e); return; }
     if (status !== "ready") return;
     const { x, y, sc } = imgCoords(e);

@@ -56,7 +56,13 @@ export interface LuzLayer {
   /** Warp de perspectiva (4 cantos, espaço da cena 0..1). null = posicionamento afim. */
   warpQuad: LuzQuad | null;
   blendMode: LuzBlend;
+  /** Clip da camada a uma região da cena (tipo "clip to layer" do Photoshop):
+   *  none = sem clip · art = só onde a arte do user aparece · surface = área de
+   *  máscara/superfície do render. Vale 1:1 no preview (CSS mask) e no render (dest-in). */
+  maskMode: LuzMaskMode;
 }
+
+export type LuzMaskMode = "none" | "art" | "surface";
 
 export const LUZ_CROP_FULL = { x: 0, y: 0, w: 1, h: 1 } as const;
 /** true quando o recorte cobre a textura inteira (pode pular extract). */
@@ -80,6 +86,7 @@ export const LUZ_DEFAULTS: LuzLayer[] = [
     crop: { x: 0, y: 0, w: 1, h: 1 },
     warpQuad: null,
     blendMode: "multiply",
+    maskMode: "none",
   },
   {
     id: "light",
@@ -96,6 +103,7 @@ export const LUZ_DEFAULTS: LuzLayer[] = [
     crop: { x: 0, y: 0, w: 1, h: 1 },
     warpQuad: null,
     blendMode: "screen",
+    maskMode: "none",
   },
 ];
 
@@ -111,6 +119,7 @@ export interface LuzRenderLayer {
   crop: { x: number; y: number; w: number; h: number };
   warpQuad: LuzQuad | null;
   blendMode: LuzBlend;
+  maskMode: LuzMaskMode;
 }
 
 export function toLuzRenderLayers(layers: LuzLayer[]): LuzRenderLayer[] {
@@ -127,5 +136,6 @@ export function toLuzRenderLayers(layers: LuzLayer[]): LuzRenderLayer[] {
       crop: l.crop ?? { x: 0, y: 0, w: 1, h: 1 },
       warpQuad: l.warpQuad ?? null,
       blendMode: l.blendMode,
+      maskMode: l.maskMode ?? "none",
     }));
 }

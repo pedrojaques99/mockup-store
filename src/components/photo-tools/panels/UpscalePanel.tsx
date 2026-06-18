@@ -1,16 +1,21 @@
 "use client";
 
-/** UpscalePanel — aumenta foto ou arte. Bicubic (local, grátis) ou IA (Visant, crédito). */
-import { ZoomIn, Loader2, Sparkles } from "lucide-react";
+/** UpscalePanel — aumenta foto ou arte. Bicubic (local, grátis) ou Visant (crédito). */
+import { Scaling, Loader2, Sparkles, Image as ImageIcon, Palette } from "lucide-react";
 import { Segmented } from "@/components/ui/Segmented";
+
+/** Opção de Segmented com ícone comunicativo + texto. */
+function Opt({ icon: Icon, children }: { icon: typeof ImageIcon; children: React.ReactNode }) {
+  return <span className="inline-flex items-center justify-center gap-1"><Icon size={10} /> {children}</span>;
+}
 
 export type UpscaleTarget = "photo" | "art";
 export type UpscaleMode = "bicubic" | "pruna" | "google" | "ai";
 
 const METHOD_META: Record<UpscaleMode, { label: string; hint: string; factorBased: boolean }> = {
   bicubic: { label: "Rápido",  hint: "Reamostragem local — grátis, sem inventar detalhe.", factorBased: true },
-  pruna:   { label: "Turbo",   hint: "Upscale por IA, rápido — até 128 MP.", factorBased: true },
-  google:  { label: "Nítido",  hint: "IA com mais detalhe — 2× ou 4×.", factorBased: true },
+  pruna:   { label: "Turbo",   hint: "Upscale rápido — até 128 MP.", factorBased: true },
+  google:  { label: "Nítido",  hint: "Mais detalhe — 2× ou 4×.", factorBased: true },
   ai:      { label: "Visant",  hint: "Máxima qualidade — usa créditos da conta.", factorBased: false },
 };
 
@@ -54,8 +59,8 @@ export function UpscalePanel({
           value={target}
           onChange={setTarget}
           options={[
-            { value: "photo", label: "Foto" },
-            { value: "art", label: hasArt ? "Arte" : "Arte (vazio)" },
+            { value: "photo", label: <Opt icon={ImageIcon}>Foto</Opt> },
+            { value: "art", label: <Opt icon={Palette}>{hasArt ? "Arte" : "Arte (vazio)"}</Opt> },
           ]}
         />
       </div>
@@ -110,7 +115,7 @@ export function UpscalePanel({
         {applying ? (
           <><Loader2 size={12} className="animate-spin" /> Aumentando…</>
         ) : mode === "bicubic" ? (
-          <><ZoomIn size={12} /> Aumentar</>
+          <><Scaling size={12} /> Aumentar</>
         ) : (
           <><Sparkles size={12} /> Aumentar ({METHOD_META[mode].label})</>
         )}

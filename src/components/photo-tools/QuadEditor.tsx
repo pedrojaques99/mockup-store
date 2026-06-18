@@ -11,9 +11,15 @@
  */
 import { useRef, useCallback, useEffect } from "react";
 import type { Quad, QuadPt, Bend } from "@/stores/editorDoc";
+import { useViewerZoom } from "@/components/viewer-zoom";
+import { HANDLE_ACCENT, HANDLE_ACCENT_RGB } from "@/components/photo-tools/handle-style";
 
 const CORNER_KEYS = ["tl", "tr", "br", "bl"] as const;
 const HANDLE_R = 9;
+// Margem do canvas além da imagem (fração da dimensão da img de cada lado) — deixa
+// os cantos/quad saírem da imagem sem cortar no buffer. Os cantos podem ir até a
+// borda dessa margem (clamp relaxado). O viewport ainda corta o que vaza dele.
+const PAD = 1.0;
 
 const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -39,6 +45,9 @@ export function QuadEditor({
   const imgRef = useRef<HTMLImageElement>(null);
   const dragging = useRef<keyof Quad | null>(null);
   const draggingEdge = useRef<BendKey | null>(null);
+  const hover = useRef<keyof Quad | null>(null); // canto sob o cursor (destaque estilo Figma)
+  // Zoom do viewer → desenha alças/linhas/lupa em px-de-canvas ÷ zoom = tamanho de TELA constante.
+  const zoom = useViewerZoom();
   const scaleRef = useRef({ sx: 1, sy: 1, ox: 0, oy: 0 });
 
   const toCanvas = useCallback(
@@ -67,8 +76,9 @@ export function QuadEditor({
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const k = (px: number) => px / zoom; // px-de-canvas p/ tamanho de tela constante
 
-    const pts = CORNER_KEYS.map((k) => toCanvas(quad[k]));
+    const pts = CORNER_KEYS.map((kk) => toCanvas(quad[kk]));
 
     // Trace the quad outline — edges curve when bent (quadratic bezier through the bow).
     const tracePath = () => {
@@ -89,11 +99,11 @@ export function QuadEditor({
     };
 
     tracePath();
-    ctx.fillStyle = "rgba(34, 197, 94, 0.12)";
+    ctx.fillStyle = `rgba(${HANDLE_ACCENT_RGB}, 0.12)`;
     ctx.fill();
     tracePath();
-    ctx.strokeStyle = "#22c55e";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = HANDLE_ACCENT;
+    ctx.lineWidth = k(2);
     ctx.stroke();
 
     // Edge bend handles (small diamonds at each edge midpoint)
@@ -105,39 +115,41 @@ export function QuadEditor({
         ctx.save();
         ctx.translate(h.x, h.y);
         ctx.rotate(Math.PI / 4);
-        const s = active ? 7 : 5;
+        const s = k(active ? 7 : 5);
         ctx.fillStyle = active ? "#16a34a" : "#0a0a0a";
-        ctx.strokeStyle = "#22c55e";
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = HANDLE_ACCENT;
+        ctx.lineWidth = k(2);
         ctx.fillRect(-s, -s, s * 2, s * 2);
         ctx.strokeRect(-s, -s, s * 2, s * 2);
         ctx.restore();
       }
     }
 
-    CORNER_KEYS.forEach((k, i) => {
+    CORNER_KEYS.forEach((kk, i) => {
       const { x, y } = pts[i];
-      const active = dragging.current === k;
+      const active = dragging.current === kk;
+      const hovered = !active && hover.current === kk;
       ctx.beginPath();
-      ctx.arc(x, y, active ? HANDLE_R + 2 : HANDLE_R - 2, 0, Math.PI * 2);
-      ctx.fillStyle = active ? "#16a34a" : "#ffffff";
+      ctx.arc(x, y, k(active ? HANDLE_R + 2 : hovered ? HANDLE_R + 1 : HANDLE_R - 2), 0, Math.PI * 2);
+      ctx.fillStyle = active ? "#16a34a" : hovered ? HANDLE_ACCENT : "#ffffff";
       ctx.fill();
-      ctx.strokeStyle = active ? "#fff" : "#22c55e";
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = active || hovered ? "#fff" : HANDLE_ACCENT;
+      ctx.lineWidth = k(2);
       ctx.stroke();
     });
 
     if (dragging.current && imgRef.current?.complete) {
       const corner = toCanvas(quad[dragging.current]);
-      const LENS_R = 72;
+      const LENS_R = k(72);
       const ZOOM = 5;
+      const off = k(106), pad = k(8);
 
-      let lx = corner.x + 106;
-      let ly = corner.y - 106;
-      if (lx + LENS_R > canvas.width - 8) lx = corner.x - 106;
-      if (ly - LENS_R < 8) ly = corner.y + 106;
-      lx = Math.max(LENS_R + 8, Math.min(canvas.width - LENS_R - 8, lx));
-      ly = Math.max(LENS_R + 8, Math.min(canvas.height - LENS_R - 8, ly));
+      let lx = corner.x + off;
+      let ly = corner.y - off;
+      if (lx + LENS_R > canvas.width - pad) lx = corner.x - off;
+      if (ly - LENS_R < pad) ly = corner.y + off;
+      lx = Math.max(LENS_R + pad, Math.min(canvas.width - LENS_R - pad, lx));
+      ly = Math.max(LENS_R + pad, Math.min(canvas.height - LENS_R - pad, ly));
 
       const imgX = (corner.x - scaleRef.current.ox) / scaleRef.current.sx;
       const imgY = (corner.y - scaleRef.current.oy) / scaleRef.current.sy;
@@ -159,37 +171,38 @@ export function QuadEditor({
 
       ctx.beginPath();
       ctx.arc(lx, ly, LENS_R, 0, Math.PI * 2);
-      ctx.strokeStyle = "#22c55e";
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = HANDLE_ACCENT;
+      ctx.lineWidth = k(2.5);
       ctx.stroke();
 
       ctx.save();
       ctx.shadowColor = "#000";
-      ctx.shadowBlur = 4;
-      ctx.strokeStyle = "#22c55e";
-      ctx.lineWidth = 1.5;
+      ctx.shadowBlur = k(4);
+      ctx.strokeStyle = HANDLE_ACCENT;
+      ctx.lineWidth = k(1.5);
+      const cr = k(15);
       ctx.beginPath();
-      ctx.moveTo(lx - 15, ly); ctx.lineTo(lx + 15, ly);
-      ctx.moveTo(lx, ly - 15); ctx.lineTo(lx, ly + 15);
+      ctx.moveTo(lx - cr, ly); ctx.lineTo(lx + cr, ly);
+      ctx.moveTo(lx, ly - cr); ctx.lineTo(lx, ly + cr);
       ctx.stroke();
       ctx.restore();
 
       ctx.beginPath();
-      ctx.arc(lx, ly, 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = "#22c55e";
+      ctx.arc(lx, ly, k(2.5), 0, Math.PI * 2);
+      ctx.fillStyle = HANDLE_ACCENT;
       ctx.fill();
 
       ctx.save();
-      ctx.strokeStyle = "rgba(34,197,94,0.35)";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = `rgba(${HANDLE_ACCENT_RGB},0.35)`;
+      ctx.lineWidth = k(1);
+      ctx.setLineDash([k(3), k(3)]);
       ctx.beginPath();
       ctx.moveTo(corner.x, corner.y);
       ctx.lineTo(lx, ly);
       ctx.stroke();
       ctx.restore();
     }
-  }, [quad, toCanvas, edgeGeom, onBendChange]);
+  }, [quad, toCanvas, edgeGeom, onBendChange, zoom]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -202,8 +215,13 @@ export function QuadEditor({
       // ZoomPanViewer CSS transform, which would double-scale the canvas. Sizing to layout
       // means the canvas (and its handles) scale uniformly WITH the transform → always aligned.
       const iw = (img as HTMLElement).offsetWidth, ih = (img as HTMLElement).offsetHeight;
-      canvas.width = iw; canvas.height = ih;
-      scaleRef.current = { sx: iw / imageNW, sy: ih / imageNH, ox: 0, oy: 0 };
+      // Canvas maior que a img (PAD de cada lado) + deslocado p/ -pad → desenha o
+      // quad/cantos que vazam da imagem sem cortar no buffer. ox/oy = origem da img.
+      const padX = Math.round(iw * PAD), padY = Math.round(ih * PAD);
+      canvas.width = iw + padX * 2; canvas.height = ih + padY * 2;
+      canvas.style.left = `${-padX}px`; canvas.style.top = `${-padY}px`;
+      canvas.style.width = `${iw + padX * 2}px`; canvas.style.height = `${ih + padY * 2}px`;
+      scaleRef.current = { sx: iw / imageNW, sy: ih / imageNH, ox: padX, oy: padY };
       draw();
     };
     const ro = new ResizeObserver(update);
@@ -236,6 +254,7 @@ export function QuadEditor({
   };
 
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button !== 0) return; // só botão esquerdo — meio/direito não mexem nas alças (meio = pan)
     const { x, y, sc } = clientToImg(e.clientX, e.clientY);
     const k = hitTest(x, y, sc);
     if (k) { e.preventDefault(); dragging.current = k; draw(); return; }
@@ -254,14 +273,28 @@ export function QuadEditor({
       return;
     }
     if (!dragging.current) {
-      (e.currentTarget as HTMLCanvasElement).style.cursor = (hitTest(x, y, sc) || edgeHitTest(x, y, sc)) ? "grab" : "default";
+      const hit = hitTest(x, y, sc);
+      (e.currentTarget as HTMLCanvasElement).style.cursor = (hit || edgeHitTest(x, y, sc)) ? "grab" : "default";
+      if (hover.current !== hit) { hover.current = hit; draw(); } // destaque do canto no hover
       return;
     }
     // Corner follows the cursor directly in image space — robust at any zoom/pan.
-    onQuadChange({ ...quad, [dragging.current]: { x: Math.round(clampN(x, 0, imageNW)), y: Math.round(clampN(y, 0, imageNH)) } });
+    // Clamp relaxado: o canto pode sair da imagem até a borda da margem (PAD) do canvas.
+    onQuadChange({ ...quad, [dragging.current]: { x: Math.round(clampN(x, -imageNW * PAD, imageNW * (1 + PAD))), y: Math.round(clampN(y, -imageNH * PAD, imageNH * (1 + PAD))) } });
   };
 
   const onMouseUp = () => { dragging.current = null; draggingEdge.current = null; draw(); };
+
+  // Duplo-clique num canto → encaixa no canto correspondente da imagem (preenche o frame).
+  const IMG_CORNER: Record<keyof Quad, [number, number]> = { tl: [0, 0], tr: [1, 0], br: [1, 1], bl: [0, 1] };
+  const onDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { x, y, sc } = clientToImg(e.clientX, e.clientY);
+    const k = hitTest(x, y, sc);
+    if (!k) return;
+    e.preventDefault(); e.stopPropagation();
+    const [fx, fy] = IMG_CORNER[k];
+    onQuadChange({ ...quad, [k]: { x: Math.round(fx * imageNW), y: Math.round(fy * imageNH) } });
+  };
 
   return (
     <div ref={containerRef} className="relative select-none">
@@ -270,11 +303,12 @@ export function QuadEditor({
         style={transparentImg ? { opacity: 0 } : undefined} />
       <canvas
         ref={canvasRef}
-        className="absolute inset-0"
+        className="absolute"
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
-        onMouseLeave={onMouseUp}
+        onMouseLeave={() => { hover.current = null; onMouseUp(); }}
+        onDoubleClick={onDoubleClick}
       />
     </div>
   );
