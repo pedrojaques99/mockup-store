@@ -15,6 +15,7 @@ import { temporal, type TemporalState } from "zundo";
 import { useCallback } from "react";
 import { DEFAULT_FRAME, type FrameConfig } from "@/lib/art-frame";
 import { LUZ_DEFAULTS, type LuzLayer } from "@/types/luz";
+import type { WarpMesh } from "@/lib/mesh-core";
 
 export interface QuadPt { x: number; y: number }
 export interface Quad { tl: QuadPt; tr: QuadPt; br: QuadPt; bl: QuadPt }
@@ -48,6 +49,22 @@ export interface DocState {
   textureAmount: number;
   specularOpacity: number;
   quad: Quad | null;
+  /** Malha de warp (grade Coons + hastes Bézier) — SSoT compartilhado com /calibrate. */
+  mesh: WarpMesh | null;
+  /** Displacement do RELEVO (foto/material) — amplitude (px) + blur. SSoT com /calibrate.
+   *  Trabalha JUNTO com a malha: malha = warp macro, disp = relevo micro (composto no render). */
+  dispScale: number;
+  dispBlur: number;
+  /** Material/substrato procedural (espelhado do /calibrate). */
+  surfaceMaterial: string;        // "none" | "fabric" | "metal" | "glass" | "worn" | "shadow"
+  surfaceMaterialIntensity: number;
+  surfaceMaterialAngle: number;
+  surfaceMaterialScale: number;
+  /** Substrato detectado/escolhido (auto-classify ou override). Alimenta o
+   *  self-learning loop: vai no payload do publish → engine-feedback agrega. */
+  substrate: string | null;
+  /** Cena calibrada vinculada (`${dir}::${sceneName}`) — base do botão "importar / salvar". */
+  calibrationKey: string | null;
   frame: FrameConfig;
   // máscaras (data URLs)
   surfaceMaskUrl: string | null;
@@ -85,6 +102,15 @@ export const DEFAULT_DOC: DocState = {
   textureAmount: 0,
   specularOpacity: 0,
   quad: null,
+  mesh: null,
+  dispScale: 0,
+  dispBlur: 8,
+  surfaceMaterial: "none",
+  surfaceMaterialIntensity: 0.5,
+  surfaceMaterialAngle: 35,
+  surfaceMaterialScale: 6,
+  substrate: null,
+  calibrationKey: null,
   frame: DEFAULT_FRAME,
   surfaceMaskUrl: null,
   occluderMaskUrl: null,

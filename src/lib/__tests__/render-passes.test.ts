@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import sharp from "sharp";
 import { neutralizeNeonPixels } from "../photo-shadow";
-import { applyLightWrap } from "../photo-fx";
+import { applyLightWrap, toPixels, fromPixels } from "../photo-fx";
 
 /** Build a small RGBA test image from a per-pixel paint fn → PNG buffer. */
 async function makeImg(w: number, h: number, paint: (x: number, y: number) => [number, number, number]): Promise<Buffer> {
@@ -46,8 +46,8 @@ describe("applyLightWrap — masked, non-destructive", () => {
     const render = await makeImg(W, H, () => [100, 100, 100]);
     const scene = await makeImg(W, H, () => [200, 50, 50]);
     const maskFull = await makeImg(W, H, () => [0, 0, 0]); // all-black alpha-ish → no ring
-    const out = await applyLightWrap(render, scene, maskFull, W, H, 0, 8);
-    const px = await pixels(out);
+    const out = await applyLightWrap(await toPixels(render), scene, await toPixels(maskFull), W, H, 0, 8);
+    const px = await pixels(await fromPixels(out));
     expect([px[0], px[1], px[2]]).toEqual([100, 100, 100]); // unchanged where mask is empty
   });
 });

@@ -12,6 +12,7 @@ import { readFile, writeFile, mkdir, copyFile, readdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { getDb } from "@/lib/db";
+import { logFeedback, relearn, hashImage } from "@/lib/engine-feedback";
 
 const TMP_DIR  = join(process.cwd(), ".tmp", "photo-scenes");
 const DATA_DIR = join(process.cwd(), "data", "photo-scenes");
@@ -96,6 +97,39 @@ export async function POST(
   };
 
   await col.updateOne({ id }, { $set: doc }, { upsert: true });
+
+  // Retro-alimentação do engine: (auto = analysis.quad) × (final = settings.quad corrigido
+  // pelo humano). Todo publish vira ground-truth pro detector aprender. Best-effort.
+  try {
+    const autoQuad = analysis.quad;
+    const finalQuad = settings?.quad ?? autoQuad;
+    if (autoQuad && finalQuad) {
+      let sceneHash = "";
+      try {
+        const metaRaw = JSON.parse(await readFile(join(sceneDir, "meta.json"), "utf-8"));
+        sceneHash = await hashImage(join(sceneDir, `photo.${metaRaw.ext || "png"}`));
+      } catch { /* hash best-effort */ }
+      const tenant = (req.headers.get("x-tenant") || (typeof body.tenant === "string" ? body.tenant : "")).trim() || undefined;
+      await logFeedback({
+        tenant, sceneHash, name: id, source: "photo-mockup", outcome: "publish",
+        surfaceType, auto: autoQuad, final: finalQuad,
+        disp: { scale: settings?.dispScale, blur: settings?.preBlur },
+        material: settings?.surfaceMaterial ? {
+          kind: settings.surfaceMaterial,
+          intensity: settings.surfaceMaterialIntensity,
+          angle: settings.surfaceMaterialAngle,
+          scale: settings.surfaceMaterialScale,
+        } : undefined,
+        // SELF-LEARNING LOOP — substrato confirmado pelo humano (override ou aceite
+        // do detectado) vai pro engine-profile.substrateCounts e boosta o ranking
+        // da PRÓXIMA cena (tanto no /calibrate quanto aqui no photo-mockup analyze).
+        // Contribui pro _global E pro tenant (se header `x-tenant` enviado).
+        substrate: typeof settings?.substrate === "string" ? settings.substrate : undefined,
+      });
+      relearn().catch(() => {});
+      if (tenant) relearn(tenant).catch(() => {});
+    }
+  } catch { /* feedback nunca bloqueia o publish */ }
 
   return NextResponse.json({ id, previewUrl: `/photo-previews/${id}.png` });
 }

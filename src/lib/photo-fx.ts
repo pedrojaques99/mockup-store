@@ -1,5 +1,19 @@
 import sharp from "sharp";
 
+// ── Raw RGBA rail (Tier 2) ──────────────────────────────────────────────────────
+// Os FX de loop puro trocam pixels crus entre si em vez de re-encodar PNG a cada
+// passe. route.ts decodifica a base 1× (toPixels), encadeia tudo em raw e encoda 1×
+// (fromPixels). Mata ~8-10 ciclos zlib de 6 MP por render.
+export interface Pixels { data: Buffer; width: number; height: number; channels: number }
+
+export async function toPixels(buf: Buffer): Promise<Pixels> {
+  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  return { data, width: info.width, height: info.height, channels: info.channels };
+}
+export function fromPixels(px: Pixels): Promise<Buffer> {
+  return sharp(px.data, { raw: { width: px.width, height: px.height, channels: px.channels as 1 | 2 | 3 | 4 } }).png().toBuffer();
+}
+
 export interface RenderFX {
   grain?: number;       // 0–100  film grain intensity
   warmth?: number;      // -100 cool → +100 warm
@@ -112,23 +126,19 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
  * colour field; applied only where `maskBuf` is set, scaled by `opacity`.
  */
 export async function applyReflection(
-  baseBuf: Buffer, artBuf: Buffer, maskBuf: Buffer,
+  base: Pixels, artBuf: Buffer, mask: Pixels,
   width: number, height: number, opacity: number, blur: number,
-): Promise<Buffer> {
+): Promise<Pixels> {
   const op = Math.max(0, Math.min(1, opacity));
-  if (op <= 0) return baseBuf;
+  if (op <= 0) return base;
 
-  const [base, art, mask] = await Promise.all([
-    sharp(baseBuf).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
-    sharp(artBuf).resize(width, height, { fit: "cover" }).blur(Math.max(0.3, blur)).removeAlpha().raw().toBuffer(),
-    sharp(maskBuf).resize(width, height, { fit: "fill" }).ensureAlpha().raw().toBuffer(),
-  ]);
+  const art = await sharp(artBuf).resize(width, height, { fit: "cover" }).blur(Math.max(0.3, blur)).removeAlpha().raw().toBuffer();
 
-  const bd = base.data, bc = base.info.channels;
+  const bd = base.data, bc = base.channels, md = mask.data, mc = mask.channels;
   const out = Buffer.from(bd);
 
   for (let i = 0; i < width * height; i++) {
-    const m = mask[i * 4] / 255; // reflection coverage (R channel)
+    const m = md[i * mc] / 255; // reflection coverage (R channel)
     if (m <= 0) continue;
     const a = m * op;
     const bi = i * bc, ai = i * 3;
@@ -140,7 +150,7 @@ export async function applyReflection(
     out[bi + 2] = Math.round(bd[bi + 2] * (1 - a) + b2 * a);
   }
 
-  return sharp(out, { raw: { width, height, channels: bc } }).png().toBuffer();
+  return { data: out, width, height, channels: bc };
 }
 
 /**
@@ -150,23 +160,19 @@ export async function applyReflection(
  * Highlights keep their real colour; strength ramps above `threshold` (0..255).
  */
 export async function applySpecular(
-  baseBuf: Buffer, rawPhotoBuf: Buffer, maskBuf: Buffer,
+  base: Pixels, rawPhotoBuf: Buffer, mask: Pixels,
   width: number, height: number, opacity: number, threshold = 205,
-): Promise<Buffer> {
+): Promise<Pixels> {
   const op = Math.max(0, Math.min(1, opacity));
-  if (op <= 0) return baseBuf;
+  if (op <= 0) return base;
 
-  const [base, photo, mask] = await Promise.all([
-    sharp(baseBuf).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
-    sharp(rawPhotoBuf).resize(width, height, { fit: "fill" }).removeAlpha().raw().toBuffer(),
-    sharp(maskBuf).resize(width, height, { fit: "fill" }).ensureAlpha().raw().toBuffer(),
-  ]);
-  const bd = base.data, bc = base.info.channels;
+  const photo = await sharp(rawPhotoBuf).resize(width, height, { fit: "fill" }).removeAlpha().raw().toBuffer();
+  const bd = base.data, bc = base.channels, md = mask.data, mc = mask.channels;
   const out = Buffer.from(bd);
   const range = Math.max(1, 255 - threshold);
 
   for (let i = 0; i < width * height; i++) {
-    const m = mask[i * 4] / 255;
+    const m = md[i * mc] / 255;
     if (m <= 0) continue;
     const pi = i * 3, bi = i * bc;
     const lum = 0.299 * photo[pi] + 0.587 * photo[pi + 1] + 0.114 * photo[pi + 2];
@@ -178,7 +184,7 @@ export async function applySpecular(
       out[bi + c] = 255 - ((255 - bd[bi + c]) * (255 - spec)) / 255;
     }
   }
-  return sharp(out, { raw: { width, height, channels: bc } }).png().toBuffer();
+  return { data: out, width, height, channels: bc };
 }
 
 /**
@@ -188,37 +194,34 @@ export async function applySpecular(
  * heavily-blurred scene is screen-blended there. O(n) via integral-image blur.
  */
 export async function applyLightWrap(
-  png: Buffer,
+  base: Pixels,
   sceneFull: Buffer,
-  maskFullAlpha: Buffer,
+  mask: Pixels,
   width: number,
   height: number,
   amount: number,
   radius = 18,
-): Promise<Buffer> {
+): Promise<Pixels> {
   const { boxFilter } = await import("./guided-filter");
-  const [pr, ambient, mr] = await Promise.all([
-    sharp(png).ensureAlpha().raw().toBuffer(),
-    sharp(sceneFull).blur(Math.max(2, radius)).ensureAlpha().raw().toBuffer(),
-    sharp(maskFullAlpha).ensureAlpha().raw().toBuffer(),
-  ]);
+  const ambient = await sharp(sceneFull).blur(Math.max(2, radius)).ensureAlpha().raw().toBuffer();
+  const pr = base.data, bc = base.channels, md = mask.data, mc = mask.channels;
   const n = width * height;
   const maskNorm = new Float64Array(n);
-  for (let i = 0; i < n; i++) maskNorm[i] = mr[i * 4 + 3] / 255;
+  for (let i = 0; i < n; i++) maskNorm[i] = md[i * mc + 3] / 255;
   const mblur = boxFilter(maskNorm, width, height, radius);
 
   const out = Buffer.from(pr);
   for (let i = 0; i < n; i++) {
     const ring = maskNorm[i] * (1 - mblur[i]) * amount;
     if (ring <= 0.002) continue;
-    const j = i * 4;
+    const j = i * bc, aj = i * 4;
     for (let c = 0; c < 3; c++) {
-      const a = pr[j + c], b = ambient[j + c];
+      const a = pr[j + c], b = ambient[aj + c];
       const screen = 255 - ((255 - a) * (255 - b)) / 255;
       out[j + c] = Math.round(a * (1 - ring) + screen * ring);
     }
   }
-  return sharp(out, { raw: { width, height, channels: 4 } }).png().toBuffer();
+  return { data: out, width, height, channels: bc };
 }
 
 /**
@@ -228,18 +231,15 @@ export async function applyLightWrap(
  * level. Masked to the surface; `amount` 0..1 scales both. Kills the "pasted" look.
  */
 export async function applyGrainColorMatch(
-  png: Buffer,
+  base: Pixels,
   sceneFull: Buffer,
-  maskFullAlpha: Buffer,
+  mask: Pixels,
   width: number,
   height: number,
   amount: number,
-): Promise<Buffer> {
-  const [pr, sc, mr] = await Promise.all([
-    sharp(png).ensureAlpha().raw().toBuffer(),
-    sharp(sceneFull).ensureAlpha().raw().toBuffer(),
-    sharp(maskFullAlpha).ensureAlpha().raw().toBuffer(),
-  ]);
+): Promise<Pixels> {
+  const sc = await sharp(sceneFull).ensureAlpha().raw().toBuffer();
+  const pr = base.data, bc = base.channels, mr = mask.data, mc = mask.channels;
   const n = width * height;
 
   // Scene mean colour + grain sigma (sampled), and masked-art mean colour.
@@ -259,25 +259,25 @@ export async function applyGrainColorMatch(
 
   let aR = 0, aG = 0, aB = 0, aN = 0;
   for (let i = 0; i < n; i++) {
-    if (mr[i * 4 + 3] < 128) continue;
-    const j = i * 4; aR += pr[j]; aG += pr[j + 1]; aB += pr[j + 2]; aN++;
+    if (mr[i * mc + 3] < 128) continue;
+    const j = i * bc; aR += pr[j]; aG += pr[j + 1]; aB += pr[j + 2]; aN++;
   }
-  if (aN === 0) return png;
+  if (aN === 0) return base;
   aR /= aN; aG /= aN; aB /= aN;
 
   const dR = (sR - aR) * amount * 0.45, dG = (sG - aG) * amount * 0.45, dB = (sB - aB) * amount * 0.45;
   const out = Buffer.from(pr);
   const clamp = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v);
   for (let i = 0; i < n; i++) {
-    const cov = mr[i * 4 + 3] / 255;
+    const cov = mr[i * mc + 3] / 255;
     if (cov <= 0.002) continue;
-    const j = i * 4;
+    const j = i * bc;
     const noise = (Math.random() - 0.5) * 2 * sigma * amount;
     out[j]     = clamp(pr[j]     + (dR + noise) * cov);
     out[j + 1] = clamp(pr[j + 1] + (dG + noise) * cov);
     out[j + 2] = clamp(pr[j + 2] + (dB + noise) * cov);
   }
-  return sharp(out, { raw: { width, height, channels: 4 } }).png().toBuffer();
+  return { data: out, width, height, channels: bc };
 }
 
 /**
@@ -286,31 +286,28 @@ export async function applyGrainColorMatch(
  * below the surface; box-blurred and multiplied (darkened) onto the render.
  */
 export async function applyContactShadow(
-  png: Buffer,
-  maskFullAlpha: Buffer,
+  base: Pixels,
+  mask: Pixels,
   width: number,
   height: number,
   amount: number,
   offset?: number,
   blur?: number,
-): Promise<Buffer> {
+): Promise<Pixels> {
   const { boxFilter } = await import("./guided-filter");
-  const [pr, mr] = await Promise.all([
-    sharp(png).ensureAlpha().raw().toBuffer(),
-    sharp(maskFullAlpha).ensureAlpha().raw().toBuffer(),
-  ]);
+  const pr = base.data, bc = base.channels, mr = mask.data, mc = mask.channels;
   const n = width * height;
   const off = offset ?? Math.max(4, Math.round(height * 0.014));
   const br = blur ?? Math.max(4, Math.round(Math.max(width, height) * 0.012));
 
-  const mask = new Float64Array(n);
-  for (let i = 0; i < n; i++) mask[i] = mr[i * 4 + 3] / 255;
+  const maskA = new Float64Array(n);
+  for (let i = 0; i < n; i++) maskA[i] = mr[i * mc + 3] / 255;
   const shadow = new Float64Array(n);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = y * width + x;
-      const above = y - off >= 0 ? mask[(y - off) * width + x] : 0;
-      const s = above - mask[i];
+      const above = y - off >= 0 ? maskA[(y - off) * width + x] : 0;
+      const s = above - maskA[i];
       if (s > 0) shadow[i] = s;
     }
   }
@@ -320,10 +317,10 @@ export async function applyContactShadow(
   for (let i = 0; i < n; i++) {
     const d = Math.min(1, sb[i]) * amount;
     if (d <= 0.002) continue;
-    const j = i * 4;
+    const j = i * bc;
     out[j] = Math.round(pr[j] * (1 - d));
     out[j + 1] = Math.round(pr[j + 1] * (1 - d));
     out[j + 2] = Math.round(pr[j + 2] * (1 - d));
   }
-  return sharp(out, { raw: { width, height, channels: 4 } }).png().toBuffer();
+  return { data: out, width, height, channels: bc };
 }

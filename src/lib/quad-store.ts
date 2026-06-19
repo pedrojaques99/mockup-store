@@ -13,9 +13,19 @@ import { readFile, writeFile, rename } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import type { QuadCorners } from "./key-color-core";
+import type { WarpMesh } from "./mesh-warp";
 
 export const NEW_MOCKUPS_DIR = join(process.cwd(), "Render", "New Mockups");
+/** Pasta de trabalho para imagens enviadas via upload na rota /calibrate. */
+export const UPLOAD_DIR = join(process.cwd(), ".tmp", "calibrate-upload");
 const FILE = "quads.json";
+const IGNORE_FILE = "calibrate-ignore.json";
+
+/** Resolve o `dir` vindo da API (default = Render/New Mockups). Trim só; o caller checa existsSync. */
+export function resolveDir(d?: string | null): string {
+  const t = (d ?? "").trim();
+  return t || NEW_MOCKUPS_DIR;
+}
 
 export interface QuadEntry {
   /** Verdade — o que o humano encaixou (ou o auto, se ainda não corrigido). */
@@ -30,6 +40,22 @@ export interface QuadEntry {
   /** IoU auto×quad no momento do save (quão bom o detector estava). */
   iou?: number;
   detectorVersion?: number;
+  /** Calibração de displacement: amplitude do warp e suavização do mapa de profundidade. */
+  dispScale?: number;
+  dispBlur?: number;
+  /** Calibração de material/pós-edit (procedural): tipo + força + ângulo + escala. */
+  material?: string;       // none | fabric | metal | glass | worn | shadow
+  materialIntensity?: number;
+  materialAngle?: number;
+  materialScale?: number;
+  /** Malha de warp (grade Coons estilo PS Warp) — abaulamento/envelope da superfície. */
+  mesh?: WarpMesh;
+  /** Substrato confirmado (auto-detectado ou override manual). Alimenta o
+   *  self-learning loop e é re-importado pelo photo-mockup editor. */
+  substrate?: string;
+  /** Caminho relativo (dentro de `dir`) de um PNG sidecar com a máscara da superfície
+   *  desenhada no /calibrate. SSoT compartilhado com o photo-mockup editor (importa/exporta). */
+  surfaceMaskRel?: string;
   imageWidth: number;
   imageHeight: number;
   savedAt: number;
@@ -57,6 +83,32 @@ export async function loadQuads(dir: string = NEW_MOCKUPS_DIR): Promise<QuadStor
 export async function getQuad(name: string, dir: string = NEW_MOCKUPS_DIR): Promise<QuadEntry | null> {
   const all = await loadQuads(dir);
   return all[name] ?? null;
+}
+
+// ── Lista de ignorados (cenas que somem da fila de calibração) ──────────────
+
+export async function loadIgnored(dir: string = NEW_MOCKUPS_DIR): Promise<string[]> {
+  const p = join(dir, IGNORE_FILE);
+  if (!existsSync(p)) return [];
+  try {
+    const arr = JSON.parse(await readFile(p, "utf8"));
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Liga/desliga o ignore de um arquivo. Retorna a lista final. */
+export async function setIgnored(
+  name: string,
+  ignore: boolean,
+  dir: string = NEW_MOCKUPS_DIR,
+): Promise<string[]> {
+  const set = new Set(await loadIgnored(dir));
+  if (ignore) set.add(name); else set.delete(name);
+  const list = [...set].sort();
+  await atomicWrite(join(dir, IGNORE_FILE), JSON.stringify(list, null, 2));
+  return list;
 }
 
 /** Upsert de uma entrada (merge raso com o que já existir). Retorna a entrada final. */

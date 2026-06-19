@@ -1,5 +1,29 @@
 # Plano — Calibração de Superfície & Detector Unificado
 
+> **Status — console de calibração implementado (tsc verde, smoke runtime ok):**
+> - Núcleo `key-color-core.ts`; `detectKeyColorQuad` em `photo-detect.ts` (findNeonQuad = wrapper).
+> - Store `quad-store.ts` (golden `quads.json` + ignore list + `resolveDir`).
+> - API `/api/calibrate/{scenes,detect,overlay,save,ignore,upload,displacement,material}`.
+> - Rota `/calibrate`: fila+triagem, QuadEditor (lupa 5×), overlay magenta, **pasta dinâmica
+>   + upload/drag**, **ignorar/restaurar**, **método de detecção** (magenta/branca/manual →
+>   resolve "sem magenta"), **modo Displacement** (mapa de relevo + dispScale/blur),
+>   **modo Material/FX procedural** (tecido/metal/vidro/gasto/sombra projetada, preview ao vivo).
+> - `scripts/eval-quads.ts` (IoU vs golden). Smoke real: storefront (antes 330×6px) e hotel
+>   (1293×65px) degenerados agora detectam limpos a conf 100%.
+>
+> **Fase 4 — religação ao render: FEITA.** `test-pipeline-cv.ts` e `photo-render.ts` leem
+> `getQuad` (golden vence OVERRIDE_QUADS) e aplicam displacement+material; `photo-scene.ts`
+> aceita `dispScale`+camada `material`. Render final ao vivo no console: `/api/calibrate/render`
+> compõe arte-teste (grid/poster/checker) com quad+luz+displacement+material → preview real
+> debounced (modo F). Undo/redo (Ctrl+Z/Shift+Z/Y) com histórico local coalescido.
+>
+> **Loop retro-alimentativo (engine que aprende): FEITO.** `src/lib/engine-feedback.ts` —
+> captura o par (auto, final) de todo aceite (publish do photo-mockup + save do /calibrate)
+> em `data/engine-feedback/events.jsonl`; `relearn()` agrega em `engine-profile.json` (bias por
+> canto/superfície + defaults + IoU médio); o `detect` aplica o bias → o detector melhora a
+> cada correção. `scripts/engine-learn.ts` = gatilho manual/cron. Smoke provou: 6 correções
+> com viés +10px → bias aprendido exato. IA p/ textura real = hook no ai-edit FLUX/Visant.
+
 > **Reframe:** não é "fine-tune" de modelo. O magenta é uma _key color_ chapada
 > (hue ~300–325°) → detecção é problema **determinístico de CV**. O valor não está em
 > consertar um quad; está em **capturar o teu julgamento como dado estruturado**, de modo

@@ -327,6 +327,8 @@ async function main() {
   await mkdir(OUT, { recursive: true });
 
   const { autoDetectSurface, extractSurfaceMaskCV, extractCardMaskCV, findNeonQuad } = await import("../src/lib/photo-detect");
+  const { getQuad } = await import("../src/lib/quad-store");
+  const { buildMaterialOverlay, MATERIAL_BLEND } = await import("../src/lib/material-fx");
   const { analyzePhoto } = await import("../src/lib/photo-analyze");
   const { extractGrayscaleLayers, extractMask, expandQuad, neutralizeNeonPixels,
           paintQuadMagenta, computeQuadSurfaceStats, extractDisplacementMap,
@@ -371,8 +373,23 @@ async function main() {
       analysis = null;
     }
 
+    // ── Phase 1a: Golden quad (calibração humana — prioridade máxima) ─────
+    // Aposenta o OVERRIDE_QUADS hardcoded: se há entrada manual no quads.json da
+    // pasta da cena (lookup por basename), ela vence CV/neon/LLM/SAM.
+    const goldenName = photo.path.split(/[\\/]/).pop()!;
+    const golden = await getQuad(goldenName).catch(() => null);
+    const goldenLocked = !!(golden && golden.source === "manual");
+    if (goldenLocked && golden) {
+      analysis = {
+        quad: golden.quad, surfaceType: golden.surfaceType, material: "matte",
+        hasOcclusion: false, occlusionDesc: "", lightingDir: "ambient",
+        confidence: golden.confidence ?? 0.99, imageWidth: W, imageHeight: H, avgLightness: 0.8,
+      };
+      console.log(`${ts()} 📌 Golden (manual) aplicado: ${goldenName}`);
+    }
+
     // ── Phase 1b: Override quad (locked known-good detection) ──────────
-    if (photo.overrideQuad && OVERRIDE_QUADS[photo.name]) {
+    if (!goldenLocked && photo.overrideQuad && OVERRIDE_QUADS[photo.name]) {
       const ov = OVERRIDE_QUADS[photo.name];
       analysis = { ...ov, imageWidth: W, imageHeight: H, avgLightness: 0.80 };
       const detW = ov.quad.tr.x - ov.quad.tl.x;
@@ -382,7 +399,7 @@ async function main() {
 
     // ── Phase 1c: Neon key-color quad — zero LLM, perspective-accurate ──
     // Skip when overrideQuad is set — manual quad takes priority over CV detection.
-    if (photo.neonMagenta && !photo.overrideQuad) {
+    if (!goldenLocked && photo.neonMagenta && !photo.overrideQuad) {
       const neonQuad = await findNeonQuad(photo.path, W, H);
       if (neonQuad) {
         const detW = Math.round((neonQuad.tr.x + neonQuad.br.x) / 2 - (neonQuad.tl.x + neonQuad.bl.x) / 2);
@@ -402,7 +419,7 @@ async function main() {
     // For apparel/packaging/outdoor photos where CV/LLM consistently fail.
     // sam: text prompt drives Lang-SAM (tmappdev) — returns pixel mask → bounding quad.
     // SAM quad is used as-is; the mask from SAM replaces the solid-polygon fallback.
-    if (photo.sam && !photo.overrideQuad && !photo.neonMagenta && hasSAM) {
+    if (!goldenLocked && photo.sam && !photo.overrideQuad && !photo.neonMagenta && hasSAM) {
       console.log(`${ts()} 🎯 SAM/lang — "${photo.sam}"`);
       const surfType = analysis?.surfaceType ?? "other";
       const samResult = await detectQuadSAM(photo.path, photo.sam, surfType, W, H, "lang");
@@ -434,7 +451,7 @@ async function main() {
     // CV row-scan only detects axis-aligned rectangles; LLM gets actual perspective quad.
     // Cache: if {name}-analysis.json already exists, reuse it (avoids LLM re-call variance).
     // Skip LLM entirely when overrideQuad or neonMagenta or SAM already resolved the quad.
-    const needsLLM = !photo.overrideQuad && !photo.neonMagenta && !(photo as any)._samMaskBuf && (photo.forceLLM || !analysis || analysis.confidence < 0.4);
+    const needsLLM = !goldenLocked && !photo.overrideQuad && !photo.neonMagenta && !(photo as any)._samMaskBuf && (photo.forceLLM || !analysis || analysis.confidence < 0.4);
     const cachedPath = resolve(OUT, `${photo.name}-analysis.json`);
     if (needsLLM && existsSync(cachedPath)) {
       try {
@@ -500,8 +517,17 @@ async function main() {
       }
     }
 
-    // Save analysis only if not loaded from cache (to preserve the best LLM detection)
-    if (!existsSync(cachedPath)) {
+    // Carimba a calibração (golden) no analysis pro photo-render consumir.
+    if (goldenLocked && golden) {
+      analysis.dispScale = golden.dispScale;
+      analysis.dispBlur = golden.dispBlur;
+      analysis.material = golden.material;
+      analysis.materialIntensity = golden.materialIntensity;
+      analysis.materialAngle = golden.materialAngle;
+      analysis.materialScale = golden.materialScale;
+    }
+    // Save analysis: força quando golden (refletir a calibração); senão preserva o melhor LLM.
+    if (goldenLocked || !existsSync(cachedPath)) {
       await writeFile(cachedPath, JSON.stringify(analysis, null, 2));
     }
 
@@ -589,11 +615,22 @@ async function main() {
       photoSource, lightingQuad, lightingMaskBuf, multiplyFloor, lightingPreBlur
     );
 
-    // Displacement map + color cast layer
+    // Displacement map (blur calibrado quando golden) + color cast layer
+    const dispBlur = goldenLocked && golden?.dispBlur != null ? golden.dispBlur : 8;
     const [dispBuf, castBuf] = await Promise.all([
-      extractDisplacementMap(photoSource, W, H, quad, 8),
+      extractDisplacementMap(photoSource, W, H, quad, dispBlur),
       extractColorCastLayer(photo.path, W, H, quad),  // use original (pre-neutralize) for color
     ]);
+
+    // Material procedural calibrado (golden) → overlay recortado ao quad p/ o render.
+    const matKind = goldenLocked ? (golden?.material as any) : undefined;
+    let matBuf: Buffer | null = null;
+    if (matKind && matKind !== "none") {
+      matBuf = await buildMaterialOverlay(W, H, quad, {
+        material: matKind, intensity: golden?.materialIntensity, angle: golden?.materialAngle, scale: golden?.materialScale,
+      });
+      await writeFile(resolve(OUT, `${photo.name}-material.png`), matBuf);
+    }
 
     await Promise.all([
       writeFile(resolve(OUT, `${photo.name}-screen.png`),   screenBuf),
@@ -620,6 +657,7 @@ async function main() {
       light_multiply: multiplyImg,
       mask: maskImg,
     };
+    if (matBuf) assets.material = await loadImage(matBuf);
 
     const doc = buildPhotoSceneDoc(analysis, {
       // Wall: screenOpacity=0 avoids contrast artifact (watermark). Shadow comes through multiply only.
@@ -627,6 +665,8 @@ async function main() {
       //   No watermarks so no floor protection needed; full shadow depth.
       screenOpacity:   photo.shadowScene ? 0.20 : 0,
       multiplyOpacity: isCard ? 0.30 : (isBillboard && !photo.shadowScene) ? 0 : 0.45,
+      dispScale: goldenLocked ? golden?.dispScale : undefined,
+      material: matKind && matKind !== "none" ? { blend: MATERIAL_BLEND[matKind as keyof typeof MATERIAL_BLEND] } : undefined,
     });
     const face = doc.faces[0];
     console.log(`${ts()} ✓ face ${face.innerW}×${face.innerH} | layers: ${doc.layers.map((l: any) => l.src).join(", ")}`);

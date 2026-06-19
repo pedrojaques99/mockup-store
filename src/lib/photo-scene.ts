@@ -17,6 +17,10 @@ export interface SceneOptions {
   multiplyOpacity?: number;
   /** Color cast overlay opacity (screen blend). Default 0.10. Set 0 to disable. */
   castOpacity?: number;
+  /** Calibrado: amplitude do displacement (sobrescreve o default por surfaceType). */
+  dispScale?: number;
+  /** Calibrado: camada de material procedural (asset "material") + blend. */
+  material?: { blend: string; opacity?: number };
 }
 
 export function buildPhotoSceneDoc(
@@ -73,13 +77,23 @@ export function buildPhotoSceneDoc(
       left: 0,
       top: 0,
     }] : []),
+    // Material procedural calibrado (asset "material") — tecido/metal/vidro/gasto/sombra.
+    // Transparente fora do quad → afeta só a superfície. Blend vindo da calibração.
+    ...(opts.material ? [{
+      role: "over" as const,
+      src: "material",
+      blendMode: opts.material.blend as SceneDoc["layers"][number]["blendMode"],
+      opacity: opts.material.opacity ?? 0.85,
+      left: 0,
+      top: 0,
+    }] : []),
   ];
 
-  // Displacement scale by surface type: fabric wrinkles need more, flat billboards none.
+  // Displacement scale: calibrado tem prioridade; senão default por surfaceType.
   const DISP_SCALE: Record<string, number> = {
     fabric: 12, tshirt: 12, bag: 10, wall: 8, paper: 6, card: 0, billboard: 0, poster: 0,
   };
-  const dispScale = DISP_SCALE[surfaceType] ?? 6;
+  const dispScale = opts.dispScale ?? (DISP_SCALE[surfaceType] ?? 6);
 
   return {
     version: 1,

@@ -117,6 +117,8 @@ async function main() {
 
   const { extractGrayscaleLayers, extractMask } = await import("../src/lib/photo-shadow");
   const { buildPhotoSceneDoc } = await import("../src/lib/photo-scene");
+  const { getQuad } = await import("../src/lib/quad-store");
+  const { MATERIAL_BLEND } = await import("../src/lib/material-fx");
   const { renderScene } = await import("@visant/psd-engine");
 
   for (const target of TARGETS) {
@@ -132,6 +134,19 @@ async function main() {
     const analysis = await loadCachedAnalysis(target.name);
     if (!analysis) {
       console.warn(`  ⚠ No cached quad for ${target.name} — run test-pipeline-cv first`); continue;
+    }
+
+    // Golden (calibração manual) tem prioridade: sobrescreve quad/surfaceType + disp/material.
+    const goldenName = target.path.split(/[\\/]/).pop()!;
+    const golden = await getQuad(goldenName).catch(() => null);
+    if (golden && golden.source === "manual") {
+      analysis.quad = golden.quad;
+      analysis.surfaceType = golden.surfaceType ?? analysis.surfaceType;
+      analysis.dispScale = golden.dispScale; analysis.dispBlur = golden.dispBlur;
+      analysis.material = golden.material; analysis.materialIntensity = golden.materialIntensity;
+      analysis.materialAngle = golden.materialAngle; analysis.materialScale = golden.materialScale;
+      analysis.mesh = golden.mesh;
+      console.log(`${ts()} 📌 Golden aplicado: ${goldenName}`);
     }
 
     const meta = await sharp(target.path).metadata();
@@ -169,10 +184,31 @@ async function main() {
       console.warn(`  ⚠ Art not found: ${artPath}`); continue;
     }
 
+    // Malha (warp envelope) calibrada → displacement field (prioridade no slot de disp).
+    const { generateMeshDisplacement, meshIsWarped } = await import("../src/lib/mesh-warp");
+    let meshDispImg: any = null, meshDispScale: number | undefined;
+    if (analysis.mesh && meshIsWarped(analysis.mesh)) {
+      const md = await generateMeshDisplacement(analysis.mesh);
+      if (md) { meshDispImg = await loadImage(md.png); meshDispScale = md.dispScale; console.log(`${ts()} 🔲 malha → disp ${md.width}x${md.height} scale ${md.dispScale}`); }
+    }
+
+    // Material procedural calibrado → overlay recortado ao quad (gera na hora se golden tiver).
+    const matKind = analysis.material as string | undefined;
+    let matImg: any = null;
+    if (matKind && matKind !== "none") {
+      const { buildMaterialOverlay } = await import("../src/lib/material-fx");
+      const matBuf = await buildMaterialOverlay(W, H, quad, {
+        material: matKind as any, intensity: analysis.materialIntensity, angle: analysis.materialAngle, scale: analysis.materialScale,
+      });
+      matImg = await loadImage(matBuf);
+    }
+
     // Build scene doc + render
     const doc = buildPhotoSceneDoc(analysis, {
       screenOpacity:   isCard ? 0 : isBillboard ? 0 : 0.20,
       multiplyOpacity: isCard ? 0.30 : isBillboard ? 0 : 0.45,
+      dispScale: meshDispScale ?? analysis.dispScale,
+      material: matKind && matKind !== "none" ? { blend: MATERIAL_BLEND[matKind as keyof typeof MATERIAL_BLEND] } : undefined,
     });
     const face = doc.faces[0];
     console.log(`${ts()} ✓ face ${face.innerW}×${face.innerH} | ${surfaceType}`);
@@ -207,6 +243,8 @@ async function main() {
     };
     if (castImg) assets.color_cast = castImg;
     if (dispImg) assets.displacement = dispImg;
+    if (meshDispImg) assets.displacement = meshDispImg; // malha tem prioridade no slot de disp
+    if (matImg) assets.material = matImg;
 
     const canvas = renderScene(doc, assets, { surface: artCanvas }, createCanvas);
 

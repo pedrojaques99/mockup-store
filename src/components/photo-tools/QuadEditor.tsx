@@ -49,6 +49,7 @@ export function QuadEditor({
   // Zoom do viewer → desenha alças/linhas/lupa em px-de-canvas ÷ zoom = tamanho de TELA constante.
   const zoom = useViewerZoom();
   const scaleRef = useRef({ sx: 1, sy: 1, ox: 0, oy: 0 });
+  const logicalRef = useRef({ cw: 0, ch: 0 }); // tamanho lógico (CSS px); backing = ×res (HiDPI)
 
   const toCanvas = useCallback(
     (p: QuadPt) => ({ x: p.x * scaleRef.current.sx + scaleRef.current.ox, y: p.y * scaleRef.current.sy + scaleRef.current.oy }),
@@ -75,7 +76,19 @@ export function QuadEditor({
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // HiDPI: backing-store ×res (devicePixelRatio × zoom do viewer) → linhas/alças nítidas
+    // sob o transform CSS do ZoomPanViewer (sem mais pixelização). Desenho em px lógico.
+    const { cw, ch } = logicalRef.current;
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const res = Math.max(1, Math.min(4, dpr * zoom));
+    if (cw > 0) {
+      const bw = Math.round(cw * res), bh = Math.round(ch * res);
+      if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
+      ctx.setTransform(res, 0, 0, res, 0, 0);
+      ctx.clearRect(0, 0, cw, ch);
+    } else {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
     const k = (px: number) => px / zoom; // px-de-canvas p/ tamanho de tela constante
 
     const pts = CORNER_KEYS.map((kk) => toCanvas(quad[kk]));
@@ -144,12 +157,13 @@ export function QuadEditor({
       const ZOOM = 5;
       const off = k(106), pad = k(8);
 
+      const { cw, ch } = logicalRef.current; // dims lógicas (HiDPI desenha em px lógico)
       let lx = corner.x + off;
       let ly = corner.y - off;
-      if (lx + LENS_R > canvas.width - pad) lx = corner.x - off;
+      if (lx + LENS_R > cw - pad) lx = corner.x - off;
       if (ly - LENS_R < pad) ly = corner.y + off;
-      lx = Math.max(LENS_R + pad, Math.min(canvas.width - LENS_R - pad, lx));
-      ly = Math.max(LENS_R + pad, Math.min(canvas.height - LENS_R - pad, ly));
+      lx = Math.max(LENS_R + pad, Math.min(cw - LENS_R - pad, lx));
+      ly = Math.max(LENS_R + pad, Math.min(ch - LENS_R - pad, ly));
 
       const imgX = (corner.x - scaleRef.current.ox) / scaleRef.current.sx;
       const imgY = (corner.y - scaleRef.current.oy) / scaleRef.current.sy;
@@ -218,9 +232,10 @@ export function QuadEditor({
       // Canvas maior que a img (PAD de cada lado) + deslocado p/ -pad → desenha o
       // quad/cantos que vazam da imagem sem cortar no buffer. ox/oy = origem da img.
       const padX = Math.round(iw * PAD), padY = Math.round(ih * PAD);
-      canvas.width = iw + padX * 2; canvas.height = ih + padY * 2;
+      const cw = iw + padX * 2, ch = ih + padY * 2;
+      logicalRef.current = { cw, ch };           // tamanho lógico (CSS px); draw() faz o backing ×res
       canvas.style.left = `${-padX}px`; canvas.style.top = `${-padY}px`;
-      canvas.style.width = `${iw + padX * 2}px`; canvas.style.height = `${ih + padY * 2}px`;
+      canvas.style.width = `${cw}px`; canvas.style.height = `${ch}px`;
       scaleRef.current = { sx: iw / imageNW, sy: ih / imageNH, ox: padX, oy: padY };
       draw();
     };

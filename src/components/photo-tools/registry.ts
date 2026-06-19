@@ -2,10 +2,10 @@
  * SSoT for the photo-mockup tool set. The rail, keyboard map, and panels all
  * derive from this list — add a tool here and wire its panel branch, nothing else.
  */
-import { Frame, Lasso, Droplets, ImageIcon, Sun, Crop, Scaling, Wand2 } from "lucide-react";
+import { Frame, Lasso, Droplets, ImageIcon, Sun, Crop, Scaling, Wand2, Grid3x3 } from "lucide-react";
 import type { RailTool } from "./ToolRail";
 
-export type PhotoTool = "corners" | "mask" | "reflect" | "luz" | "aiedit" | "crop" | "upscale" | "render";
+export type PhotoTool = "corners" | "mask" | "reflect" | "luz" | "aiedit" | "crop" | "upscale" | "calibrate" | "render";
 
 /** Mask-editor instruments (the "how"). The mask itself is the target (the "what").
  *  Pen is an instrument, never a category. */
@@ -24,6 +24,7 @@ export const PHOTO_TOOLS: RailTool<PhotoTool>[] = [
   { id: "reflect", label: "Reflexo", icon: Droplets, group: "edit", shortcut: "R" },
   { id: "luz", label: "Luz", icon: Sun, group: "edit", shortcut: "L" },
   { id: "aiedit", label: "Editar", icon: Wand2, group: "edit", shortcut: "E" },
+  { id: "calibrate", label: "Superfície", icon: Grid3x3, group: "edit", shortcut: "S" },
   { id: "crop", label: "Cortar", icon: Crop, group: "process", shortcut: "P" },
   { id: "upscale", label: "Aumentar", icon: Scaling, group: "process", shortcut: "U" },
   { id: "render", label: "Render", icon: ImageIcon, group: "output", shortcut: "V" },
@@ -36,6 +37,7 @@ export const PHOTO_TOOL_KEYS: Record<string, PhotoTool> = {
   r: "reflect",
   l: "luz",
   e: "aiedit",
+  s: "calibrate",
   p: "crop",
   u: "upscale",
   v: "render",

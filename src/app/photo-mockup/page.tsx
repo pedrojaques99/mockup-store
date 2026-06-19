@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   Upload, Loader2, AlertTriangle, CheckCircle2, RefreshCw,
-  Eye, Wand2, Camera, X, Sparkles, Keyboard,
+  Eye, Wand2, Camera, X, Sparkles, Keyboard, Save, FolderOpen,
 } from "lucide-react";
 import ZoomPanViewer from "@/components/ZoomPanViewer";
 import SegmentCanvas from "@/components/SegmentCanvas";
@@ -19,6 +19,8 @@ import { EditSelectionPanel } from "@/components/photo-tools/panels/EditSelectio
 import { ReflexoPanel } from "@/components/photo-tools/panels/ReflexoPanel";
 import { SceneInfo } from "@/components/photo-tools/panels/SceneInfo";
 import { RenderPanel } from "@/components/photo-tools/panels/RenderPanel";
+import { CalibrationPanel } from "@/components/photo-tools/panels/CalibrationPanel";
+import { AuthChip } from "@/components/AuthChip";
 import { LuzPanel } from "@/components/photo-tools/panels/LuzPanel";
 import { LuzOverlay } from "@/components/LuzOverlay";
 import { LuzAssetModal } from "@/components/photo-tools/LuzAssetModal";
@@ -28,7 +30,7 @@ import { CropPanel, ASPECT_VALUE, type CropAspect } from "@/components/photo-too
 import { UpscalePanel, type UpscaleTarget, type UpscaleMode } from "@/components/photo-tools/panels/UpscalePanel";
 import { AIEditPanel, type AiEditMode } from "@/components/photo-tools/panels/AIEditPanel";
 import { ArtDropZone } from "@/components/photo-tools/ArtDropZone";
-import { AI_BLEND_DEFAULTS } from "@/components/photo-tools/looks";
+import { AI_BLEND_DEFAULTS, liveLookDelta } from "@/components/photo-tools/looks";
 import { DEFAULT_FRAME, renderFramedArt } from "@/lib/art-frame";
 import { QuadEditor } from "@/components/photo-tools/QuadEditor";
 import { CanvasContextChip } from "@/components/photo-tools/CanvasContextChip";
@@ -36,6 +38,7 @@ import { ShortcutsHelp } from "@/components/photo-tools/ShortcutsHelp";
 import { useMaskEditor } from "./hooks/useMaskEditor";
 import { toBase64File, urlToDataUrl, dataUrlToFile, fetchJSON } from "@/lib/photo-mockup-io";
 import { useDocField, editorHistory, useTemporal, useEditorDoc } from "@/stores/editorDoc";
+import { packProject, unpackProject } from "@/lib/project-file";
 import { saveSession, loadSession, clearSession } from "@/stores/photoSession";
 import { runAiOp, AiOpError } from "@/lib/ai-op";
 import { Toaster, toast } from "sonner";
@@ -97,6 +100,7 @@ function PhotoMockupPageInner() {
 
   // Upload
   const [uploadId, setUploadId] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState("projeto");
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [imgDims, setImgDims] = useState({ w: 0, h: 0 });
   const [uploadState, setUploadState] = useState<StepState>("idle");
@@ -296,6 +300,8 @@ function PhotoMockupPageInner() {
   const autoRenderTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleRenderRef  = useRef<() => void>(() => {});
   const renderStateRef   = useRef<StepState>("idle");
+  // fx (look) já assado no render exibido → base do delta CSS do preview instantâneo (Tier 3).
+  const bakedFxRef = useRef({ grain: 0, warmth: 0, saturation: 100, brightness: 100, contrast: 100 });
   const [autoRenderPending, setAutoRenderPending] = useState(false);
   const [bgDragOver, setBgDragOver] = useState(false);
 
@@ -305,11 +311,24 @@ function PhotoMockupPageInner() {
   // params/máscaras/aba/histórico e usa o quad já mapeado pras novas dimensões, em vez
   // de tratar como foto nova (que zera o quad pro default, volta pra Cantos e limpa undo).
   const handlePhotoFile = useCallback(async (file: File, preserve?: { quad: Quad | null }) => {
-    setUploadErr(""); setUploadState("loading");
-    setAnalysis(null); setAnalyzeState("idle"); setAnalyzeErr("");
-    setProcessState("idle"); setProcessErr(""); setShadowPreview(null);
-    setRenderUrl(null); setRenderState("idle");
-    if (!preserve) { setQuad(null); setTool("corners"); } // foto nova → Cantos pra definir a superfície
+    setUploadErr("");
+    // Foto nova → reinicia a máquina de etapas (upload→analyze→process→render). Como o
+    // editor (ZoomPanViewer) só monta em "process"/"render", reiniciar as etapas DESMONTA
+    // o canvas de propósito. preserve (crop/upscale/ai-edit) edita a MESMA cena: mantemos
+    // as etapas onde estão pra NÃO remontar o viewer — senão zoom/pan/ferramenta zeram
+    // (era o "reset que sai até do zoom" depois do upscale).
+    if (!preserve) {
+      setUploadState("loading");
+      setAnalysis(null); setAnalyzeState("idle"); setAnalyzeErr("");
+      setProcessState("idle"); setProcessErr("");
+      // Foto nova = projeto novo: zera o DOC inteiro (luz, máscaras, fx, geometria).
+      // Sem isto, luzLayers/máscaras/sliders do projeto anterior vazam pra cena nova,
+      // pois todos vivem no editorDoc (useDocField), não em useState local.
+      useEditorDoc.getState().resetDoc();
+      setQuad(null); setTool("corners"); // foto nova → Cantos pra definir a superfície
+    }
+    setShadowPreview(null);
+    setRenderUrl(null); setRenderState("idle"); // render antiga é de outra resolução → descarta
 
     try {
       const form = new FormData();
@@ -353,6 +372,60 @@ function PhotoMockupPageInner() {
       setUploadErr(e.message); setUploadState("error");
     }
   }, []);
+
+  // ── Projeto como arquivo .vsn (salvar/abrir local) ───────────────────────────
+  // Bundle portátil: foto original + DocState inteiro (luz/máscaras/fx/geometria).
+  const saveProject = useCallback(async () => {
+    if (!photoUrl || !uploadId) return;
+    try {
+      const photoBytes = new Uint8Array(await (await fetch(photoUrl)).arrayBuffer());
+      // Thumb: a foto reduzida via canvas (preview leve pra galeria/OS).
+      let thumbBytes: Uint8Array | undefined;
+      try {
+        const img = await new Promise<HTMLImageElement>((res, rej) => {
+          const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = renderUrl ?? photoUrl;
+        });
+        const scale = Math.min(1, 480 / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+        c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+        const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/jpeg", 0.7));
+        if (blob) thumbBytes = new Uint8Array(await blob.arrayBuffer());
+      } catch { /* sem thumb → bundle segue sem preview */ }
+
+      const bytes = packProject({
+        doc: useEditorDoc.getState().doc, imgDims, tool,
+        name: projectName || "projeto", photoBytes, thumbBytes, savedAt: Date.now(),
+      });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/octet-stream" }));
+      a.download = `${(projectName || "projeto").replace(/[^\w\-]+/g, "_")}.vsn`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast.success("Projeto salvo (.vsn)");
+    } catch (e: any) {
+      toast.error(`Falha ao salvar: ${e.message}`);
+    }
+  }, [photoUrl, uploadId, renderUrl, imgDims, tool, projectName]);
+
+  const openProject = useCallback(async (file: File) => {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const proj = unpackProject(bytes);
+      setProjectName(proj.name);
+      // Aplica o doc importado ANTES do upload; handlePhotoFile no modo `preserve`
+      // sobe a foto, mantém este doc e usa o quad importado (sem remontar o viewer).
+      useEditorDoc.getState().resetDoc(proj.doc);
+      const photoFile = new File([proj.photoBytes as BlobPart], "photo.png", { type: "image/png" });
+      await handlePhotoFile(photoFile, { quad: proj.doc.quad });
+      setTool(proj.tool as PhotoTool);
+      editorHistory.clear(); // projeto carregado → baseline novo do undo
+      clearSession();
+      toast.success(`Projeto "${proj.name}" aberto`);
+    } catch (e: any) {
+      toast.error(`Arquivo .vsn inválido: ${e.message}`);
+    }
+  }, [handlePhotoFile]);
 
   // true quando a área de corte ultrapassa a imagem original → outpaint (expandir com IA).
   const cropExpanding = !!cropArea && imgDims.w > 0 && imgDims.h > 0 && (
@@ -448,13 +521,16 @@ function PhotoMockupPageInner() {
     if (!uploadId) return;
     setAnalyzeState("loading"); setAnalyzeErr("");
     try {
-      const data = await fetchJSON<Analysis>("/api/photo-mockup/analyze", {
+      const data = await fetchJSON<Analysis & { sceneAnalysis?: { substrate?: { kind?: string } } }>("/api/photo-mockup/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: uploadId, force }),
       });
       setAnalysis(data);
       setQuad(data.quad);
+      // Self-learning loop: substrato auto-detectado entra no DocState → publish loga.
+      const sub = data.sceneAnalysis?.substrate?.kind;
+      if (sub) useEditorDoc.getState().setField("substrate", sub);
       setAnalyzeState("done");
       if (force) toast.success("Superfície re-detectada");
     } catch (e: any) {
@@ -579,7 +655,7 @@ function PhotoMockupPageInner() {
       if (renderStateRef.current === "loading" || processingRef.current) { setAutoRenderPending(false); return; }
       setAutoRenderPending(false);
       handleRenderRef.current();
-    }, 600);
+    }, 250); // look renders agora batem no cache da base (Tier 1) → debounce curto sem spam
     return () => { if (autoRenderTimer.current) clearTimeout(autoRenderTimer.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, shadowOpacity, highlightOpacity, castOpacity, maskFeather, maskContract, reflectionOpacity, reflectionBlur, lightWrap, matchScene, contactShadow, textureAmount, specularOpacity, frameSig, warpSig]);
@@ -839,12 +915,21 @@ function PhotoMockupPageInner() {
           specularOpacity,
           fx: { grain: fxGrain, warmth: fxWarmth, saturation: fxSaturation, brightness: fxBrightness, contrast: fxContrast },
           luzOverlays: toLuzRenderLayers(luzLayers),
+          // SSoT calibration → render: a malha (warp envelope) entra no slot de
+          // displacement; quando há warpDisp (cylinder/texture), são compostos no servidor.
+          mesh: useEditorDoc.getState().doc.mesh ?? undefined,
         }),
       });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error ?? `HTTP ${res.status}`); }
+      if (process.env.NODE_ENV === "development") {
+        const st = res.headers.get("Server-Timing");
+        if (st) console.debug(`[render] ${Date.now() - t0}ms total · ${st}`);
+      }
       const blob = await res.blob();
       setRenderUrl(URL.createObjectURL(blob));
       setRenderMs(Date.now() - t0);
+      // fx assado neste render → zera o delta do preview instantâneo (cur==baked).
+      bakedFxRef.current = { grain: fxGrain, warmth: fxWarmth, saturation: fxSaturation, brightness: fxBrightness, contrast: fxContrast };
       setRenderState("done");
       renderStateRef.current = "done";
       setAiBlendUrl(null); setAiBlendState("idle"); setAiBlendErr("");
@@ -908,7 +993,27 @@ function PhotoMockupPageInner() {
       const r = await fetch(`/api/photo-mockup/${uploadId}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, renderBase64, settings: { shadowOpacity, highlightOpacity, castOpacity, fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast, maskFeather, maskContract, shadowFloor, preBlur, reflectionOpacity, reflectionBlur, cylinder, bend, textureAmount, specularOpacity }, tags: analysis?.surfaceType ? [analysis.surfaceType] : [] }),
+        body: JSON.stringify({
+          name, renderBase64,
+          settings: {
+            shadowOpacity, highlightOpacity, castOpacity,
+            fxGrain, fxWarmth, fxSaturation, fxBrightness, fxContrast,
+            maskFeather, maskContract, shadowFloor, preBlur,
+            reflectionOpacity, reflectionBlur,
+            cylinder, bend, textureAmount, specularOpacity,
+            // SSoT da calibração + self-learning: vai pro engine-feedback no servidor.
+            quad: useEditorDoc.getState().doc.quad ?? undefined,
+            mesh: useEditorDoc.getState().doc.mesh ?? undefined,
+            dispScale: useEditorDoc.getState().doc.dispScale,
+            dispBlur: useEditorDoc.getState().doc.dispBlur,
+            surfaceMaterial: useEditorDoc.getState().doc.surfaceMaterial,
+            surfaceMaterialIntensity: useEditorDoc.getState().doc.surfaceMaterialIntensity,
+            surfaceMaterialAngle: useEditorDoc.getState().doc.surfaceMaterialAngle,
+            surfaceMaterialScale: useEditorDoc.getState().doc.surfaceMaterialScale,
+            substrate: useEditorDoc.getState().doc.substrate ?? undefined,
+          },
+          tags: analysis?.surfaceType ? [analysis.surfaceType] : [],
+        }),
       });
       if (!r.ok) { const j = await r.json(); throw new Error(j.error ?? `HTTP ${r.status}`); }
       setPublishState("done");
@@ -922,8 +1027,22 @@ function PhotoMockupPageInner() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const f = e.dataTransfer.files[0];
-    if (f?.type.startsWith("image/")) handlePhotoFile(f);
-  }, [handlePhotoFile]);
+    if (!f) return;
+    if (f.name.toLowerCase().endsWith(".vsn")) openProject(f);   // soltar projeto → abre direto
+    else if (f.type.startsWith("image/")) handlePhotoFile(f);
+  }, [handlePhotoFile, openProject]);
+
+  // OS "Abrir com" → double-click num .vsn abre direto aqui (PWA File Handling API,
+  // Chromium desktop). Sem app instalado, cai nos caminhos Abrir/drag-drop.
+  useEffect(() => {
+    const lq = (window as any).launchQueue;
+    if (!lq?.setConsumer) return;
+    lq.setConsumer(async (params: { files?: FileSystemFileHandle[] }) => {
+      const handle = params.files?.[0];
+      if (!handle) return;
+      try { openProject(await handle.getFile()); } catch { /* handle revogado */ }
+    });
+  }, [openProject]);
 
   // ── Global undo/redo — Zustand + zundo (`temporal`). Todo o DocState é versionado
   //    automaticamente; não há lista manual de campos. Ver src/stores/editorDoc.ts.
@@ -1045,6 +1164,7 @@ function PhotoMockupPageInner() {
     setAnalyzeState("idle"); setAnalysis(null); setQuad(null);
     setProcessState("idle"); setShadowPreview(null); setRenderUrl(null);
     setTool("render");
+    useEditorDoc.getState().resetDoc(); // projeto novo → zera luz/máscaras/fx/geometria do doc
     editorHistory.clear();
     clearSession(); // trocar foto descarta a sessão persistida
   }, [surfaceMaskUrl, occluderMaskUrl, aiEditMaskUrl, reflectionMaskUrl, renderUrl, artFile]);
@@ -1061,6 +1181,14 @@ function PhotoMockupPageInner() {
     processState !== "done" ? "process" : "render";
 
   const activeImageUrl = aiBlendUrl && showAiResult ? aiBlendUrl : renderUrl;
+
+  // Preview de look INSTANTÂNEO (Tier 3): enquanto o servidor recompõe (debounce ou em
+  // voo), mostra o delta do fx atual vs o já assado no render — feedback em 0 ms, sem
+  // overshoot. O hover de preset (previewFilter) tem prioridade quando ativo.
+  const liveLookFilter =
+    (tool === "render" && (autoRenderPending || renderState === "loading") && renderUrl)
+      ? liveLookDelta({ saturation: fxSaturation, brightness: fxBrightness }, bakedFxRef.current)
+      : null;
 
   // Quad as a CSS clip-path polygon in % of the image — used to blur only the
   // surface area while a re-render is in flight (rest of the scene stays sharp).
@@ -1140,8 +1268,32 @@ function PhotoMockupPageInner() {
           </nav>
         </div>
 
-        {/* Right: novo projeto + undo/redo + pipeline */}
+        {/* Right: novo projeto + abrir/salvar .vsn + undo/redo + pipeline */}
         <div className="flex items-center gap-3">
+          <input
+            id="vsn-input" type="file" accept=".vsn" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) openProject(f); e.target.value = ""; }}
+          />
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => document.getElementById("vsn-input")?.click()}
+              title="Abrir projeto (.vsn)"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-all"
+            >
+              <FolderOpen size={11} />
+              Abrir
+            </button>
+            {photoUrl && (
+              <button
+                onClick={saveProject}
+                title="Salvar projeto em arquivo (.vsn) — foto + luz + máscaras + ajustes"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-all"
+              >
+                <Save size={11} />
+                Salvar
+              </button>
+            )}
+          </div>
           {photoUrl && (
             <button
               onClick={resetPhoto}
@@ -1152,6 +1304,8 @@ function PhotoMockupPageInner() {
               Novo projeto
             </button>
           )}
+          <AuthChip />
+
           <div className="flex items-center gap-0.5 pr-3 border-r border-neutral-800">
             <button
               onClick={() => editorHistory.undo()} disabled={!canUndo}
@@ -1206,9 +1360,14 @@ function PhotoMockupPageInner() {
                     <input
                       id="photo-input"
                       type="file"
-                      accept="image/jpeg,image/png,image/webp"
+                      accept="image/jpeg,image/png,image/webp,.vsn"
                       className="hidden"
-                      onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePhotoFile(f); }}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        if (f.name.toLowerCase().endsWith(".vsn")) openProject(f);
+                        else handlePhotoFile(f);
+                      }}
                     />
                     {uploadState === "loading" ? (
                       <Loader2 size={32} className="animate-spin text-acc" />
@@ -1216,8 +1375,8 @@ function PhotoMockupPageInner() {
                       <>
                         <Upload size={32} className="text-zinc-500" />
                         <div className="text-center">
-                          <p className="font-medium text-zinc-300">Solte sua foto aqui</p>
-                          <p className="text-sm text-zinc-500 mt-1">Cartão, pôster, outdoor, parede…</p>
+                          <p className="font-medium text-zinc-300">Solte sua foto ou projeto aqui</p>
+                          <p className="text-sm text-zinc-500 mt-1">Foto (cartão, pôster, outdoor…) ou projeto <span className="font-mono">.vsn</span></p>
                         </div>
                       </>
                     )}
@@ -1285,7 +1444,7 @@ function PhotoMockupPageInner() {
                             src={baseSrc}
                             alt="mockup"
                             draggable={false}
-                            style={{ maxWidth: "calc(100vw - 360px)", maxHeight: "calc(100vh - 80px)", objectFit: "contain", display: "block", filter: previewFilter ?? undefined, transition: "filter var(--motion) var(--ease)" }}
+                            style={{ maxWidth: "calc(100vw - 360px)", maxHeight: "calc(100vh - 80px)", objectFit: "contain", display: "block", filter: previewFilter ?? liveLookFilter ?? undefined, transition: "filter var(--motion) var(--ease)" }}
                           />
                           {/* Pulso "trabalhando aqui" (SSoT: SurfacePulse). Render → clip no quad;
                               edição da imagem → mask na seleção (ou imagem toda); limpar rosa → quad. */}
@@ -1545,6 +1704,13 @@ function PhotoMockupPageInner() {
                   onPanelOpenChange={setPanelOpen}
                 >
                     <div className="space-y-3">
+
+                      {/* Painel "Superfície" — ponte SSoT com /calibrate (mesh + disp + material + mask). */}
+                      {photoUrl && tool === "calibrate" && (
+                        <div className="bg-zinc-800/40 rounded-xl border border-zinc-700/40 p-2">
+                          <CalibrationPanel />
+                        </div>
+                      )}
 
                       {/* Surface tools — one canvas; the rail switches what overlays it. */}
                       {photoUrl && (tool === "corners" || tool === "mask" || tool === "reflect") && (

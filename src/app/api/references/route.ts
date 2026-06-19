@@ -10,8 +10,21 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(parseInt(searchParams.get("limit") || "60"), 200);
   const search = searchParams.get("search") || "";
   const studio = searchParams.get("studio") || "";
-  const tag = searchParams.get("tag") || "";
+  // Multi-tag: `tags` (CSV, até 5) com modo AND/OR. Mantém compat com `tag`.
+  const tags = (searchParams.get("tags") || searchParams.get("tag") || "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  const tagMode = searchParams.get("tagMode") === "OR" ? "OR" : "AND";
   const hasPsd = searchParams.get("has_psd") === "true";
+
+  const TAG_DIMS = ["niche", "style", "vibe", "material", "mockup_type", "setting", "color_palette"];
+  // Uma tag casa em `tags` flat OU em qualquer dimensão.
+  const tagCond = (t: string) => [
+    { tags: t },
+    ...TAG_DIMS.map((dim) => ({ [`dimensions.${dim}`]: t })),
+  ];
 
   const db = await getDb();
   const col = db.collection("community_presets");
@@ -33,56 +46,33 @@ export async function GET(req: NextRequest) {
     isAdminCurated: true,
   };
 
-  if (search) {
-    // Try text search first (supports stemming, language, weighted fields)
-    // Fall back to regex for short queries or partial matches
-    if (search.length >= 3) {
-      filter.$text = { $search: search };
-    } else {
-      filter.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-        { tags: { $regex: search, $options: "i" } },
-      ];
-    }
-  }
-
   if (studio) filter.studio = studio;
-  if (tag) {
-    // Support filtering by dimension value across all dimension keys, or by flat tags
-    filter.$or = [
-      ...(Array.isArray(filter.$or) ? filter.$or : []),
-      { tags: tag },
-      ...["niche", "style", "vibe", "material", "mockup_type", "setting", "color_palette"].map(
-        (dim) => ({ [`dimensions.${dim}`]: tag })
-      ),
-    ];
-    // If we already have $or from search, merge them with $and
-    if (search && filter.$or) {
-      const searchCondition = search.length >= 3
-        ? { $text: { $search: search } }
-        : {
-            $or: [
-              { name: { $regex: search, $options: "i" } },
-              { description: { $regex: search, $options: "i" } },
-              { tags: { $regex: search, $options: "i" } },
-            ],
-          };
-      delete filter.$text;
-      delete filter.$or;
-      filter.$and = [
-        searchCondition,
-        {
+
+  // Busca: text search (≥3 chars, com stemming/peso) ou regex pra termos curtos.
+  const searchCond = search
+    ? search.length >= 3
+      ? { $text: { $search: search } }
+      : {
           $or: [
-            { tags: tag },
-            ...["niche", "style", "vibe", "material", "mockup_type", "setting", "color_palette"].map(
-              (dim) => ({ [`dimensions.${dim}`]: tag })
-            ),
+            { name: { $regex: search, $options: "i" } },
+            { description: { $regex: search, $options: "i" } },
+            { tags: { $regex: search, $options: "i" } },
           ],
-        },
-      ];
+        }
+    : null;
+  const hasText = !!(searchCond && "$text" in searchCond);
+
+  // Combina busca + tags via $and top-level (preserva category/isAdminCurated).
+  const and: Record<string, unknown>[] = [];
+  if (searchCond) and.push(searchCond);
+  if (tags.length) {
+    if (tagMode === "OR") {
+      and.push({ $or: tags.flatMap(tagCond) });
+    } else {
+      for (const t of tags) and.push({ $or: tagCond(t) });
     }
   }
+  if (and.length) filter.$and = and;
 
   const fetchLimit = hasPsd ? 500 : limit;
   const skip = hasPsd ? 0 : (page - 1) * limit;
@@ -95,7 +85,7 @@ export async function GET(req: NextRequest) {
   };
 
   // Add text score for relevance sorting when using $text
-  const useTextScore = search.length >= 3 && filter.$text;
+  const useTextScore = hasText;
   if (useTextScore) projection.score = { $meta: "textScore" } as unknown as number;
 
   const sort: Record<string, unknown> = useTextScore

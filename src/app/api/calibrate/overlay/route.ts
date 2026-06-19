@@ -4,7 +4,7 @@ import { join } from "path";
 import sharp from "sharp";
 import { detectDominantVividHue } from "@/lib/photo-detect";
 import { isKeyColor } from "@/lib/key-color-core";
-import { NEW_MOCKUPS_DIR } from "@/lib/quad-store";
+import { resolveDir } from "@/lib/quad-store";
 
 function safeName(name: string | null): string | null {
   if (!name) return null;
@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
   const safe = safeName(req.nextUrl.searchParams.get("name"));
   if (!safe) return NextResponse.json({ error: "nome inválido" }, { status: 400 });
 
-  const full = join(NEW_MOCKUPS_DIR, safe);
+  const dir = resolveDir(req.nextUrl.searchParams.get("dir"));
+  const full = join(dir, safe);
   if (!existsSync(full)) return NextResponse.json({ error: "cena não encontrada" }, { status: 404 });
 
   const m = await sharp(full).metadata();

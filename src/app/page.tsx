@@ -16,6 +16,8 @@ import {
   FolderPlus,
   ChevronRight,
   ChevronDown,
+  EyeOff,
+  RotateCcw,
   X,
   Maximize2,
   Folder,
@@ -48,6 +50,7 @@ import {
   type FrameConfig,
   renderFramedArt,
 } from "@/lib/art-frame";
+import { dedupeRefs } from "@/lib/dedup";
 import Lottie from "lottie-react";
 import boxLoaderData from "../../public/lottie/box-loader.json";
 
@@ -58,6 +61,7 @@ function MockupCard({
   isRendering,
   onSelect,
   onApply,
+  onHide,
   thumbSize,
   renderedUrl,
 }: {
@@ -67,6 +71,7 @@ function MockupCard({
   isRendering: boolean;
   onSelect: () => void;
   onApply: () => void;
+  onHide: () => void;
   thumbSize: number;
   renderedUrl?: string;
 }) {
@@ -141,6 +146,30 @@ function MockupCard({
             <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-all active:scale-90 shadow-2xl uppercase tracking-widest">
               Aplicar
             </span>
+          </div>
+        )}
+
+        {!isRendering && (
+          <div className="absolute top-2 left-2 z-20 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
+            {mockup.psdPath && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: mockup.psdPath }) });
+                }}
+                title="Abrir pasta do PSD"
+                className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-all active:scale-90 shadow-xl"
+              >
+                <Folder className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); onHide(); }}
+              title="Esconder este mockup"
+              className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-all active:scale-90 shadow-xl"
+            >
+              <EyeOff className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
       </div>
@@ -366,7 +395,11 @@ export default function Home() {
   const [hasMore, setHasMore] = useState(true);
   const [search, setSearch] = useState("");
   const [studio, setStudio] = useState("");
-  const [activeTag, setActiveTag] = useState("");
+  const [activeTags, setActiveTags] = useState<string[]>([]);
+  const [tagMode, setTagMode] = useState<"AND" | "OR">("AND");
+  const [hideDuplicates, setHideDuplicates] = useState(true);
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const [lastHidden, setLastHidden] = useState<{ id: string; name: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [expandedDims, setExpandedDims] = useState<Set<string>>(new Set());
@@ -389,6 +422,7 @@ export default function Home() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [suggestLimit, setSuggestLimit] = useState(18);
 
   const [brandAssets, setBrandAssets] = useState<Asset[]>([]);
   const [showLibrary, setShowLibrary] = useState(false);
@@ -576,7 +610,10 @@ export default function Home() {
       });
       if (search) params.set("search", search);
       if (studio) params.set("studio", studio);
-      if (activeTag) params.set("tag", activeTag);
+      if (activeTags.length) {
+        params.set("tags", activeTags.join(","));
+        params.set("tagMode", tagMode);
+      }
       params.set("has_psd", "true");
 
       try {
@@ -600,7 +637,7 @@ export default function Home() {
         setInitialLoad(false);
       }
     },
-    [search, studio, activeTag, loading]
+    [search, studio, activeTags, tagMode, loading]
   );
 
   useEffect(() => {
@@ -610,7 +647,7 @@ export default function Home() {
     setInitialLoad(true);
     fetchPage(1, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, studio, activeTag]);
+  }, [search, studio, activeTags, tagMode]);
 
   useEffect(() => {
     fetch("/api/references/studios")
@@ -676,26 +713,42 @@ export default function Home() {
     }
   }, [fetchBrands]);
 
-  // Sugestões brand-aware: recarrega quando a marca muda
-  useEffect(() => {
-    if (!brandId) {
-      setSuggestions([]);
-      return;
-    }
-    localStorage.setItem("mockup-store:brandId", brandId);
-    setLoadingSuggestions(true);
-    setSuggestError(null);
-    fetch(`/api/suggest?brandId=${encodeURIComponent(brandId)}&limit=18`)
-      .then(async (r) => {
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-        setSuggestions(d.suggestions || []);
-      })
-      .catch((err) => {
+  // Sugestões brand-aware. `force` re-roda o perfil LLM (regenerar); `limit`
+  // permite "ver mais".
+  const loadSuggestions = useCallback(
+    (opts?: { force?: boolean; limit?: number }) => {
+      if (!brandId) {
         setSuggestions([]);
-        setSuggestError(String(err.message || err));
-      })
-      .finally(() => setLoadingSuggestions(false));
+        return;
+      }
+      localStorage.setItem("mockup-store:brandId", brandId);
+      const params = new URLSearchParams({
+        brandId,
+        limit: String(opts?.limit ?? suggestLimit),
+      });
+      if (opts?.force) params.set("refresh", "true");
+      setLoadingSuggestions(true);
+      setSuggestError(null);
+      fetch(`/api/suggest?${params}`)
+        .then(async (r) => {
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+          setSuggestions(d.suggestions || []);
+        })
+        .catch((err) => {
+          setSuggestions([]);
+          setSuggestError(String(err.message || err));
+        })
+        .finally(() => setLoadingSuggestions(false));
+    },
+    [brandId, suggestLimit]
+  );
+
+  // Recarrega quando a marca muda (volta ao limite base).
+  useEffect(() => {
+    setSuggestLimit(18);
+    loadSuggestions({ limit: 18 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandId]);
 
   const [assetError, setAssetError] = useState<string | null>(null);
@@ -924,7 +977,7 @@ export default function Home() {
 
     // Lazy-init worker
     if (!workerRef.current) {
-      workerRef.current = new Worker(new URL("../workers/render.worker.ts", import.meta.url));
+      workerRef.current = new Worker(new URL("../workers/render.worker.ts", import.meta.url), { type: "module" });
     }
     const worker = workerRef.current;
 
@@ -1091,8 +1144,58 @@ export default function Home() {
     });
   };
 
+  // Carrega/persiste a lista de mockups ocultados manualmente.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("mockup-store:hiddenIds");
+      if (saved) setHiddenIds(new Set(JSON.parse(saved)));
+    } catch {}
+  }, []);
+  const persistHidden = useCallback((next: Set<string>) => {
+    setHiddenIds(next);
+    try {
+      localStorage.setItem("mockup-store:hiddenIds", JSON.stringify([...next]));
+    } catch {}
+  }, []);
+  const hideMockup = useCallback(
+    (ref: Reference) => {
+      persistHidden(new Set(hiddenIds).add(ref.id));
+      setLastHidden({ id: ref.id, name: ref.name });
+    },
+    [hiddenIds, persistHidden]
+  );
+  const unhideMockup = useCallback(
+    (id: string) => {
+      const next = new Set(hiddenIds);
+      next.delete(id);
+      persistHidden(next);
+      setLastHidden((cur) => (cur?.id === id ? null : cur));
+    },
+    [hiddenIds, persistHidden]
+  );
+
+  // Grid: tira ocultados manualmente, depois colapsa duplicados.
+  const { kept: displayRefs, hiddenDupes } = useMemo(() => {
+    const visible = hiddenIds.size ? refs.filter((r) => !hiddenIds.has(r.id)) : refs;
+    if (!hideDuplicates) return { kept: visible, hiddenDupes: 0 };
+    const { kept, hidden } = dedupeRefs(visible);
+    return { kept, hiddenDupes: hidden };
+  }, [refs, hideDuplicates, hiddenIds]);
+
+  // Toast de desfazer some sozinho depois de alguns segundos.
+  useEffect(() => {
+    if (!lastHidden) return;
+    const t = setTimeout(() => setLastHidden(null), 6000);
+    return () => clearTimeout(t);
+  }, [lastHidden]);
+
+  const MAX_TAGS = 5;
   const toggleTag = (tag: string) => {
-    setActiveTag((prev) => (prev === tag ? "" : tag));
+    setActiveTags((prev) => {
+      if (prev.includes(tag)) return prev.filter((t) => t !== tag);
+      if (prev.length >= MAX_TAGS) return prev; // teto de 5 tags simultâneas
+      return [...prev, tag];
+    });
   };
 
   const handleIngestFolder = async () => {
@@ -1370,6 +1473,39 @@ export default function Home() {
                 </select>
                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600 pointer-events-none" />
               </div>
+              <button
+                onClick={() => setHideDuplicates((v) => !v)}
+                className={`flex items-center justify-between gap-2 h-9 rounded-xl border px-3 text-[10px] font-black uppercase tracking-widest transition-all active:scale-[0.98] ${
+                  hideDuplicates
+                    ? "bg-neutral-900 border-neutral-700 text-neutral-300"
+                    : "bg-transparent border-neutral-800 text-neutral-600 hover:text-neutral-400"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Copy className="w-3.5 h-3.5" />
+                  Esconder duplicados
+                </span>
+                <span className="flex items-center gap-2">
+                  {hideDuplicates && hiddenDupes > 0 && (
+                    <span className="text-neutral-500 normal-case tracking-normal">{hiddenDupes} ocultos</span>
+                  )}
+                  <span className={`w-7 h-4 rounded-full relative transition-colors ${hideDuplicates ? "bg-emerald-500/80" : "bg-neutral-700"}`}>
+                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${hideDuplicates ? "left-3.5" : "left-0.5"}`} />
+                  </span>
+                </span>
+              </button>
+              {hiddenIds.size > 0 && (
+                <button
+                  onClick={() => persistHidden(new Set())}
+                  className="flex items-center justify-between gap-2 h-9 rounded-xl border border-neutral-800 px-3 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-neutral-300 hover:border-neutral-600 transition-all active:scale-[0.98]"
+                >
+                  <span className="flex items-center gap-2">
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Restaurar ocultos
+                  </span>
+                  <span className="text-neutral-600 normal-case tracking-normal">{hiddenIds.size}</span>
+                </button>
+              )}
             </div>
 
 
@@ -1453,16 +1589,48 @@ export default function Home() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-4 min-h-0 space-y-8 no-scrollbar">
-            {activeTag && (
+            {activeTags.length > 0 && (
               <div className="animate-in fade-in zoom-in duration-300">
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-600 mb-2 px-1">Filtro Ativo</p>
-                <button
-                  onClick={() => setActiveTag("")}
-                  className="inline-flex items-center gap-2.5 bg-white text-black text-[10px] font-black px-4 py-2 rounded-full hover:bg-neutral-200 transition-all shadow-xl active:scale-95"
-                >
-                  {activeTag}
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-600">
+                    Filtros Ativos ({activeTags.length}/{MAX_TAGS})
+                  </p>
+                  <div className="flex items-center gap-2">
+                    {activeTags.length > 1 && (
+                      <div className="flex rounded-full bg-neutral-900 border border-neutral-800 p-0.5">
+                        {(["AND", "OR"] as const).map((m) => (
+                          <button
+                            key={m}
+                            onClick={() => setTagMode(m)}
+                            className={`text-[9px] font-black px-2.5 py-1 rounded-full transition-all ${
+                              tagMode === m ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
+                            }`}
+                          >
+                            {m === "AND" ? "E" : "OU"}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => setActiveTags([])}
+                      className="text-[9px] font-black uppercase tracking-widest text-neutral-600 hover:text-neutral-300 transition-colors"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {activeTags.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => toggleTag(t)}
+                      className="inline-flex items-center gap-2 bg-white text-black text-[10px] font-black px-3.5 py-1.5 rounded-full hover:bg-neutral-200 transition-all shadow-xl active:scale-95"
+                    >
+                      {t}
+                      <X className="w-3 h-3" />
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -1486,20 +1654,28 @@ export default function Home() {
                       <span className="text-[9px] text-neutral-700 font-bold group-hover/tag:text-neutral-500">{tags.length}</span>
                     </button>
                     <div className="flex flex-wrap gap-2 pl-7">
-                      {visible.map((t) => (
-                        <button
-                          key={`${dim}-${t.value}`}
-                          onClick={() => toggleTag(t.value)}
-                          className={`text-[10px] px-3 py-1.5 rounded-lg transition-all font-bold ${
-                            activeTag === t.value
-                              ? "bg-white text-black shadow-2xl scale-110 z-10"
-                              : "bg-neutral-900 text-neutral-500 border border-neutral-800 hover:border-neutral-600 hover:text-neutral-300"
-                          }`}
-                        >
-                          {t.value}
-                          <span className={`ml-2 ${activeTag === t.value ? "opacity-40" : "text-neutral-800"}`}>{t.count}</span>
-                        </button>
-                      ))}
+                      {visible.map((t) => {
+                        const isActive = activeTags.includes(t.value);
+                        const capped = !isActive && activeTags.length >= MAX_TAGS;
+                        return (
+                          <button
+                            key={`${dim}-${t.value}`}
+                            onClick={() => toggleTag(t.value)}
+                            disabled={capped}
+                            title={capped ? `Máximo de ${MAX_TAGS} tags` : undefined}
+                            className={`text-[10px] px-3 py-1.5 rounded-lg transition-all font-bold ${
+                              isActive
+                                ? "bg-white text-black shadow-2xl scale-110 z-10"
+                                : capped
+                                ? "bg-neutral-900/40 text-neutral-700 border border-neutral-900 cursor-not-allowed opacity-50"
+                                : "bg-neutral-900 text-neutral-500 border border-neutral-800 hover:border-neutral-600 hover:text-neutral-300"
+                            }`}
+                          >
+                            {t.value}
+                            <span className={`ml-2 ${isActive ? "opacity-40" : "text-neutral-800"}`}>{t.count}</span>
+                          </button>
+                        );
+                      })}
                       {!expanded && tags.length > 10 && (
                         <button onClick={() => toggleDim(dim)} className="text-[9px] font-black px-3 py-1.5 text-neutral-700 hover:text-neutral-400 uppercase">+{tags.length - 10} mais</button>
                       )}
@@ -1514,7 +1690,7 @@ export default function Home() {
         <ResizeHandle />
 
         {/* Main Area: Grid */}
-        <Panel className="flex flex-col bg-neutral-950 min-w-0 overflow-hidden">
+        <Panel className="relative flex flex-col bg-neutral-950 min-w-0 overflow-hidden">
           <main className="flex-1 overflow-y-auto p-8 no-scrollbar">
             {brandId && (
               <div className="mb-12 animate-in fade-in slide-in-from-left-4 duration-700">
@@ -1525,8 +1701,17 @@ export default function Home() {
                       Matches Inteligentes para <span className="text-white bg-white/5 px-2 py-1 rounded-md">{brands.find((b) => b.id === brandId)?.name}</span>
                     </p>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3">
                     {loadingSuggestions && <Loader2 className="w-5 h-5 text-neutral-600 animate-spin" />}
+                    <button
+                      onClick={() => loadSuggestions({ force: true })}
+                      disabled={loadingSuggestions}
+                      title="Regenerar matches (re-analisa a marca)"
+                      className="flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-400 hover:text-white hover:border-neutral-600 transition-all active:scale-90 disabled:opacity-40"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingSuggestions ? "animate-spin" : ""}`} />
+                      Regenerar
+                    </button>
                     <button onClick={() => setBrandId("")} className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-600 hover:text-white hover:border-neutral-600 transition-all active:scale-90"><X className="w-4 h-4" /></button>
                   </div>
                 </div>
@@ -1553,6 +1738,20 @@ export default function Home() {
                         }}
                       />
                     ))}
+                    {suggestions.length >= suggestLimit && (
+                      <button
+                        onClick={() => {
+                          const next = suggestLimit + 12;
+                          setSuggestLimit(next);
+                          loadSuggestions({ limit: next });
+                        }}
+                        disabled={loadingSuggestions}
+                        className="shrink-0 w-32 rounded-2xl border border-dashed border-neutral-800 flex flex-col items-center justify-center gap-2 text-neutral-600 hover:text-neutral-300 hover:border-neutral-600 transition-all active:scale-95 disabled:opacity-40"
+                      >
+                        {loadingSuggestions ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5" />}
+                        <span className="text-[10px] font-black uppercase tracking-widest">Ver mais</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1588,7 +1787,7 @@ export default function Home() {
                     gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` 
                   }}
                 >
-                  {refs.map((ref, i) => (
+                  {displayRefs.map((ref, i) => (
                     <MockupCard
                       key={`${ref.id}-${i}`}
                       mockup={ref}
@@ -1602,6 +1801,7 @@ export default function Home() {
                         selectRef(ref);
                         pendingRenderRef.current = ref;
                       }}
+                      onHide={() => hideMockup(ref)}
                     />
                   ))}
                 </div>
@@ -1624,6 +1824,23 @@ export default function Home() {
               </>
             )}
           </main>
+
+          {lastHidden && (
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 bg-neutral-900/95 backdrop-blur-xl border border-neutral-700 rounded-2xl pl-5 pr-3 py-3 shadow-2xl animate-in slide-in-from-bottom-4 fade-in duration-300">
+              <span className="flex items-center gap-2.5 text-[11px] font-bold text-neutral-300">
+                <EyeOff className="w-4 h-4 text-neutral-500" />
+                <span className="max-w-[220px] truncate">Mockup oculto: <span className="text-white">{lastHidden.name}</span></span>
+              </span>
+              <button
+                onClick={() => unhideMockup(lastHidden.id)}
+                className="flex items-center gap-2 bg-white text-black text-[10px] font-black uppercase tracking-widest px-3.5 py-2 rounded-xl hover:bg-neutral-200 transition-all active:scale-90"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Desfazer
+              </button>
+              <button onClick={() => setLastHidden(null)} className="w-7 h-7 rounded-lg flex items-center justify-center text-neutral-600 hover:text-white transition-colors"><X className="w-4 h-4" /></button>
+            </div>
+          )}
         </Panel>
 
         {selected && <ResizeHandle />}
@@ -1672,12 +1889,20 @@ export default function Home() {
                     <span className="text-[11px] font-bold">Adicionar arte</span>
                   </div>
                 )}
-                {/* Preview render loading overlay — shown only during Worker compositing */}
-                {previewRendering && (
-                  <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center">
-                    <div className="flex flex-col items-center gap-1.5">
-                      <Lottie animationData={boxLoaderData} loop className="w-10 h-10" />
-                      <span className="text-[10px] font-bold text-white/70 animate-pulse">{currentStep || "compositing…"}</span>
+                {/* Render loading overlay — shown over the thumb for both preview (Worker) and final render */}
+                {rendering && (
+                  <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] flex items-center justify-center px-6">
+                    <div className="flex flex-col items-center gap-2 w-full max-w-[220px]">
+                      <Lottie animationData={boxLoaderData} loop className={previewRendering ? "w-10 h-10" : "w-16 h-16"} />
+                      <div className="flex items-center gap-2 text-[10px] font-bold text-white/70">
+                        <span className="animate-pulse">{currentStep || (previewRendering ? "compositing…" : "Processando…")}</span>
+                        {!previewRendering && <span className="text-white/40">{renderElapsed}s</span>}
+                      </div>
+                      {!previewRendering && (
+                        <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                          <div className="h-full bg-white animate-progress-indefinite rounded-full" style={{ width: "40%" }} />
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1934,19 +2159,6 @@ export default function Home() {
                   </button>
                 )}
               </div>
-
-              {rendering && !previewRendering && (
-                <div className="flex flex-col gap-2 items-center animate-in fade-in slide-in-from-bottom-2">
-                  <Lottie animationData={boxLoaderData} loop className="w-16 h-16" />
-                  <div className="flex items-center gap-2 text-[11px] font-bold text-neutral-400">
-                    <span className="animate-pulse">{currentStep || "Processando"}…</span>
-                    <span className="text-neutral-600">{renderElapsed}s</span>
-                  </div>
-                  <div className="w-full h-1 bg-neutral-900 rounded-full overflow-hidden">
-                    <div className="h-full bg-white animate-progress-indefinite rounded-full" style={{ width: "40%" }} />
-                  </div>
-                </div>
-              )}
 
               {renderResult && !rendering && !isPreviewResult && (
                 <a

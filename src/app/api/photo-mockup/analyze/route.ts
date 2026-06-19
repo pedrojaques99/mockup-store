@@ -3,12 +3,13 @@ import { readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { analyzePhoto } from "@/lib/photo-analyze";
+import { analyzeScene } from "@/lib/scene-classify";
 
 const TMP_DIR  = join(process.cwd(), ".tmp",  "photo-scenes");
 const DATA_DIR = join(process.cwd(), "data", "photo-scenes");
 
 export async function POST(req: NextRequest) {
-  const { id, force } = await req.json();
+  const { id, force, ai } = await req.json();
 
   if (!id || typeof id !== "string" || !/^[a-f0-9]{16}$/.test(id)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
@@ -40,7 +41,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const analysis = await analyzePhoto(photoPath, width, height);
-    const payload = { ...analysis, id };
+    // **Self-learning loop**: roda em paralelo. `analyzeScene` carrega o profile
+    // (`engine-feedback.substrateCounts`) e aplica prior boost ao rankSubstrates —
+    // o photo-mockup recebe os MESMOS smart presets que o /calibrate, e cada
+    // publish do photo-mockup já loga o substrate (ver publish/route.ts) que vai
+    // refinar o ranking da próxima cena. Loop fechado nos dois editores.
+    const tenant = (req.headers.get("x-tenant") || "").trim() || undefined;
+    const sceneAnalysis = await analyzeScene(photoPath, { ai: !!ai, tenant }).catch(() => null);
+    const payload = { ...analysis, id, sceneAnalysis };
     await writeFile(analysisPath, JSON.stringify(payload, null, 2));
     return NextResponse.json({ ...payload, cached: false });
   } catch (err: any) {
