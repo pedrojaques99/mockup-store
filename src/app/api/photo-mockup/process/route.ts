@@ -10,7 +10,7 @@ import { readFile, writeFile, unlink, rename } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import sharp from "sharp";
-import { extractGrayscaleLayers, extractMask, cleanMagentaMarker, extractOccluder, neutralizeNeonPixels, extractReflectionMask } from "@/lib/photo-shadow";
+import { extractGrayscaleLayers, extractMask, cleanMagentaMarker, extractOccluder, neutralizeNeonPixels, extractReflectionMask, extractColorCastLayer } from "@/lib/photo-shadow";
 import type { QuadPoints } from "@/lib/photo-analyze";
 
 const dataUrlToBuffer = (s: string) =>
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
       .toBuffer();
   }
 
-  const [{ screen, multiply }, maskBuf, cleanPhotoBuf, autoOccluderBuf, autoReflectionBuf] = await Promise.all([
+  const [{ screen, multiply }, maskBuf, cleanPhotoBuf, autoOccluderBuf, autoReflectionBuf, colorCastBuf] = await Promise.all([
     extractGrayscaleLayers(rawPhotoPath, quad, surfaceMaskBuf, floor, blurSig),  // raw photo for accurate lighting
     extractMask(W, H, quad, feather),
     // 1) fill solid magenta with sampled bg, 2) desaturate ONLY the saturated
@@ -122,6 +122,9 @@ export async function POST(req: NextRequest) {
     extractOccluder(rawPhotoPath, quad),
     // Reflection map — where the magenta surface bounced into the scene (floor/glass)
     extractReflectionMask(rawPhotoPath, quad, W, H),
+    // Color-cast (tom ambiente da cena) — assado em disco pro core de render aplicar o
+    // slider de cast em produção (antes a layer era emitida mas sem asset → morta).
+    extractColorCastLayer(rawPhotoPath, W, H, quad),
   ]);
 
   // Brush override for the reflection map (user-painted) takes priority over auto-detect
@@ -209,6 +212,7 @@ export async function POST(req: NextRequest) {
     atomicWrite(join(dir, "shadow-screen.png"), screen),
     atomicWrite(join(dir, "mask.png"), artMask),
     atomicWrite(join(dir, "reflection-mask.png"), reflectionBuf),
+    atomicWrite(join(dir, "color-cast.png"), colorCastBuf),
   ];
   if (finalCleanBuf) writes.push(atomicWrite(cleanPath, finalCleanBuf));
   if (occluderBuf) writes.push(atomicWrite(join(dir, "occluder.png"), occluderBuf));
