@@ -338,9 +338,10 @@ export async function generateScenePreviews(
   return results;
 }
 
-export interface SceneInfo { id: string; name: string; surfaceType: string; published: boolean; }
+export interface SceneInfo { id: string; name: string; surfaceType: string; published: boolean; studio?: string; tags?: string[]; }
 
-/** Enumera as cenas calibradas disponíveis (data/ = publicadas, .tmp/ = rascunho). */
+/** Enumera as cenas calibradas disponíveis (data/ = publicadas, .tmp/ = rascunho).
+ *  Lê `studio`/`tags` do settings.json (override do grouping no grid). */
 export async function listPhotoScenes(): Promise<SceneInfo[]> {
   const out: SceneInfo[] = [];
   const seen = new Set<string>();
@@ -355,9 +356,32 @@ export async function listPhotoScenes(): Promise<SceneInfo[]> {
       try {
         const a = JSON.parse(await readFile(join(dir, "analysis.json"), "utf-8"));
         const m = JSON.parse(await readFile(join(dir, "meta.json"), "utf-8"));
-        out.push({ id, name: m.originalName ?? id, surfaceType: a.surfaceType ?? "unknown", published: i === 0 });
+        let studio: string | undefined, tags: string[] | undefined;
+        if (existsSync(join(dir, "settings.json"))) {
+          const s = JSON.parse(await readFile(join(dir, "settings.json"), "utf-8"));
+          if (typeof s.studio === "string") studio = s.studio;
+          if (Array.isArray(s.tags)) tags = s.tags;
+        }
+        out.push({ id, name: m.originalName ?? id, surfaceType: a.surfaceType ?? "unknown", published: i === 0, studio, tags });
       } catch { /* cena corrompida — ignora */ }
     }
   }
   return out;
+}
+
+/** Grava `studio`/`tags` no settings.json das cenas (grouping no grid). Merge, não sobrescreve. */
+export async function tagScenes(ids: string[], opts: { studio?: string; tags?: string[] }): Promise<{ id: string; ok: boolean }[]> {
+  const res: { id: string; ok: boolean }[] = [];
+  for (const id of ids) {
+    const dir = resolveSceneDir(id);
+    if (!dir) { res.push({ id, ok: false }); continue; }
+    const p = join(dir, "settings.json");
+    let s: Record<string, unknown> = {};
+    try { if (existsSync(p)) s = JSON.parse(await readFile(p, "utf-8")); } catch { /* */ }
+    if (opts.studio) s.studio = opts.studio;
+    if (opts.tags) s.tags = [...new Set([...(Array.isArray(s.tags) ? s.tags : []), ...opts.tags])];
+    await writeFile(p, JSON.stringify(s, null, 2));
+    res.push({ id, ok: true });
+  }
+  return res;
 }

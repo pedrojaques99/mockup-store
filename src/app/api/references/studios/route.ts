@@ -35,10 +35,12 @@ export async function GET() {
     console.error("[studios] Mongo indisponível:", e instanceof Error ? e.message : e);
   }
 
-  // Filesystem: só as não-publicadas (.tmp = "Local"); as publicadas já vêm do Mongo.
+  // Filesystem não-publicadas: agrupa pelo `studio` da cena (settings.json) ou "Local".
   try {
-    const local = (await listPhotoScenes()).filter((s) => !s.published).length;
-    if (local) counts.set("Local", (counts.get("Local") ?? 0) + local);
+    for (const s of (await listPhotoScenes()).filter((x) => !x.published)) {
+      const studio = s.studio || "Local";
+      counts.set(studio, (counts.get(studio) ?? 0) + 1);
+    }
   } catch { /* sem filesystem — ok */ }
 
   return NextResponse.json(

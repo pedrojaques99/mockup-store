@@ -17,30 +17,31 @@ const PREVIEW_DIR = join(process.cwd(), "public", "photo-previews");
 async function filesystemPhotoRefs(opts: { search: string; studio: string; tags: string[]; tagMode: "AND" | "OR"; existingIds: Set<string> }) {
   const scenes = await listPhotoScenes();
   const q = opts.search.toLowerCase();
-  const matchTag = (surfaceType: string, studio: string, t: string) =>
-    t === surfaceType || t === studio || t === "photo" || t === "local";
   return scenes
     .filter((s) => !opts.existingIds.has(s.id))
-    .map((s) => ({ s, studio: s.published ? "Photo Scene" : "Local" }))
-    .filter(({ s, studio }) => {
+    .map((s) => {
+      const studio = s.studio ?? (s.published ? "Photo Scene" : "Local");
+      const tags = [s.surfaceType, "photo", s.published ? "publicada" : "local", ...(s.tags ?? [])];
+      return { s, studio, tags };
+    })
+    .filter(({ s, studio, tags }) => {
       if (opts.studio && studio !== opts.studio) return false;
-      if (q && !s.name.toLowerCase().includes(q) && !s.surfaceType.toLowerCase().includes(q)) return false;
+      if (q && !s.name.toLowerCase().includes(q) && !s.surfaceType.toLowerCase().includes(q) && !tags.some((t) => t.toLowerCase().includes(q))) return false;
       if (opts.tags.length) {
-        const ok = opts.tagMode === "OR"
-          ? opts.tags.some((t) => matchTag(s.surfaceType, studio, t))
-          : opts.tags.every((t) => matchTag(s.surfaceType, studio, t));
+        const has = (t: string) => tags.includes(t) || t === studio;
+        const ok = opts.tagMode === "OR" ? opts.tags.some(has) : opts.tags.every(has);
         if (!ok) return false;
       }
       return true;
     })
-    .map(({ s, studio }) => ({
+    .map(({ s, studio, tags }) => ({
       id: s.id,
       name: s.name.replace(/\.[^.]+$/, ""),
       studio,
       description: `${s.surfaceType} photo mockup`,
       referenceImageUrl: existsSync(join(PREVIEW_DIR, `${s.id}.png`)) ? `/photo-previews/${s.id}.png` : undefined,
       dimensions: { mockup_type: [s.surfaceType] },
-      tags: [s.surfaceType, "photo", studio === "Local" ? "local" : "publicada"],
+      tags,
       type: "photo" as const,
       photoSceneId: s.id,
     }));
