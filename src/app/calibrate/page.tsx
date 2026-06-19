@@ -403,11 +403,18 @@ export default function CalibratePage() {
     // Escala estimada: a amplitude na UI (dispScale) é o "raio" max em px (já é byte→px).
     const scale = Math.max(2, data.dispScale || 8);
     const sx = cv.width / data.width, sy = cv.height / data.height;
+    // median 3×3 → 1 pixel-outlier não puxa um nó (decode /128 = constante do engine)
     const sampler = (x: number, y: number): readonly [number, number] => {
-      const ix = Math.max(0, Math.min(cv.width - 1, Math.round(x * sx)));
-      const iy = Math.max(0, Math.min(cv.height - 1, Math.round(y * sy)));
-      const o = (iy * cv.width + ix) * 4;
-      return [((px[o] - 128) / 127) * scale, ((px[o + 1] - 128) / 127) * scale] as const;
+      const cx = Math.round(x * sx), cy = Math.round(y * sy);
+      const rs: number[] = [], gs: number[] = [];
+      for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+        const ix = Math.max(0, Math.min(cv.width - 1, cx + ox));
+        const iy = Math.max(0, Math.min(cv.height - 1, cy + oy));
+        const o = (iy * cv.width + ix) * 4;
+        rs.push(px[o]); gs.push(px[o + 1]);
+      }
+      const med = (arr: number[]) => { arr.sort((a, b) => a - b); return arr[4]; };
+      return [((med(rs) - 128) / 128) * scale, ((med(gs) - 128) / 128) * scale] as const;
     };
     editData((d) => d.mesh ? ({ ...d, mesh: applyDispToMesh(d.mesh, sampler, intensity) }) : d);
   }, [data, dispUrl, refreshDisp, editData]);
@@ -460,10 +467,17 @@ export default function CalibratePage() {
       ctx.drawImage(img, 0, 0);
       const { data: px } = ctx.getImageData(0, 0, cv.width, cv.height);
       const sx = cv.width / data.width, sy = cv.height / data.height;
+      // median 3×3 do depth → spike de 1 pixel (depth model / specular) não voa um nó
       const sampler = (x: number, y: number) => {
-        const ix = Math.max(0, Math.min(cv.width - 1, Math.round(x * sx)));
-        const iy = Math.max(0, Math.min(cv.height - 1, Math.round(y * sy)));
-        return px[(iy * cv.width + ix) * 4] / 255;
+        const cx = Math.round(x * sx), cy = Math.round(y * sy);
+        const vs: number[] = [];
+        for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+          const ix = Math.max(0, Math.min(cv.width - 1, cx + ox));
+          const iy = Math.max(0, Math.min(cv.height - 1, cy + oy));
+          vs.push(px[(iy * cv.width + ix) * 4]);
+        }
+        vs.sort((a, b) => a - b);
+        return vs[4] / 255;
       };
       editData((d) => d.mesh ? ({ ...d, mesh: meshFromDepth(d.mesh, sampler, amount) }) : d);
       URL.revokeObjectURL(url);

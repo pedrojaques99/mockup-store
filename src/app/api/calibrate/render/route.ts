@@ -109,14 +109,25 @@ export async function POST(req: NextRequest) {
   // Malha (envelope) + relevo da foto/material **trabalham juntos**: o abaulamento
   // (geometria macro) e o relevo (textura micro) viram offsets que SOMAM no mesmo
   // displacement field — sem um sobrescrever o outro. Composição via composeDispFields.
-  const meshDisp = useMesh ? await generateMeshDisplacement(mesh!) : null;
+  const meshDisp = useMesh ? await generateMeshDisplacement(mesh!, { quad }) : null;
   const photoDispScale = typeof body.dispScale === "number" ? body.dispScale * sc : 0;
   let composedDisp: { png: Buffer; scale: number } | null = null;
   if (meshDisp && photoDispScale > 0) {
+    // Compose no ESPAÇO DO faceCanvas (bbox do quad) — não no full-image. O relevo da
+    // foto (dispBuf) é full W×H; recorta-se pro bbox do quad (alpha 0 fora do quad é
+    // ignorado pelo compose). Antes compunha em W×H e o engine espremia o canvas todo no
+    // face → smear localizado. Ver docs/PLAN-displacement-pixel-perfect.md.
+    const qxs = [quad.tl.x, quad.tr.x, quad.br.x, quad.bl.x];
+    const qys = [quad.tl.y, quad.tr.y, quad.br.y, quad.bl.y];
+    const bx = Math.max(0, Math.floor(Math.min(...qxs)));
+    const by = Math.max(0, Math.floor(Math.min(...qys)));
+    const bw = Math.min(W - bx, Math.max(1, Math.ceil(Math.max(...qxs) - bx)));
+    const bh = Math.min(H - by, Math.max(1, Math.ceil(Math.max(...qys) - by)));
+    const dispFace = await sharp(dispBuf).extract({ left: bx, top: by, width: bw, height: bh }).png().toBuffer();
     composedDisp = await composeDispFields([
-      { png: meshDisp.png, w: meshDisp.width, h: meshDisp.height, scale: meshDisp.dispScale, offsetX: meshDisp.offsetX, offsetY: meshDisp.offsetY },
-      { png: dispBuf, w: W, h: H, scale: photoDispScale, offsetX: 0, offsetY: 0 },
-    ], W, H);
+      { png: meshDisp.png, w: meshDisp.width, h: meshDisp.height, scale: meshDisp.dispScale, offsetX: 0, offsetY: 0 },
+      { png: dispFace, w: meshDisp.width, h: meshDisp.height, scale: photoDispScale, offsetX: 0, offsetY: 0 },
+    ], meshDisp.width, meshDisp.height);
   }
   const dispScaleFinal = composedDisp ? composedDisp.scale
     : meshDisp ? meshDisp.dispScale

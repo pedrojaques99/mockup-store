@@ -26,6 +26,34 @@ export interface WarpMesh {
 const lerp = (a: Pt, b: Pt, t: number): Pt => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
 const ZERO = { x: 0, y: 0 };
 const neg = (p: Pt): Pt => ({ x: -p.x, y: -p.y });
+const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
+const signedTri = (a: Pt, b: Pt, c: Pt) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+
+/** Fração do tamanho da célula local que um nó pode se mover sem dobrar a malha. */
+const NODE_CLAMP_FRAC = 0.45;
+
+/**
+ * Tamanho da célula local de um nó = menor distância aos 4 vizinhos da grade. Usado pra
+ * limitar o deslocamento de um nó (anti-fold) proporcionalmente à malha, não em px fixos.
+ */
+function cellSizeAt(points: Pt[], rows: number, cols: number, i: number, j: number): number {
+  const P = (a: number, b: number) => points[a * cols + b];
+  const p = P(i, j); let d = Infinity;
+  if (j > 0) d = Math.min(d, dist(p, P(i, j - 1)));
+  if (j < cols - 1) d = Math.min(d, dist(p, P(i, j + 1)));
+  if (i > 0) d = Math.min(d, dist(p, P(i - 1, j)));
+  if (i < rows - 1) d = Math.min(d, dist(p, P(i + 1, j)));
+  return Number.isFinite(d) ? d : 0;
+}
+
+/** Limita o vetor (dx,dy) a `cap` de magnitude (preserva direção). */
+function clampVec(dx: number, dy: number, cap: number): readonly [number, number] {
+  if (cap <= 0) return [0, 0];
+  const m = Math.hypot(dx, dy);
+  if (m <= cap || m === 0) return [dx, dy];
+  const k = cap / m;
+  return [dx * k, dy * k];
+}
 
 // Handles direcionais de um nó (mirror por default; override se *Out/*In presentes).
 export const hOutOf = (t: Tangent): Pt => t.hOut ?? t.h;
@@ -100,6 +128,54 @@ export function autoSmoothTangents(m: WarpMesh): WarpMesh {
   return { ...m, tangents };
 }
 
+/**
+ * **Guard anti-dobra**: relaxa nós internos que dobram a malha (célula auto-interseção /
+ * orientação invertida vs. o plano do quad) em direção à média dos vizinhos (Laplaciano,
+ * Jacobi), preservando bordas. Converge pra malha sem fold sem alterar células válidas.
+ * Rede de segurança final do auto-curva/depth-mesh/edição manual + no server (rasterizador).
+ */
+export function clampMeshFolds(m: WarpMesh, iters = 10): WarpMesh {
+  const { rows, cols } = m;
+  if (rows < 2 || cols < 2) return m;
+  const q = meshCorners(m);
+  const expected = Math.sign(signedTri(q.tl, q.tr, q.br)); // orientação da superfície
+  if (expected === 0) return m; // quad degenerado → nada a fazer
+  let pts = m.points.slice();
+  const P = (a: number, b: number) => pts[a * cols + b];
+  for (let it = 0; it < iters; it++) {
+    const bad = new Uint8Array(rows * cols); // nós a relaxar nesta passada
+    let count = 0;
+    for (let i = 0; i < rows - 1; i++) for (let j = 0; j < cols - 1; j++) {
+      const p00 = P(i, j), p01 = P(i, j + 1), p10 = P(i + 1, j), p11 = P(i + 1, j + 1);
+      // 4 triângulos (cada canto): qualquer sinal != orientação esperada ⇒ célula dobrada
+      const tris: [Pt, Pt, Pt][] = [
+        [p00, p01, p11], [p00, p11, p10], [p00, p01, p10], [p01, p11, p10],
+      ];
+      let folded = false;
+      for (const [a, b, c] of tris) {
+        const s = signedTri(a, b, c);
+        if (s === 0 || Math.sign(s) !== expected) { folded = true; break; }
+      }
+      if (folded) {
+        for (const [ii, jj] of [[i, j], [i, j + 1], [i + 1, j], [i + 1, j + 1]] as const) {
+          if (ii > 0 && jj > 0 && ii < rows - 1 && jj < cols - 1) { // só nó interno (borda fixa)
+            if (!bad[ii * cols + jj]) { bad[ii * cols + jj] = 1; count++; }
+          }
+        }
+      }
+    }
+    if (count === 0) break;
+    const relaxed = pts.slice();
+    for (let i = 1; i < rows - 1; i++) for (let j = 1; j < cols - 1; j++) {
+      if (!bad[i * cols + j]) continue;
+      const a = P(i - 1, j), b = P(i + 1, j), c = P(i, j - 1), d = P(i, j + 1);
+      relaxed[i * cols + j] = { x: (a.x + b.x + c.x + d.x) / 4, y: (a.y + b.y + c.y + d.y) / 4 };
+    }
+    pts = relaxed;
+  }
+  return { ...m, points: pts.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })) };
+}
+
 /** Posição no quad (bilinear/perspectiva) para (u,v) ∈ [0,1]². */
 export function bilinearQuad(q: QuadCorners, u: number, v: number): Pt {
   return lerp(lerp(q.tl, q.tr, u), lerp(q.bl, q.br, u), v);
@@ -143,10 +219,13 @@ export function applyDispToMesh(
   for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
     if (i === 0 || j === 0 || i === rows - 1 || j === cols - 1) continue; // borda fixa
     const k = i * cols + j; const p = m.points[k];
-    const [dx, dy] = sampler(p.x, p.y);
-    next[k] = { x: Math.round(p.x + dx * amount), y: Math.round(p.y + dy * amount) };
+    const [sxr, syr] = sampler(p.x, p.y);
+    // clamp por-nó: não deixa um pixel-outlier do field puxar o nó além da célula (anti-fold)
+    const cap = NODE_CLAMP_FRAC * cellSizeAt(m.points, rows, cols, i, j);
+    const [dx, dy] = clampVec(sxr * amount, syr * amount, cap);
+    next[k] = { x: Math.round(p.x + dx), y: Math.round(p.y + dy) };
   }
-  return autoSmoothTangents({ ...m, points: next });
+  return autoSmoothTangents(clampMeshFolds({ ...m, points: next }));
 }
 
 /**
@@ -165,9 +244,11 @@ export function meshFromDepth(
 ): WarpMesh {
   const { rows, cols } = m;
   const next = m.points.slice();
-  // Calcula range de depth observado nos nós pra normalizar
-  let dmin = 1, dmax = 0;
-  for (const p of m.points) { const d = sampleDepth(p.x, p.y); if (d < dmin) dmin = d; if (d > dmax) dmax = d; }
+  // Range robusto (P2–P98) dos depths amostrados nos nós → 1 pixel outlier (spike do
+  // depth model / specular highlight) não satura a normalização e não voa 1 nó.
+  const samples = m.points.map((p) => sampleDepth(p.x, p.y)).sort((a, b) => a - b);
+  const pct = (q: number) => samples[Math.max(0, Math.min(samples.length - 1, Math.round(q * (samples.length - 1))))];
+  const dmin = pct(0.02), dmax = pct(0.98);
   const range = Math.max(0.05, dmax - dmin);
   // Eixo da malha: aproxima por (TR-TL) e (BL-TL). Deslocamento dos nós é perpendicular ao plano.
   const TL = m.points[0], TR = m.points[cols - 1], BL = m.points[(rows - 1) * cols];
@@ -180,11 +261,13 @@ export function meshFromDepth(
   for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
     if (i === 0 || j === 0 || i === rows - 1 || j === cols - 1) continue; // borda fixa
     const k = i * cols + j; const p = m.points[k];
-    const d = sampleDepth(p.x, p.y);
+    const d = Math.max(dmin, Math.min(dmax, sampleDepth(p.x, p.y))); // recorta outlier ao range robusto
     const t = (d - dmin) / range - 0.5; // [-0.5,+0.5]
-    next[k] = { x: Math.round(p.x + norm.x * t * amount), y: Math.round(p.y + norm.y * t * amount) };
+    const cap = NODE_CLAMP_FRAC * cellSizeAt(m.points, rows, cols, i, j);
+    const [dx, dy] = clampVec(norm.x * t * amount, norm.y * t * amount, cap);
+    next[k] = { x: Math.round(p.x + dx), y: Math.round(p.y + dy) };
   }
-  return autoSmoothTangents({ ...m, points: next });
+  return autoSmoothTangents(clampMeshFolds({ ...m, points: next }));
 }
 
 /** True se a malha desvia da grade regular do quad (pontos movidos OU hastes Bézier). */

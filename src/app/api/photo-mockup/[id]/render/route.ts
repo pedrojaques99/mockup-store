@@ -242,18 +242,20 @@ export async function POST(
             })) }
         : mesh;
       if (meshIsWarped(sMesh)) {
-        const md = await generateMeshDisplacement(sMesh);
+        // Autora o field no ESPAÇO DO faceCanvas (bbox do `face.quad` que o engine usa).
+        const md = await generateMeshDisplacement(sMesh, { quad: docAnalysis.quad });
         if (md) {
           const face = doc.faces[0] as { dispRef?: string; dispScale?: number };
           // Se já há warpDisp (cylinder/bend/textura), compor os dois → um disp só.
           if (warpDisp) {
-            const Wc = analysis.imageWidth * S, Hc = analysis.imageHeight * S;
+            // Compose no MESMO espaço do faceCanvas (= md.width×md.height, bbox do quad).
+            // Malha já está nesse espaço; warpDisp é MAP×MAP "stretch-to-fit na face" →
+            // resample pro mesmo tamanho. (Antes compunha em canvas-inteiro e o engine
+            // espremia tudo no face → smear localizado. Ver docs/PLAN-displacement-pixel-perfect.md)
             const composed = await composeDispFields([
-              { png: md.png, w: md.width, h: md.height, scale: md.dispScale, offsetX: md.offsetX, offsetY: md.offsetY },
-              // warpDisp é gerado no espaço inner (innerW×innerH) e o engine o casa pelo quad.
-              // Aqui assumimos full-canvas pra somar — mais simples e funcional pra blend macro+micro.
-              { png: warpDisp.buffer, w: Wc, h: Hc, scale: warpDisp.scale * S, offsetX: 0, offsetY: 0 },
-            ], Wc, Hc);
+              { png: md.png, w: md.width, h: md.height, scale: md.dispScale, offsetX: 0, offsetY: 0 },
+              { png: warpDisp.buffer, w: md.width, h: md.height, scale: warpDisp.scale * S, offsetX: 0, offsetY: 0 },
+            ], md.width, md.height);
             (assets as Record<string, unknown>).displacement = await loadImage(composed.png);
             face.dispScale = composed.scale;
           } else {
