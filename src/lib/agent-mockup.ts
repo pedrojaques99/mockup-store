@@ -18,6 +18,7 @@ import {
   type RenderEngine, type SceneAnalysis, type BaseParams, type LooksParams,
 } from "./photo-render-core";
 import { loadQuads, type QuadEntry } from "./quad-store";
+import { detectKeyColorQuad } from "./photo-detect";
 import { frameArt } from "./server-frame";
 import type { FitMode } from "./art-frame";
 import type { MaterialKind } from "./material-fx";
@@ -286,18 +287,31 @@ export async function finalizeScene(imagePath: string, entry: QuadEntry, sidecar
 export interface FinalizeResult { filename: string; id?: string; ok: boolean; error?: string; }
 
 /**
- * Finaliza TODAS as imagens de uma pasta que têm entrada no quads.json dela.
- * `only` filtra por nomes (substring). Retorna um result por imagem.
+ * Finaliza as imagens de uma pasta. Usa o quad corrigido do `quads.json` quando existe;
+ * senão **auto-detecta** o quad da superfície magenta (detectKeyColorQuad, CV puro) — então
+ * funciona em pastas recém-geradas (ex.: cenas do visant-mockup-creator, sem quads.json).
+ * `only` filtra por nomes (substring).
  */
-export async function finalizeFolder(dir: string, opts: { only?: string[] } = {}): Promise<FinalizeResult[]> {
+export async function finalizeFolder(dir: string, opts: { only?: string[]; surfaceType?: string } = {}): Promise<FinalizeResult[]> {
   const store = await loadQuads(dir);
-  const names = Object.keys(store).filter((n) => !opts.only?.length || opts.only.some((o) => n.includes(o)));
+  const imgs = (await readdir(dir)).filter((f) => /\.(png|jpe?g|webp)$/i.test(f) && !/-analysis\./i.test(f));
+  const names = imgs.filter((n) => !opts.only?.length || opts.only.some((o) => n.includes(o)));
   const results: FinalizeResult[] = [];
   for (const filename of names) {
     try {
       const imagePath = join(dir, filename);
-      if (!existsSync(imagePath)) { results.push({ filename, ok: false, error: "imagem ausente" }); continue; }
-      const id = await finalizeScene(imagePath, store[filename], dir);
+      let entry: QuadEntry | undefined = store[filename];
+      if (!entry) {
+        const meta = await sharp(imagePath).metadata();
+        const W = meta.width ?? 0, H = meta.height ?? 0;
+        const det = await detectKeyColorQuad(imagePath, W, H);
+        if (!det?.quad) { results.push({ filename, ok: false, error: "sem superfície magenta detectada" }); continue; }
+        entry = {
+          quad: det.quad, method: det.method ?? "key-color", surfaceType: opts.surfaceType ?? "poster",
+          source: "auto", hue: det.hue, confidence: det.confidence, imageWidth: W, imageHeight: H, savedAt: 0,
+        };
+      }
+      const id = await finalizeScene(imagePath, entry, dir);
       results.push({ filename, id, ok: true });
     } catch (e: unknown) {
       results.push({ filename, ok: false, error: e instanceof Error ? e.message : String(e) });
