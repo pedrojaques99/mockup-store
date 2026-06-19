@@ -20,7 +20,7 @@ import { readFile, writeFile, rm } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import sharp from "sharp";
-import { createPhotoMockups, listPhotoScenes, resolveSceneDir } from "../src/lib/agent-mockup";
+import { createPhotoMockups, listPhotoScenes, resolveSceneDir, finalizeFolder } from "../src/lib/agent-mockup";
 import type { FitMode } from "../src/lib/art-frame";
 
 const argv = process.argv.slice(2);
@@ -119,6 +119,17 @@ async function main() {
     console.log(`${scenes.length} cenas • ${dupNames.length} nomes duplicados (${dupTotal} cópias extras)`);
     console.log(`HTML: ${htmlPath}`);
     console.log(`PNG:  ${montagePath}`);
+    return;
+  }
+
+  if (cmd === "finalize") {
+    const dir = flag("dir") ?? "Render/New Mockups";
+    const only = flag("only")?.split(",").map((s) => s.trim()).filter(Boolean);
+    console.log(`finalizando cenas de ${dir}${only ? ` (filtro: ${only.join(",")})` : ""}\n`);
+    const results = await finalizeFolder(dir, { only });
+    for (const r of results) console.log(`  ${r.ok ? "✓" : "✗"} ${r.filename}${r.ok ? `  → ${r.id}` : `  (${r.error})`}`);
+    const ok = results.filter((r) => r.ok).length;
+    console.log(`\n✓ ${ok}/${results.length} finalizadas`);
     return;
   }
 

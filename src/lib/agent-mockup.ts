@@ -10,14 +10,18 @@
  */
 import { readFile, writeFile, mkdir, readdir } from "fs/promises";
 import { existsSync } from "fs";
-import { join } from "path";
+import { join, basename } from "path";
+import { randomUUID } from "crypto";
+import sharp from "sharp";
 import {
-  buildBaseComposite, applyLooks,
+  extractSceneAssets, buildBaseComposite, applyLooks,
   type RenderEngine, type SceneAnalysis, type BaseParams, type LooksParams,
 } from "./photo-render-core";
+import { loadQuads, type QuadEntry } from "./quad-store";
 import { frameArt } from "./server-frame";
 import type { FitMode } from "./art-frame";
 import type { MaterialKind } from "./material-fx";
+import type { QuadCorners } from "./key-color-core";
 
 const SCENE_ROOTS = [
   join(process.cwd(), "data", "photo-scenes"),
@@ -211,6 +215,95 @@ export async function createPhotoMockups(job: PhotoMockupJob): Promise<{ results
   };
   await writeFile(join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
   return { results, outDir };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FINALIZAR — imagem-fonte (+ quad corrigido do quads.json) → cena baked no store.
+// É a cola que faltava entre o /calibrate (quads.json) e o store do photo-mockup.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function bbox(q: QuadCorners, W: number, H: number) {
+  const xs = [q.tl.x, q.tr.x, q.br.x, q.bl.x], ys = [q.tl.y, q.tr.y, q.br.y, q.bl.y];
+  const left = Math.max(0, Math.floor(Math.min(...xs)));
+  const top = Math.max(0, Math.floor(Math.min(...ys)));
+  return { left, top, width: Math.min(W - 1, Math.ceil(Math.max(...xs))) - left + 1, height: Math.min(H - 1, Math.ceil(Math.max(...ys))) - top + 1 };
+}
+
+/**
+ * Cria uma cena baked em `.tmp/photo-scenes/<id>/` a partir de uma imagem-fonte e seu
+ * QuadEntry (quad corrigido + surfaceType + material/mesh + SAM opcional). Usa o MESMO
+ * `extractSceneAssets` do /process → assets idênticos ao app. Retorna o id criado.
+ */
+export async function finalizeScene(imagePath: string, entry: QuadEntry, sidecarDir: string): Promise<string> {
+  const meta = await sharp(imagePath).metadata();
+  const W = meta.width ?? entry.imageWidth, H = meta.height ?? entry.imageHeight;
+  const sx = entry.imageWidth ? W / entry.imageWidth : 1, sy = entry.imageHeight ? H / entry.imageHeight : 1;
+  const sp = (p: { x: number; y: number }) => ({ x: Math.round(p.x * sx), y: Math.round(p.y * sy) });
+  const quad: QuadCorners = (sx === 1 && sy === 1)
+    ? entry.quad
+    : { tl: sp(entry.quad.tl), tr: sp(entry.quad.tr), br: sp(entry.quad.br), bl: sp(entry.quad.bl) };
+  const surfaceType = entry.surfaceType || "billboard";
+
+  const id = randomUUID().replace(/-/g, "").slice(0, 16);
+  const dir = join(process.cwd(), ".tmp", "photo-scenes", id);
+  await mkdir(dir, { recursive: true });
+
+  const photoPng = join(dir, "photo.png");
+  await writeFile(photoPng, await sharp(imagePath).png().toBuffer());
+  await writeFile(join(dir, "meta.json"), JSON.stringify({ ext: "png", width: W, height: H, originalName: basename(imagePath) }, null, 2));
+  const analysis = { id, quad, surfaceType, material: entry.material ?? "unknown", hasOcclusion: false, confidence: entry.confidence ?? 1, imageWidth: W, imageHeight: H };
+  await writeFile(join(dir, "analysis.json"), JSON.stringify(analysis, null, 2));
+
+  // SAM sidecar (surfaceMaskRel) → recorta no bbox do quad (igual /process)
+  let surfaceMaskBuf: Buffer | undefined;
+  if (entry.surfaceMaskRel) {
+    const samPath = join(sidecarDir, entry.surfaceMaskRel);
+    if (existsSync(samPath)) {
+      surfaceMaskBuf = await sharp(samPath).resize(W, H, { fit: "fill" }).extract(bbox(quad, W, H)).ensureAlpha().png().toBuffer();
+    }
+  }
+
+  const assets = await extractSceneAssets(photoPng, { quad, imageWidth: W, imageHeight: H, surfaceType }, { surfaceMaskBuf, cleanSource: photoPng });
+  await Promise.all([
+    writeFile(join(dir, "shadow.png"), assets.multiply),
+    writeFile(join(dir, "shadow-screen.png"), assets.screen),
+    writeFile(join(dir, "mask.png"), assets.mask),
+    writeFile(join(dir, "color-cast.png"), assets.colorCast),
+    writeFile(join(dir, "photo-clean.png"), assets.cleanPhoto),
+    assets.reflectionMask ? writeFile(join(dir, "reflection-mask.png"), assets.reflectionMask) : Promise.resolve(),
+    assets.occluder ? writeFile(join(dir, "occluder.png"), assets.occluder) : Promise.resolve(),
+  ]);
+
+  // settings.json — calibração de material/mesh do quads.json (o resto usa defaults do core)
+  await writeFile(join(dir, "settings.json"), JSON.stringify({
+    surfaceType, material: entry.material, materialIntensity: entry.materialIntensity,
+    materialAngle: entry.materialAngle, materialScale: entry.materialScale, mesh: entry.mesh,
+  }, null, 2));
+
+  return id;
+}
+
+export interface FinalizeResult { filename: string; id?: string; ok: boolean; error?: string; }
+
+/**
+ * Finaliza TODAS as imagens de uma pasta que têm entrada no quads.json dela.
+ * `only` filtra por nomes (substring). Retorna um result por imagem.
+ */
+export async function finalizeFolder(dir: string, opts: { only?: string[] } = {}): Promise<FinalizeResult[]> {
+  const store = await loadQuads(dir);
+  const names = Object.keys(store).filter((n) => !opts.only?.length || opts.only.some((o) => n.includes(o)));
+  const results: FinalizeResult[] = [];
+  for (const filename of names) {
+    try {
+      const imagePath = join(dir, filename);
+      if (!existsSync(imagePath)) { results.push({ filename, ok: false, error: "imagem ausente" }); continue; }
+      const id = await finalizeScene(imagePath, store[filename], dir);
+      results.push({ filename, id, ok: true });
+    } catch (e: unknown) {
+      results.push({ filename, ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return results;
 }
 
 export interface SceneInfo { id: string; name: string; surfaceType: string; published: boolean; }
