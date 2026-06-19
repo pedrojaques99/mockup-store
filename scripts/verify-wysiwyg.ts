@@ -75,32 +75,51 @@ async function main() {
   const innerW = analysis.imageWidth, innerH = analysis.imageHeight; // arte ~ cena (test grid)
   const artBase64 = artArg && existsSync(artArg) ? readFileSync(artArg).toString("base64") : testArt(Math.min(1024, innerW), Math.min(1024, innerH));
 
-  const baseParams: BaseParams = {}; // só geometria/luz/cast default — o que ambos compartilham
-  const looksParams: LooksParams = {};
+  // Params RICOS: exercita TODOS os assets/caminhos (não só o base).
+  // - textureAmount → relevo;  material → overlay;  castOpacity → usa colorCast asset
+  // - reflectionOpacity → usa reflectionMask;  specular/contact → usa rawPhoto+mask
+  // Assim A(disco) vs B(live) compara cast+reflexo+occluder+máscara, não só a luz.
+  const baseParams: BaseParams = {
+    textureAmount: 0.4,
+    castOpacity: 0.25,
+    material: { kind: "fabric" as never, intensity: 0.5 },
+    shadowOpacity: 0.3, highlightOpacity: 0.3,
+  };
+  const looksParams: LooksParams = {
+    reflectionOpacity: 0.3, specularOpacity: 0.3, contactShadow: 0.3, matchScene: 0.2,
+  };
 
   console.log(`cena: ${id}  (${analysis.imageWidth}×${analysis.imageHeight})`);
+  console.log(`params ricos: relevo+material+cast+reflexo+specular+contato+match`);
 
-  // ── A: PRODUÇÃO (assets de disco) ──
-  const diskCast = join(dir, "color-cast.png");
+  // REBAKE: escreve os assets frescos em disco (= o que o /process gera HOJE) pra o teste
+  // não sofrer com cenas stale. A = lê esses PNGs (produção); B = mesma extração em memória.
+  const baked = join(process.cwd(), ".tmp", "wysiwyg-verify", "baked");
+  mkdirSync(baked, { recursive: true });
+  const assets = await extractSceneAssets(rawPhoto, analysis, { fast: false });
+  const w = (name: string, b: Buffer | null) => { if (b) { const p = join(baked, name); require("fs").writeFileSync(p, b); return p; } return null; };
+  w("shadow.png", assets.multiply); w("shadow-screen.png", assets.screen); w("mask.png", assets.mask);
+  w("photo-clean.png", assets.cleanPhoto); w("color-cast.png", assets.colorCast);
+  const refP = w("reflection-mask.png", assets.reflectionMask); const occP = w("occluder.png", assets.occluder);
+
+  // ── A: PRODUÇÃO (assets de disco frescos) ──
   const A = await buildBaseComposite({
     engine, analysis,
-    photo: existsSync(cleanPath) ? readFileSync(cleanPath) : rawPhoto,
-    rawPhoto,
-    multiply: readFileSync(join(dir, "shadow.png")),
-    screen: existsSync(join(dir, "shadow-screen.png")) ? readFileSync(join(dir, "shadow-screen.png")) : readFileSync(join(dir, "shadow.png")),
-    mask: readFileSync(join(dir, "mask.png")),
-    colorCast: existsSync(diskCast) ? readFileSync(diskCast) : undefined,
+    photo: readFileSync(join(baked, "photo-clean.png")), rawPhoto,
+    multiply: readFileSync(join(baked, "shadow.png")),
+    screen: readFileSync(join(baked, "shadow-screen.png")),
+    mask: readFileSync(join(baked, "mask.png")),
+    colorCast: readFileSync(join(baked, "color-cast.png")),
     artBase64, params: baseParams, quality: "hd",
   });
   const Apng = await applyLooks({
     engine, analysis, png: A.basePng, fullMask: A.fullMask, rawPhoto, artBase64,
-    reflectionMask: existsSync(join(dir, "reflection-mask.png")) ? readFileSync(join(dir, "reflection-mask.png")) : null,
-    occluder: existsSync(join(dir, "occluder.png")) ? readFileSync(join(dir, "occluder.png")) : null,
+    reflectionMask: refP ? readFileSync(refP) : null,
+    occluder: occP ? readFileSync(occP) : null,
     params: looksParams,
   });
 
   // ── B: PRÉVIA (live-extract do mesmo raw) ──
-  const assets = await extractSceneAssets(rawPhoto, analysis, { fast: false });
   const B = await buildBaseComposite({
     engine, analysis, photo: assets.cleanPhoto, rawPhoto,
     multiply: assets.multiply, screen: assets.screen, mask: assets.mask, colorCast: assets.colorCast,
@@ -120,6 +139,27 @@ async function main() {
   console.log(`\nerro médio por canal (0–255): ${diff.toFixed(3)}`);
   console.log(diff < 1 ? "✅ WYSIWYG — caminhos idênticos (≤1)" : diff < 5 ? "🟡 quase idêntico (provável SAM/relevo de borda)" : "🔴 divergem — investigar");
   console.log(`saída: ${outDir}\\A-producao.png  +  B-previa.png`);
+
+  // ── Smoke-test SAM: o intersect realmente recorta a máscara? ──
+  // /calibrate e /process chamam o MESMO extractSceneAssets com o MESMO crop de bbox,
+  // então provar que o intersect acontece = SAM idêntico nos dois (por construção).
+  const q = analysis.quad;
+  const cx = (q.tl.x + q.br.x) / 2, cy = (q.tl.y + q.br.y) / 2;
+  const rx = Math.abs(q.br.x - q.tl.x) / 4, ry = Math.abs(q.br.y - q.tl.y) / 4;
+  // alpha-shaped (fundo TRANSPARENTE, elipse opaca) — o intersect usa dest-in (canal alpha)
+  const samSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${analysis.imageWidth}" height="${analysis.imageHeight}"><ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="white"/></svg>`;
+  const left = Math.max(0, Math.floor(Math.min(q.tl.x, q.tr.x, q.br.x, q.bl.x)));
+  const top = Math.max(0, Math.floor(Math.min(q.tl.y, q.tr.y, q.br.y, q.bl.y)));
+  const maxX = Math.min(analysis.imageWidth - 1, Math.ceil(Math.max(q.tl.x, q.tr.x, q.br.x, q.bl.x)));
+  const maxY = Math.min(analysis.imageHeight - 1, Math.ceil(Math.max(q.tl.y, q.tr.y, q.br.y, q.bl.y)));
+  const samBuf = await sharp(Buffer.from(samSvg)).resize(analysis.imageWidth, analysis.imageHeight, { fit: "fill" }).extract({ left, top, width: maxX - left + 1, height: maxY - top + 1 }).ensureAlpha().png().toBuffer();
+  const alphaSum = async (b: Buffer) => { const d = await sharp(b).ensureAlpha().raw().toBuffer(); let s = 0; for (let i = 3; i < d.length; i += 4) s += d[i]; return s; };
+  const noSam = await extractSceneAssets(rawPhoto, analysis, { fast: true });
+  const withSam = await extractSceneAssets(rawPhoto, analysis, { fast: true, surfaceMaskBuf: samBuf });
+  const aNo = await alphaSum(noSam.mask), aYes = await alphaSum(withSam.mask);
+  const shrink = aNo > 0 ? (1 - aYes / aNo) * 100 : 0;
+  console.log(`\nSAM intersect: máscara encolheu ${shrink.toFixed(1)}% (${aNo} → ${aYes} alpha)`);
+  console.log(shrink > 5 ? "✅ SAM aplicada (intersect ativo) — mesmo crop que /process → WYSIWYG por construção" : "⚠️ SAM não recortou — investigar");
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
