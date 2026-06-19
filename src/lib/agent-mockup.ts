@@ -8,7 +8,7 @@
  * Robustez na raiz: tipado, try/catch por cena (1 falha não derruba o lote), resumível
  * (pula o que já existe), determinístico, sem estado global.
  */
-import { readFile, writeFile, mkdir, readdir } from "fs/promises";
+import { readFile, writeFile, mkdir, readdir, copyFile } from "fs/promises";
 import { existsSync } from "fs";
 import { join, basename } from "path";
 import { randomUUID } from "crypto";
@@ -303,6 +303,24 @@ export async function finalizeFolder(dir: string, opts: { only?: string[] } = {}
       results.push({ filename, ok: false, error: e instanceof Error ? e.message : String(e) });
     }
   }
+  return results;
+}
+
+/**
+ * Gera previews renderizados (com arte) em `public/photo-previews/<id>.png` pra cada cena
+ * — é o thumbnail que o grid da home mostra (como um PSD). Reusa createPhotoMockups.
+ */
+export async function generateScenePreviews(
+  art: Buffer, sceneIds: string[], opts: { fit?: FitMode; bg?: string | null; padding?: number; onProgress?: (m: string) => void } = {},
+): Promise<MockupResult[]> {
+  const tmp = join(process.cwd(), ".tmp", "preview-gen");
+  const { results } = await createPhotoMockups({
+    art, sceneIds, outDir: tmp, fit: opts.fit ?? "cover", bg: opts.bg ?? null, padding: opts.padding,
+    quality: "preview", fresh: true, onProgress: opts.onProgress,
+  });
+  const pub = join(process.cwd(), "public", "photo-previews");
+  await mkdir(pub, { recursive: true });
+  for (const r of results) if (r.ok && r.file) await copyFile(r.file, join(pub, `${r.sceneId}.png`));
   return results;
 }
 

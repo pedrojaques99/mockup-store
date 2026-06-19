@@ -20,7 +20,7 @@ import { readFile, writeFile, rm } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import sharp from "sharp";
-import { createPhotoMockups, listPhotoScenes, resolveSceneDir, finalizeFolder } from "../src/lib/agent-mockup";
+import { createPhotoMockups, listPhotoScenes, resolveSceneDir, finalizeFolder, generateScenePreviews } from "../src/lib/agent-mockup";
 import type { FitMode } from "../src/lib/art-frame";
 
 const argv = process.argv.slice(2);
@@ -70,17 +70,33 @@ async function main() {
     const counts = new Map<string, number>();
     for (const s of scenes) counts.set(s.name, (counts.get(s.name) ?? 0) + 1);
 
+    // --art: renderiza o logo em CADA cena (galeria de MOCKUPS) via o próprio loop.
+    // Sem --art: usa a foto-limpa (catálogo de cenas vazias, p/ dedup).
+    const renderMap = new Map<string, string>();
+    const artArg = flag("art");
+    if (artArg) {
+      const art = await readFile(artArg);
+      console.log(`renderizando arte em ${scenes.length} cenas p/ a galeria (preview)…`);
+      const { results } = await createPhotoMockups({
+        art, sceneIds: scenes.map((s) => s.id), outDir: ".tmp/gallery-renders",
+        fit: (flag("fit") as FitMode) ?? "cover", bg: flag("bg") ?? null,
+        padding: flag("padding") ? parseFloat(flag("padding")!) : undefined,
+        quality: "preview", fresh: true, onProgress: () => process.stdout.write("."),
+      });
+      process.stdout.write("\n");
+      for (const r of results) if (r.ok && r.file) renderMap.set(r.sceneId, r.file);
+    }
+
     // thumbnail por cena (cover 200×134) — base64 p/ HTML + buffer p/ montagem
     const cell = { w: 200, h: 134, pad: 6, label: 26 };
     const thumbs: { s: typeof scenes[number]; b64: string; buf: Buffer | null }[] = [];
     for (const s of scenes) {
       const dir = resolveSceneDir(s.id);
       let buf: Buffer | null = null;
-      if (dir) {
-        const src = existsSync(join(dir, "photo-clean.png")) ? join(dir, "photo-clean.png")
-          : existsSync(join(dir, "photo.png")) ? join(dir, "photo.png") : null;
-        if (src) { try { buf = await sharp(src).resize(cell.w, cell.h, { fit: "cover" }).jpeg({ quality: 70 }).toBuffer(); } catch { /* */ } }
-      }
+      const src = renderMap.get(s.id)
+        ?? (dir && existsSync(join(dir, "photo-clean.png")) ? join(dir, "photo-clean.png")
+          : dir && existsSync(join(dir, "photo.png")) ? join(dir, "photo.png") : null);
+      if (src) { try { buf = await sharp(src).resize(cell.w, cell.h, { fit: "cover" }).jpeg({ quality: 70 }).toBuffer(); } catch { /* */ } }
       thumbs.push({ s, b64: buf ? buf.toString("base64") : "", buf });
     }
 
@@ -119,6 +135,21 @@ async function main() {
     console.log(`${scenes.length} cenas • ${dupNames.length} nomes duplicados (${dupTotal} cópias extras)`);
     console.log(`HTML: ${htmlPath}`);
     console.log(`PNG:  ${montagePath}`);
+    return;
+  }
+
+  if (cmd === "previews") {
+    const art = await resolveArt();
+    let sceneIds = flag("scenes")?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+    if (!sceneIds.length) sceneIds = (await listPhotoScenes()).map((s) => s.id);
+    console.log(`gerando ${sceneIds.length} previews → public/photo-previews/ …`);
+    const results = await generateScenePreviews(art, sceneIds, {
+      fit: (flag("fit") as FitMode) ?? "cover", bg: flag("bg") ?? null,
+      padding: flag("padding") ? parseFloat(flag("padding")!) : undefined,
+      onProgress: () => process.stdout.write("."),
+    });
+    process.stdout.write("\n");
+    console.log(`✓ ${results.filter((r) => r.ok).length}/${results.length} previews em public/photo-previews/`);
     return;
   }
 
