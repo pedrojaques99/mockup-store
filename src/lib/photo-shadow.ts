@@ -485,7 +485,7 @@ export async function extractColorCastLayer(
  * Returns a full W×H RGBA image — non-magenta in-quad pixels are opaque, rest transparent.
  * Composite this on top of the final render to restore depth.
  */
-export async function extractOccluder(photoPath: string, quad: QuadPoints): Promise<Buffer | null> {
+export async function extractOccluder(photoPath: string | Buffer, quad: QuadPoints): Promise<Buffer | null> {
   const { data, info } = await sharp(photoPath)
     .ensureAlpha()
     .raw()
@@ -528,7 +528,7 @@ export async function extractOccluder(photoPath: string, quad: QuadPoints): Prom
  * the image border. Runs two dilation passes after the core scan to catch
  * antialiased fringe pixels at the quad edge.
  */
-export async function cleanMagentaMarker(photoPath: string): Promise<Buffer> {
+export async function cleanMagentaMarker(photoPath: string | Buffer): Promise<Buffer> {
   const { data, info } = await sharp(photoPath)
     .ensureAlpha()
     .raw()
