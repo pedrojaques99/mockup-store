@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { existsSync } from "fs";
+import { readFile } from "fs/promises";
 import { join } from "path";
 import sharp from "sharp";
-import {
-  extractGrayscaleLayers, extractMask, extractDisplacementMap, extractColorCastLayer, neutralizeNeonPixels,
-} from "@/lib/photo-shadow";
-import { buildPhotoSceneDoc } from "@/lib/photo-scene";
-import { buildMaterialOverlay, MATERIAL_BLEND, type MaterialKind } from "@/lib/material-fx";
+import type { MaterialKind } from "@/lib/material-fx";
 import { resolveDir } from "@/lib/quad-store";
-import { generateMeshDisplacement, meshIsWarped, meshCorners, composeDispFields, type WarpMesh } from "@/lib/mesh-warp";
-import type { QuadCorners } from "@/lib/key-color-core";
+import { meshIsWarped, meshCorners, type WarpMesh } from "@/lib/mesh-warp";
+import { extractSceneAssets, buildBaseComposite, applyLooks, type RenderEngine, type SceneAnalysis } from "@/lib/photo-render-core";
+import type { QuadCorners, Pt } from "@/lib/key-color-core";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { createCanvas, loadImage } = require("canvas");
-import { renderScene } from "@visant/psd-engine";
+import { renderScene, perspectiveWarp } from "@visant/psd-engine";
 
 function safeName(name: unknown): string | null {
   if (typeof name !== "string" || !name) return null;
@@ -78,96 +76,67 @@ export async function POST(req: NextRequest) {
   // Malha warpada → quad-base = cantos da malha; o abaulamento vira displacement field.
   const meshRaw: WarpMesh | undefined = body.mesh && Array.isArray(body.mesh.points) ? body.mesh : undefined;
   const useMesh = !!(meshRaw && meshIsWarped(meshRaw));
-  const mesh = meshRaw && sc !== 1 ? { ...meshRaw, points: meshRaw.points.map(sp) } : meshRaw;
+  // escala a malha (pontos E hastes) pro espaço de trabalho do preview
+  const spv = (p?: Pt) => (p ? sp(p) : undefined);
+  const spMesh = (m: WarpMesh): WarpMesh => sc === 1 ? m : {
+    ...m, points: m.points.map(sp),
+    tangents: m.tangents?.map((t) => ({ h: sp(t.h), v: sp(t.v), hOut: spv(t.hOut), hIn: spv(t.hIn), vOut: spv(t.vOut), vIn: spv(t.vIn) })),
+  };
+  const mesh = meshRaw ? spMesh(meshRaw) : undefined;
   const quad: QuadCorners = useMesh ? meshCorners(mesh!) : sQuad(body.quad);
   const surfaceType: string = body.surfaceType || "billboard";
   const matKind = (body.material || "none") as MaterialKind;
-  const dispBlur = (typeof body.dispBlur === "number" ? body.dispBlur : 8) * sc;
 
-  const isCard = surfaceType === "card" || surfaceType === "paper";
-  const isBillboard = surfaceType === "billboard" || surfaceType === "poster";
+  // Foto da cena no espaço de trabalho (buffer cru — o core neutraliza neon/magenta).
+  const sceneBuf: Buffer = sc !== 1 ? await sharp(full).resize(W, H).toBuffer() : await readFile(full);
+  const analysis: SceneAnalysis = { quad, imageWidth: W, imageHeight: H, surfaceType };
 
-  // Fonte da cena (downscalada no preview) + neutraliza magenta/neon (best-effort).
-  const sceneInput: string | Buffer = sc !== 1 ? await sharp(full).resize(W, H).toBuffer() : full;
-  let photoSrc: string | Buffer = sceneInput;
-  try { photoSrc = await neutralizeNeonPixels(sceneInput, W, H); } catch { /* */ }
+  // ── CORE ÚNICO (mesmo de produção) → WYSIWYG. HD = idêntico; preview = res reduzida. ──
+  const hd = !!body.hd;
+  const assets = await extractSceneAssets(sceneBuf, analysis, { fast: !hd });
 
-  const multiplyFloor = isCard ? 0 : 200;
-  const lightingPreBlur = !isCard && !isBillboard ? 25 : 0;
-
-  const [{ screen, multiply }, maskBuf, dispBuf, castBuf] = await Promise.all([
-    extractGrayscaleLayers(photoSrc, quad, undefined, multiplyFloor, lightingPreBlur),
-    extractMask(W, H, quad, 4),
-    extractDisplacementMap(photoSrc, W, H, quad, dispBlur),
-    extractColorCastLayer(sceneInput, W, H, quad),
-  ]);
-
-  const matBuf = matKind !== "none"
-    ? await buildMaterialOverlay(W, H, quad, { material: matKind, intensity: body.materialIntensity, angle: body.materialAngle, scale: body.materialScale })
-    : null;
-
-  // Malha (envelope) + relevo da foto/material **trabalham juntos**: o abaulamento
-  // (geometria macro) e o relevo (textura micro) viram offsets que SOMAM no mesmo
-  // displacement field — sem um sobrescrever o outro. Composição via composeDispFields.
-  const meshDisp = useMesh ? await generateMeshDisplacement(mesh!, { quad }) : null;
-  const photoDispScale = typeof body.dispScale === "number" ? body.dispScale * sc : 0;
-  let composedDisp: { png: Buffer; scale: number } | null = null;
-  if (meshDisp && photoDispScale > 0) {
-    // Compose no ESPAÇO DO faceCanvas (bbox do quad) — não no full-image. O relevo da
-    // foto (dispBuf) é full W×H; recorta-se pro bbox do quad (alpha 0 fora do quad é
-    // ignorado pelo compose). Antes compunha em W×H e o engine espremia o canvas todo no
-    // face → smear localizado. Ver docs/PLAN-displacement-pixel-perfect.md.
-    const qxs = [quad.tl.x, quad.tr.x, quad.br.x, quad.bl.x];
-    const qys = [quad.tl.y, quad.tr.y, quad.br.y, quad.bl.y];
-    const bx = Math.max(0, Math.floor(Math.min(...qxs)));
-    const by = Math.max(0, Math.floor(Math.min(...qys)));
-    const bw = Math.min(W - bx, Math.max(1, Math.ceil(Math.max(...qxs) - bx)));
-    const bh = Math.min(H - by, Math.max(1, Math.ceil(Math.max(...qys) - by)));
-    const dispFace = await sharp(dispBuf).extract({ left: bx, top: by, width: bw, height: bh }).png().toBuffer();
-    composedDisp = await composeDispFields([
-      { png: meshDisp.png, w: meshDisp.width, h: meshDisp.height, scale: meshDisp.dispScale, offsetX: 0, offsetY: 0 },
-      { png: dispFace, w: meshDisp.width, h: meshDisp.height, scale: photoDispScale, offsetX: 0, offsetY: 0 },
-    ], meshDisp.width, meshDisp.height);
-  }
-  const dispScaleFinal = composedDisp ? composedDisp.scale
-    : meshDisp ? meshDisp.dispScale
-    : (photoDispScale > 0 ? photoDispScale : undefined);
-
-  const doc = buildPhotoSceneDoc(
-    { quad, imageWidth: W, imageHeight: H, surfaceType } as any,
-    {
-      screenOpacity: isCard ? 0 : isBillboard ? 0 : 0.20,
-      multiplyOpacity: isCard ? 0.30 : isBillboard ? 0 : 0.45,
-      dispScale: dispScaleFinal,
-      material: matBuf ? { blend: MATERIAL_BLEND[matKind] } : undefined,
-    },
-  );
-  const face = doc.faces[0];
-
-  const [photoImg, screenImg, multiplyImg, maskImg, castImg, dispImg, matImg] = await Promise.all([
-    loadImage(photoSrc), loadImage(screen), loadImage(multiply), loadImage(maskBuf),
-    loadImage(castBuf), loadImage(dispBuf), matBuf ? loadImage(matBuf) : Promise.resolve(null),
-  ]);
-
-  const assets: Record<string, any> = { photo: photoImg, light_screen: screenImg, light_multiply: multiplyImg, mask: maskImg, color_cast: castImg, displacement: dispImg };
-  if (matImg) assets.material = matImg;
-  // Disp final: composto (mesh+foto) > só mesh > só foto. O slot do engine é único.
-  if (composedDisp) assets.displacement = await loadImage(composedDisp.png);
-  else if (meshDisp) assets.displacement = await loadImage(meshDisp.png);
-
-  // Arte: pode vir do usuário (`body.artBase64`) ou usar uma arte-teste procedural.
-  let artInput: any;
+  // Arte: usuário (`body.artBase64`) ou arte-teste procedural (→ base64 pro core).
+  const d = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
+  const innerW = Math.max(1, Math.round((d(quad.tl, quad.tr) + d(quad.bl, quad.br)) / 2));
+  const innerH = Math.max(1, Math.round((d(quad.tl, quad.bl) + d(quad.tr, quad.br)) / 2));
+  let artBase64: string;
   if (typeof body.artBase64 === "string" && body.artBase64.length > 32) {
-    const b64 = body.artBase64.replace(/^data:image\/\w+;base64,/, "");
-    const buf = Buffer.from(b64, "base64");
-    // resize pra inner do quad — preserva nitidez e evita moiré
-    const resized = await sharp(buf).resize(face.innerW, face.innerH, { fit: "fill" }).png().toBuffer();
-    artInput = await loadImage(resized);
+    artBase64 = body.artBase64;
   } else {
-    artInput = makeTestArt(body.art || "grid", face.innerW, face.innerH);
+    const testArt = makeTestArt(body.art || "grid", innerW, innerH) as { toBuffer: (t: string) => Buffer };
+    artBase64 = testArt.toBuffer("image/png").toString("base64");
   }
-  const canvas = renderScene(doc, assets, { surface: artInput }, createCanvas);
-  const png: Buffer = (canvas as any).toBuffer("image/png");
+
+  const engine: RenderEngine = {
+    createCanvas, loadImage,
+    toBuffer: (c: unknown, t: string) => (c as { toBuffer: (t: string) => Buffer }).toBuffer(t),
+    renderScene: renderScene as RenderEngine["renderScene"],
+    perspectiveWarp: perspectiveWarp as RenderEngine["perspectiveWarp"],
+  };
+
+  const base = await buildBaseComposite({
+    engine, analysis, photo: assets.cleanPhoto, rawPhoto: sceneBuf,
+    multiply: assets.multiply, screen: assets.screen, mask: assets.mask, colorCast: assets.colorCast,
+    artBase64,
+    params: {
+      warp: body.warp, textureAmount: body.textureAmount, mesh,
+      maskFeather: body.maskFeather, maskContract: body.maskContract,
+      shadowOpacity: body.shadowOpacity, highlightOpacity: body.highlightOpacity, castOpacity: body.castOpacity,
+      material: matKind !== "none" ? { kind: matKind, intensity: body.materialIntensity, angle: body.materialAngle, scale: body.materialScale } : null,
+    },
+    quality: hd ? "hd" : "preview",
+  });
+
+  const png = await applyLooks({
+    engine, analysis, png: base.basePng, fullMask: base.fullMask, rawPhoto: sceneBuf, artBase64,
+    reflectionMask: assets.reflectionMask, occluder: assets.occluder,
+    params: {
+      reflectionOpacity: body.reflectionOpacity, reflectionBlur: body.reflectionBlur,
+      specularOpacity: body.specularOpacity, lightWrap: body.lightWrap,
+      matchScene: body.matchScene, contactShadow: body.contactShadow,
+      fx: body.fx, luzOverlays: body.luzOverlays,
+    },
+  });
 
   return new NextResponse(new Uint8Array(png), { headers: { "Content-Type": "image/png", "Cache-Control": "no-store" } });
 }
