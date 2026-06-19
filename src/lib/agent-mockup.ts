@@ -369,6 +369,92 @@ export async function listPhotoScenes(): Promise<SceneInfo[]> {
   return out;
 }
 
+/** Aspecto da superfície (bbox do quad) de uma cena finalizada — pra casar arte por aspecto. */
+async function sceneAspect(id: string): Promise<number> {
+  const dir = resolveSceneDir(id);
+  if (!dir) return 1;
+  try {
+    const a = JSON.parse(await readFile(join(dir, "analysis.json"), "utf-8"));
+    const q = a.quad;
+    const xs = [q.tl.x, q.tr.x, q.br.x, q.bl.x], ys = [q.tl.y, q.tr.y, q.br.y, q.bl.y];
+    const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+    return h > 0 ? w / h : 1;
+  } catch { return 1; }
+}
+
+async function imgAspect(path: string): Promise<number> {
+  try { const m = await sharp(path).metadata(); return m.width && m.height ? m.width / m.height : 1; } catch { return 1; }
+}
+
+export interface KitResult { kind: "layout" | "logo"; art: string; sceneId: string; file?: string; ok: boolean; error?: string; }
+
+/**
+ * **Kit de marca em uma tacada** (a lição do fluxo Hockey Direct): finaliza as cenas de
+ * uma pasta (auto-detect do quad), marca com o estúdio da marca, **casa cada layout/logo
+ * na cena mais coerente por aspecto** (layout=cover full-bleed; logo=contain no fundo da
+ * marca), renderiza via core WYSIWYG, gera previews pro grid e devolve os results.
+ */
+export async function buildBrandKit(opts: {
+  scenesDir: string; layouts: string[]; logos: string[];
+  studio: string; tags?: string[]; outDir: string; bg?: string;
+  nLayouts?: number; nLogo?: number; onProgress?: (m: string) => void;
+}): Promise<KitResult[]> {
+  const log = opts.onProgress ?? (() => {});
+  // 1) finaliza + tag
+  const fin = await finalizeFolder(opts.scenesDir);
+  const ids = fin.filter((r) => r.ok && r.id).map((r) => r.id!) as string[];
+  log(`finalizadas ${ids.length} cenas`);
+  await tagScenes(ids, { studio: opts.studio, tags: opts.tags });
+
+  // 2) aspecto de cada cena + de cada arte
+  const scenes = await Promise.all(ids.map(async (id) => ({ id, aspect: await sceneAspect(id) })));
+  const layouts = await Promise.all(opts.layouts.map(async (p) => ({ p, aspect: await imgAspect(p) })));
+  const logos = await Promise.all(opts.logos.map(async (p) => ({ p, aspect: await imgAspect(p) })));
+
+  // 3) casa: cada layout pega a cena livre de aspecto mais próximo (cover full-bleed)
+  const used = new Set<string>();
+  const closest = (aspect: number) => {
+    let best: { id: string; aspect: number } | null = null, bd = Infinity;
+    for (const s of scenes) { if (used.has(s.id)) continue; const d = Math.abs(Math.log(s.aspect / aspect)); if (d < bd) { bd = d; best = s; } }
+    if (best) used.add(best.id);
+    return best?.id;
+  };
+  const pairs: { kind: "layout" | "logo"; art: string; sceneId: string; fit: FitMode; bg?: string | null; padding?: number }[] = [];
+  for (const l of layouts.slice(0, opts.nLayouts ?? 5)) {
+    const sid = closest(l.aspect); if (sid) pairs.push({ kind: "layout", art: l.p, sceneId: sid, fit: "cover" });
+  }
+  // logos nas cenas restantes (contain no fundo da marca), ciclando os logos disponíveis
+  const rest = scenes.filter((s) => !used.has(s.id)).slice(0, opts.nLogo ?? 5);
+  rest.forEach((s, i) => {
+    const lg = logos[i % Math.max(1, logos.length)];
+    if (lg) pairs.push({ kind: "logo", art: lg.p, sceneId: s.id, fit: "contain", bg: opts.bg ?? null, padding: 0.16 });
+  });
+
+  // 4) render + previews
+  await mkdir(opts.outDir, { recursive: true });
+  const results: KitResult[] = [];
+  let n = 0;
+  for (const p of pairs) {
+    n++;
+    try {
+      const art = await readFile(p.art);
+      const { results: rr } = await createPhotoMockups({ art, sceneIds: [p.sceneId], outDir: opts.outDir, fit: p.fit, bg: p.bg ?? null, padding: p.padding, quality: "hd", fresh: true });
+      const r = rr[0];
+      if (r?.ok && r.file) {
+        const name = `${p.kind}_${String(n).padStart(2, "0")}_${basename(p.art).replace(/\.[^.]+$/, "").replace(/[^\w]+/g, "_")}.png`;
+        const dest = join(opts.outDir, name);
+        await copyFile(r.file, dest);
+        await copyFile(r.file, join(process.cwd(), "public", "photo-previews", `${p.sceneId}.png`)).catch(() => {});
+        results.push({ kind: p.kind, art: basename(p.art), sceneId: p.sceneId, file: dest, ok: true });
+        log(`✓ ${name}`);
+      } else results.push({ kind: p.kind, art: basename(p.art), sceneId: p.sceneId, ok: false, error: r?.error });
+    } catch (e) {
+      results.push({ kind: p.kind, art: basename(p.art), sceneId: p.sceneId, ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return results;
+}
+
 /** Grava `studio`/`tags` no settings.json das cenas (grouping no grid). Merge, não sobrescreve. */
 export async function tagScenes(ids: string[], opts: { studio?: string; tags?: string[] }): Promise<{ id: string; ok: boolean }[]> {
   const res: { id: string; ok: boolean }[] = [];

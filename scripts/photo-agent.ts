@@ -17,10 +17,10 @@
  *        --fit contain|cover|stretch  --bg #ffffff  --padding 0.12  --preview  --fresh
  */
 import { readFile, writeFile, rm } from "fs/promises";
-import { existsSync } from "fs";
+import { existsSync, statSync, readdirSync } from "fs";
 import { join } from "path";
 import sharp from "sharp";
-import { createPhotoMockups, listPhotoScenes, resolveSceneDir, finalizeFolder, generateScenePreviews, tagScenes } from "../src/lib/agent-mockup";
+import { createPhotoMockups, listPhotoScenes, resolveSceneDir, finalizeFolder, generateScenePreviews, tagScenes, buildBrandKit } from "../src/lib/agent-mockup";
 import type { FitMode } from "../src/lib/art-frame";
 
 const argv = process.argv.slice(2);
@@ -138,6 +138,28 @@ async function main() {
     return;
   }
 
+  if (cmd === "kit") {
+    const scenesDir = flag("scenes-dir"), layoutsDir = flag("layouts"), logoArg = flag("logo"), studio = flag("studio");
+    if (!scenesDir || !layoutsDir || !logoArg || !studio) {
+      throw new Error('uso: kit --scenes-dir <dir> --layouts <dir> --logo <file|dir> --studio "Marca" [--out --bg #hex --tags a,b --nLayouts 5 --nLogo 5]');
+    }
+    const listImgs = (p: string) => statSync(p).isDirectory()
+      ? readdirSync(p).filter((f) => /\.(png|jpe?g|webp|svg)$/i.test(f)).sort().map((f) => join(p, f))
+      : [p];
+    const out = flag("out") ?? `.tmp/kit-${studio.replace(/\W+/g, "-").toLowerCase()}`;
+    console.log(`kit "${studio}": cenas ${scenesDir} • layouts ${layoutsDir} • logo ${logoArg}\n`);
+    const res = await buildBrandKit({
+      scenesDir, layouts: listImgs(layoutsDir), logos: listImgs(logoArg), studio,
+      tags: flag("tags")?.split(",").map((t) => t.trim()).filter(Boolean),
+      outDir: out, bg: flag("bg"),
+      nLayouts: flag("nLayouts") ? parseInt(flag("nLayouts")!, 10) : 5,
+      nLogo: flag("nLogo") ? parseInt(flag("nLogo")!, 10) : 5,
+      onProgress: (m) => console.log("  " + m),
+    });
+    console.log(`\n✓ ${res.filter((r) => r.ok).length}/${res.length} → ${out}`);
+    return;
+  }
+
   if (cmd === "tag") {
     const ids = flag("scenes")?.split(",").map((s) => s.trim()).filter((s) => /^[a-f0-9]{16}$/.test(s)) ?? [];
     if (!ids.length) throw new Error("uso: tag --scenes <id,id> --studio \"Nome\" [--tags a,b]");
@@ -239,7 +261,7 @@ async function main() {
     return;
   }
 
-  console.log("uso: photo-agent.ts <scenes|gallery|render|delete|dedupe> [flags] — veja o topo do arquivo");
+  console.log("uso: photo-agent.ts <scenes|gallery|kit|finalize|previews|render|tag|delete|dedupe> [flags] — veja o topo do arquivo");
 }
 
 main().catch((e) => { console.error("erro:", e instanceof Error ? e.message : e); process.exit(1); });

@@ -58,3 +58,43 @@ Regras embutidas (mantêm consistência, vieram de erros reais):
 - Cap de 8 faces (anti-OOM em murais de pôster) + try/catch por render.
 - Murais multi-face recebem **layouts variados** (rotaciona entre os 3 mais próximos no aspect).
 - Pré-requisito: render-server na 4200 (`npm run render`). PSDs resolvidos via `psd_metadata.filePath` no disco.
+
+## Pipeline foto → kit de marca (sem PSD) — `scripts/photo-agent.ts`
+
+O loop headless WYSIWYG: o que o agente gera é byte-idêntico ao app (mesmo core
+`src/lib/photo-render-core.ts`). Lib-raiz `src/lib/agent-mockup.ts`; superfícies
+(CLI/MCP/HTTP) são adaptadores finos. Sempre `npx tsx`.
+
+```
+# kit de marca em UMA tacada (gera nada — usa cenas já existentes na pasta):
+#   finaliza (auto-detecta quad magenta) → tag estúdio → casa layout↔cena por
+#   aspecto (layout=cover, logo=contain+fundo) → render WYSIWYG → previews → entrega
+npx tsx scripts/photo-agent.ts kit --scenes-dir "Render/New Mockups/<Pasta>" \
+  --layouts "<dir de layouts>" --logo "<file|dir>" --studio "Marca" \
+  --bg "#16271a" --tags marca,campanha --out .tmp/kit-marca
+
+# passos avulsos:
+npx tsx scripts/photo-agent.ts scenes                      # lista cenas do store
+npx tsx scripts/photo-agent.ts finalize --dir "<pasta>"    # imagem+quad → cena baked
+npx tsx scripts/photo-agent.ts render --art <png|svg> --scenes "id,id" --fit cover
+npx tsx --env-file=.env.local scripts/photo-agent.ts render --brand <visantId> --count N
+npx tsx scripts/photo-agent.ts previews --art <logo>       # thumbnails do grid
+npx tsx scripts/photo-agent.ts tag --scenes "id,id" --studio "Marca" --tags a,b
+npx tsx scripts/photo-agent.ts gallery [--art <logo>]      # HTML+PNG de revisão
+npx tsx scripts/photo-agent.ts dedupe [--apply]            # 1 por nome (pub>mais-assets)
+```
+
+- **Gerar cenas-base novas** (contexto da marca, superfície magenta 16:9): skill
+  `visant-mockup-creator` (Visant `ai-generate-image`) → salva em `Render/New Mockups/<Pasta>/`.
+  O `finalize`/`kit` auto-detecta o quad magenta (`detectKeyColorQuad`, CV puro) — sem
+  `quads.json` precisa. Se a pasta tem `quads.json` (quad corrigido à mão), ele vence.
+- **Grid (home)**: `/api/references` mescla Mongo (PSDs+publicadas) + filesystem
+  (`data/`+`.tmp/photo-scenes/`), resiliente a Mongo offline. Thumbnail =
+  `public/photo-previews/<id>.png`. `studio`/`tags` por cena vêm do `settings.json`
+  (grouping/filtro). "Esconder Duplicados" agrupa por nome.
+- **Refino manual**: card → "Abrir" → `/photo-mockup?scene=<id>` (quad/máscara/warp/
+  material/luz). Salva no `settings.json`; o loop respeita (WYSIWYG).
+- **Lições de fit**: layout (creative full-bleed) = `cover`; logo = `contain` + `--bg`
+  na cor da marca; comp pronta = `cover`. Casar arte↔cena por **aspecto**.
+- **Marca no Visant Labs** (white-label, brand id): skill `brand-mockup-kit`.
+  Marca com **assets locais + cenas novas**: este pipeline (`visant-mockup-creator` + `kit`).
