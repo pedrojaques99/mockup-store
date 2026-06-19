@@ -310,7 +310,7 @@ export default function CalibratePage() {
   }, [matMode, data?.material, data?.materialIntensity, data?.materialAngle, data?.materialScale, refreshMat, data]);
 
   // ── render final ao vivo ────────────────────────────────────────
-  const refreshRender = useCallback(async () => {
+  const refreshRender = useCallback(async (hd = false) => {
     if (!scene || !data) return;
     setRendering(true);
     try {
@@ -321,7 +321,7 @@ export default function CalibratePage() {
           dispScale: data.dispScale, dispBlur: data.dispBlur,
           material: data.material, materialIntensity: data.materialIntensity,
           materialAngle: data.materialAngle, materialScale: data.materialScale,
-          mesh: data.mesh, preview: true,
+          mesh: data.mesh, preview: !hd, hd,   // hd → mesmo pipeline de produção (SSAA + full-res)
         }),
       });
       if (!r.ok) return;
@@ -825,7 +825,8 @@ export default function CalibratePage() {
                   className={["px-2 py-1 rounded text-[11px] capitalize transition-colors", artKind === k ? "bg-cyan-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{k}</button>
               ))}
             </div>
-            <button onClick={refreshRender} disabled={rendering} className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40">{rendering ? "renderizando…" : "re-renderizar"}</button>
+            <button onClick={() => refreshRender(false)} disabled={rendering} className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40">{rendering ? "renderizando…" : "re-renderizar"}</button>
+            <button onClick={() => refreshRender(true)} disabled={rendering} title="Render idêntico ao final (SSAA, full-res) — mais lento" className="px-2 py-1 rounded bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40">HD</button>
             <span className="text-zinc-600">arte-teste warpada com quad+luz+displacement+material</span>
           </div>
         )}
