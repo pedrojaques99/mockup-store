@@ -10,7 +10,7 @@ import { readFile, writeFile, unlink, rename } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import sharp from "sharp";
-import { extractGrayscaleLayers, extractMask, cleanMagentaMarker, extractOccluder, neutralizeNeonPixels, extractReflectionMask, extractColorCastLayer } from "@/lib/photo-shadow";
+import { extractSceneAssets } from "@/lib/photo-render-core";
 import type { QuadPoints } from "@/lib/photo-analyze";
 
 const dataUrlToBuffer = (s: string) =>
@@ -39,7 +39,7 @@ const TMP_DIR  = join(process.cwd(), ".tmp",  "photo-scenes");
 const DATA_DIR = join(process.cwd(), "data", "photo-scenes");
 
 export async function POST(req: NextRequest) {
-  const { id, quad: customQuad, featherPx, multiplyFloor, preBlur, surfaceMaskBase64, occluderMaskBase64, reflectionMaskBase64, aiClean, cleanPrompt } = await req.json();
+  const { id, quad: customQuad, surfaceMaskBase64, occluderMaskBase64, reflectionMaskBase64, aiClean, cleanPrompt } = await req.json();
 
   if (!id || typeof id !== "string" || !/^[a-f0-9]{16}$/.test(id)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
@@ -91,11 +91,6 @@ export async function POST(req: NextRequest) {
   const preparedPath = join(dir, "photo-prepared.png");
   const cleanSourcePath = existsSync(preparedPath) ? preparedPath : rawPhotoPath;
 
-  // Optional tuning params (all have safe lib defaults when omitted)
-  const floor   = typeof multiplyFloor === "number" ? Math.max(0, Math.min(255, multiplyFloor)) : 0;
-  const blurSig = typeof preBlur === "number" ? Math.max(0, Math.min(50, preBlur)) : 0;
-  const feather = typeof featherPx === "number" ? Math.max(0, Math.min(40, featherPx)) : 3;
-
   const W = analysis.imageWidth, H = analysis.imageHeight;
 
   // SAM2 surface mask (full-image alpha) → crop to quad bbox for extractGrayscaleLayers.
@@ -111,24 +106,18 @@ export async function POST(req: NextRequest) {
       .toBuffer();
   }
 
-  const [{ screen, multiply }, maskBuf, cleanPhotoBuf, autoOccluderBuf, autoReflectionBuf, colorCastBuf] = await Promise.all([
-    extractGrayscaleLayers(rawPhotoPath, quad, surfaceMaskBuf, floor, blurSig),  // raw photo for accurate lighting
-    extractMask(W, H, quad, feather),
-    // 1) fill solid magenta with sampled bg, 2) desaturate ONLY the saturated
-    //    magenta band (hue 300±50, sat ≥ 0.18) so the pink fringe dies but the
-    //    rest of the scene keeps its colour. NB: low minSat (e.g. 0.06) desaturates
-    //    near-neutral scene pixels too → grayscales the whole photo. Keep it ≥ 0.18.
-    cleanMagentaMarker(cleanSourcePath).then((b) => neutralizeNeonPixels(b, W, H, 300, 50, 0.18)),
-    extractOccluder(rawPhotoPath, quad),
-    // Reflection map — where the magenta surface bounced into the scene (floor/glass)
-    extractReflectionMask(rawPhotoPath, quad, W, H),
-    // Color-cast (tom ambiente da cena) — assado em disco pro core de render aplicar o
-    // slider de cast em produção (antes a layer era emitida mas sem asset → morta).
-    extractColorCastLayer(rawPhotoPath, W, H, quad),
-  ]);
+  // Extração via core ÚNICO (mesmo da prévia /calibrate) → bake ≡ preview, sem drift.
+  // Params SSoT (floor/preBlur/feather/neon/cast/reflexo) vêm de photo-render-params.
+  // A máscara (`mask`) já vem interseccionada com a SAM (surfaceMaskBuf).
+  const assets = await extractSceneAssets(
+    rawPhotoPath,
+    { quad, imageWidth: W, imageHeight: H, surfaceType: analysis.surfaceType },
+    { surfaceMaskBuf, cleanSource: cleanSourcePath },
+  );
+  const { multiply, screen, mask: artMask, cleanPhoto: cleanPhotoBuf, occluder: autoOccluderBuf, reflectionMask: autoReflectionBuf, colorCast: colorCastBuf } = assets;
 
   // Brush override for the reflection map (user-painted) takes priority over auto-detect
-  let reflectionBuf: Buffer = autoReflectionBuf;
+  let reflectionBuf: Buffer | null = autoReflectionBuf;
   if (typeof reflectionMaskBase64 === "string") {
     reflectionBuf = await sharp(dataUrlToBuffer(reflectionMaskBase64))
       .resize(W, H, { fit: "fill" }).ensureAlpha().blur(4).png().toBuffer();
@@ -144,16 +133,6 @@ export async function POST(req: NextRequest) {
       .composite([{ input: maskFull, blend: "dest-in" }])  // keep photo only where mask is opaque
       .png()
       .toBuffer();
-  }
-
-  // Clip the ART to the REAL surface: intersect the quad mask with the segment
-  // surface mask (when applied) so the art shows only on the actual surface
-  // (e.g. the round puck top), not the full quad rectangle → no bleed onto the scene.
-  let artMask = maskBuf;
-  if (surfaceMaskBuf) {
-    const m = await sharp(maskBuf).metadata();
-    const surf = await sharp(surfaceMaskBuf).resize(m.width!, m.height!, { fit: "fill" }).ensureAlpha().png().toBuffer();
-    artMask = await sharp(maskBuf).ensureAlpha().composite([{ input: surf, blend: "dest-in" }]).png().toBuffer();
   }
 
   // ── photo-clean: cru (rápido) OU recriado por IA (inpaint do quad) ──────────
@@ -211,9 +190,9 @@ export async function POST(req: NextRequest) {
     atomicWrite(join(dir, "shadow.png"), multiply),
     atomicWrite(join(dir, "shadow-screen.png"), screen),
     atomicWrite(join(dir, "mask.png"), artMask),
-    atomicWrite(join(dir, "reflection-mask.png"), reflectionBuf),
     atomicWrite(join(dir, "color-cast.png"), colorCastBuf),
   ];
+  if (reflectionBuf) writes.push(atomicWrite(join(dir, "reflection-mask.png"), reflectionBuf));
   if (finalCleanBuf) writes.push(atomicWrite(cleanPath, finalCleanBuf));
   if (occluderBuf) writes.push(atomicWrite(join(dir, "occluder.png"), occluderBuf));
   await Promise.all(writes);

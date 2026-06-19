@@ -93,7 +93,23 @@ export async function POST(req: NextRequest) {
 
   // ── CORE ÚNICO (mesmo de produção) → WYSIWYG. HD = idêntico; preview = res reduzida. ──
   const hd = !!body.hd;
-  const assets = await extractSceneAssets(sceneBuf, analysis, { fast: !hd });
+  // Máscara SAM (superfície real): recorta no bbox do quad — IGUAL ao bake do /process →
+  // luz só da superfície + máscara da arte interseccionada (sem isso, cenas com SAM divergem).
+  let surfaceMaskBuf: Buffer | undefined;
+  if (typeof body.surfaceMaskBase64 === "string" && body.surfaceMaskBase64.length > 32) {
+    const xs = [quad.tl.x, quad.tr.x, quad.br.x, quad.bl.x];
+    const ys = [quad.tl.y, quad.tr.y, quad.br.y, quad.bl.y];
+    const left = Math.max(0, Math.floor(Math.min(...xs)));
+    const top = Math.max(0, Math.floor(Math.min(...ys)));
+    const maxX = Math.min(W - 1, Math.ceil(Math.max(...xs)));
+    const maxY = Math.min(H - 1, Math.ceil(Math.max(...ys)));
+    const samFull = Buffer.from(body.surfaceMaskBase64.replace(/^data:image\/\w+;base64,/, ""), "base64");
+    surfaceMaskBuf = await sharp(samFull)
+      .resize(W, H, { fit: "fill" })
+      .extract({ left, top, width: maxX - left + 1, height: maxY - top + 1 })
+      .ensureAlpha().png().toBuffer();
+  }
+  const assets = await extractSceneAssets(sceneBuf, analysis, { surfaceMaskBuf, fast: !hd });
 
   // Arte: usuário (`body.artBase64`) ou arte-teste procedural (→ base64 pro core).
   const d = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);

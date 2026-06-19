@@ -321,6 +321,7 @@ export default function CalibratePage() {
           dispScale: data.dispScale, dispBlur: data.dispBlur,
           material: data.material, materialIntensity: data.materialIntensity,
           materialAngle: data.materialAngle, materialScale: data.materialScale,
+          surfaceMaskBase64: maskUrl ?? undefined,   // SAM → luz/máscara da superfície real (WYSIWYG)
           mesh: data.mesh, preview: !hd, hd,   // hd → mesmo pipeline de produção (SSAA + full-res)
         }),
       });
@@ -330,7 +331,7 @@ export default function CalibratePage() {
       setRenderUrl((u) => { if (u) URL.revokeObjectURL(u); return URL.createObjectURL(blob); });
     } catch { /* */ }
     finally { setRendering(false); }
-  }, [scene, data, dir, artKind]);
+  }, [scene, data, dir, artKind, maskUrl]);
 
   // re-renderiza (debounce curto) quando muda quad/disp/material/malha/arte no modo render
   useEffect(() => {
