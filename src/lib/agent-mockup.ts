@@ -350,6 +350,37 @@ export async function finalizeFolder(
   return results;
 }
 
+export interface AuditResult {
+  filename: string;
+  verdict: "ok" | "review" | "reject" | "no-magenta";
+  confidence: number; fillRatio: number; ambiguity: number; componentCount: number;
+  reasons: string[];
+}
+
+/**
+ * Pré-voo READ-ONLY: roda a detecção + gate de QA em cada imagem de uma pasta
+ * SEM bakar nada. É o que o operador roda antes de `finalize` para ver quais
+ * cenas vão dar problema (ambíguas / glow / sem magenta) e corrigir o quads.json.
+ */
+export async function auditFolder(dir: string, opts: { only?: string[] } = {}): Promise<AuditResult[]> {
+  const imgs = (await readdir(dir)).filter((f) => /\.(png|jpe?g|webp)$/i.test(f) && !/-analysis\./i.test(f));
+  const names = imgs.filter((n) => !opts.only?.length || opts.only.some((o) => n.includes(o)));
+  const out: AuditResult[] = [];
+  for (const filename of names) {
+    const imagePath = join(dir, filename);
+    try {
+      const meta = await sharp(imagePath).metadata();
+      const det = await detectKeyColorQuad(imagePath, meta.width ?? 0, meta.height ?? 0);
+      if (!det) { out.push({ filename, verdict: "no-magenta", confidence: 0, fillRatio: 0, ambiguity: 0, componentCount: 0, reasons: ["sem superfície magenta"] }); continue; }
+      const { verdict, confidence, fillRatio, ambiguity, componentCount, reasons } = det.qa;
+      out.push({ filename, verdict, confidence, fillRatio, ambiguity, componentCount, reasons });
+    } catch (e: unknown) {
+      out.push({ filename, verdict: "no-magenta", confidence: 0, fillRatio: 0, ambiguity: 0, componentCount: 0, reasons: [e instanceof Error ? e.message : String(e)] });
+    }
+  }
+  return out;
+}
+
 /**
  * Gera previews renderizados (com arte) em `public/photo-previews/<id>.png` pra cada cena
  * — é o thumbnail que o grid da home mostra (como um PSD). Reusa createPhotoMockups.

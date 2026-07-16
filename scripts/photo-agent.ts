@@ -20,7 +20,7 @@ import { readFile, writeFile, rm } from "fs/promises";
 import { existsSync, statSync, readdirSync } from "fs";
 import { join } from "path";
 import sharp from "sharp";
-import { createPhotoMockups, listPhotoScenes, resolveSceneDir, finalizeFolder, generateScenePreviews, tagScenes, buildBrandKit } from "../src/lib/agent-mockup";
+import { createPhotoMockups, listPhotoScenes, resolveSceneDir, finalizeFolder, auditFolder, generateScenePreviews, tagScenes, buildBrandKit } from "../src/lib/agent-mockup";
 import type { FitMode } from "../src/lib/art-frame";
 
 const argv = process.argv.slice(2);
@@ -185,14 +185,34 @@ async function main() {
     return;
   }
 
+  if (cmd === "qa") {
+    const dir = flag("dir") ?? "Render/New Mockups";
+    const only = flag("only")?.split(",").map((s) => s.trim()).filter(Boolean);
+    console.log(`auditando detecção em ${dir} (dry-run, sem bakar)\n`);
+    const results = await auditFolder(dir, { only });
+    const icon = (v: string) => (v === "ok" ? "✓" : v === "review" ? "~" : "✗");
+    for (const r of results) {
+      console.log(
+        `  ${icon(r.verdict)} ${r.filename.padEnd(34)} ${r.verdict.toUpperCase().padEnd(6)} ` +
+        `conf=${r.confidence.toFixed(2)} fill=${r.fillRatio.toFixed(2)} amb=${r.ambiguity.toFixed(2)} comps=${r.componentCount}` +
+        (r.reasons.length ? `  [${r.reasons.join("; ")}]` : "")
+      );
+    }
+    const reject = results.filter((r) => r.verdict === "reject" || r.verdict === "no-magenta").length;
+    const review = results.filter((r) => r.verdict === "review").length;
+    console.log(`\n${results.length - reject - review} ok · ${review} review · ${reject} reject`);
+    return;
+  }
+
   if (cmd === "finalize") {
     const dir = flag("dir") ?? "Render/New Mockups";
     const only = flag("only")?.split(",").map((s) => s.trim()).filter(Boolean);
-    console.log(`finalizando cenas de ${dir}${only ? ` (filtro: ${only.join(",")})` : ""}\n`);
-    const results = await finalizeFolder(dir, { only });
-    for (const r of results) console.log(`  ${r.ok ? "✓" : "✗"} ${r.filename}${r.ok ? `  → ${r.id}` : `  (${r.error})`}`);
+    console.log(`finalizando cenas de ${dir}${only ? ` (filtro: ${only.join(",")})` : ""}${has("strict") ? " [strict]" : ""}\n`);
+    const results = await finalizeFolder(dir, { only, strict: has("strict"), onProgress: (m) => console.log(m) });
+    for (const r of results) console.log(`  ${r.ok ? "✓" : "✗"} ${r.filename}${r.ok ? `  → ${r.id}${r.needsReview ? " ⚠ review" : ""}` : `  (${r.error})`}`);
     const ok = results.filter((r) => r.ok).length;
-    console.log(`\n✓ ${ok}/${results.length} finalizadas`);
+    const flagged = results.filter((r) => r.needsReview).length;
+    console.log(`\n✓ ${ok}/${results.length} finalizadas${flagged ? ` · ${flagged} ⚠ needsReview` : ""}`);
     return;
   }
 
