@@ -75,7 +75,8 @@ npx tsx scripts/photo-agent.ts kit --scenes-dir "Render/New Mockups/<Pasta>" \
 
 # passos avulsos:
 npx tsx scripts/photo-agent.ts scenes                      # lista cenas do store
-npx tsx scripts/photo-agent.ts finalize --dir "<pasta>"    # imagem+quad → cena baked
+npx tsx scripts/photo-agent.ts qa --dir "<pasta>"          # PRÉ-VOO: audita detecção (dry-run, sem bakar)
+npx tsx scripts/photo-agent.ts finalize --dir "<pasta>" [--strict]  # imagem+quad → cena baked
 npx tsx scripts/photo-agent.ts render --art <png|svg> --scenes "id,id" --fit cover
 npx tsx --env-file=.env.local scripts/photo-agent.ts render --brand <visantId> --count N
 npx tsx scripts/photo-agent.ts previews --art <logo>       # thumbnails do grid
@@ -88,6 +89,11 @@ npx tsx scripts/photo-agent.ts dedupe [--apply]            # 1 por nome (pub>mai
   `visant-mockup-creator` (Visant `ai-generate-image`) → salva em `Render/New Mockups/<Pasta>/`.
   O `finalize`/`kit` auto-detecta o quad magenta (`detectKeyColorQuad`, CV puro) — sem
   `quads.json` precisa. Se a pasta tem `quads.json` (quad corrigido à mão), ele vence.
+- **Gate de QA na detecção** (`detect-qa.ts`): cada detecção auto ganha um veredito
+  `ok|review|reject` (ambiguidade de 2º painel, fill-ratio, geometria). Reprovou ⇒
+  `finalize` cai na cascata SAM (`detectQuadSAM`); sem SAM, baka com `needsReview`
+  no `analysis.json` (`--strict` dropa em vez de bakar). Rode `qa` antes p/ triar.
+  Plano: `docs/PLAN-detection-qa.md`.
 - **Grid (home)**: `/api/references` mescla Mongo (PSDs+publicadas) + filesystem
   (`data/`+`.tmp/photo-scenes/`), resiliente a Mongo offline. Thumbnail =
   `public/photo-previews/<id>.png`. `studio`/`tags` por cena vêm do `settings.json`
