@@ -37,6 +37,11 @@ export interface QuadEntry {
   hue?: number;
   source: "manual" | "auto";
   confidence?: number;
+  /** Gate de QA reprovou (ambíguo / glow / geometria) e não houve cascata SAM —
+   *  a cena foi bakada mesmo assim (lenient), mas precisa passar pelo /calibrate. */
+  needsReview?: boolean;
+  /** Motivos legíveis do veredito de QA (para triagem no /calibrate e nos logs). */
+  qaReasons?: string[];
   /** IoU auto×quad no momento do save (quão bom o detector estava). */
   iou?: number;
   detectorVersion?: number;

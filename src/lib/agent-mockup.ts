@@ -19,6 +19,7 @@ import {
 } from "./photo-render-core";
 import { loadQuads, type QuadEntry } from "./quad-store";
 import { detectKeyColorQuad } from "./photo-detect";
+import { detectQuadSAM } from "./sam-mask";
 import { frameArt } from "./server-frame";
 import type { FitMode } from "./art-frame";
 import type { MaterialKind } from "./material-fx";
@@ -252,7 +253,11 @@ export async function finalizeScene(imagePath: string, entry: QuadEntry, sidecar
   const photoPng = join(dir, "photo.png");
   await writeFile(photoPng, await sharp(imagePath).png().toBuffer());
   await writeFile(join(dir, "meta.json"), JSON.stringify({ ext: "png", width: W, height: H, originalName: basename(imagePath) }, null, 2));
-  const analysis = { id, quad, surfaceType, material: entry.material ?? "unknown", hasOcclusion: false, confidence: entry.confidence ?? 1, imageWidth: W, imageHeight: H };
+  const analysis = {
+    id, quad, surfaceType, material: entry.material ?? "unknown", hasOcclusion: false,
+    confidence: entry.confidence ?? 1, imageWidth: W, imageHeight: H,
+    ...(entry.needsReview ? { needsReview: true, qaReasons: entry.qaReasons ?? [] } : {}),
+  };
   await writeFile(join(dir, "analysis.json"), JSON.stringify(analysis, null, 2));
 
   // SAM sidecar (surfaceMaskRel) → recorta no bbox do quad (igual /process)
@@ -284,7 +289,7 @@ export async function finalizeScene(imagePath: string, entry: QuadEntry, sidecar
   return id;
 }
 
-export interface FinalizeResult { filename: string; id?: string; ok: boolean; error?: string; }
+export interface FinalizeResult { filename: string; id?: string; ok: boolean; error?: string; needsReview?: boolean; qaReasons?: string[]; }
 
 /**
  * Finaliza as imagens de uma pasta. Usa o quad corrigido do `quads.json` quando existe;
@@ -292,8 +297,12 @@ export interface FinalizeResult { filename: string; id?: string; ok: boolean; er
  * funciona em pastas recém-geradas (ex.: cenas do visant-mockup-creator, sem quads.json).
  * `only` filtra por nomes (substring).
  */
-export async function finalizeFolder(dir: string, opts: { only?: string[]; surfaceType?: string } = {}): Promise<FinalizeResult[]> {
+export async function finalizeFolder(
+  dir: string,
+  opts: { only?: string[]; surfaceType?: string; strict?: boolean; onProgress?: (m: string) => void } = {},
+): Promise<FinalizeResult[]> {
   const store = await loadQuads(dir);
+  const log = opts.onProgress ?? (() => {});
   const imgs = (await readdir(dir)).filter((f) => /\.(png|jpe?g|webp)$/i.test(f) && !/-analysis\./i.test(f));
   const names = imgs.filter((n) => !opts.only?.length || opts.only.some((o) => n.includes(o)));
   const results: FinalizeResult[] = [];
@@ -301,18 +310,39 @@ export async function finalizeFolder(dir: string, opts: { only?: string[]; surfa
     try {
       const imagePath = join(dir, filename);
       let entry: QuadEntry | undefined = store[filename];
+      // Quad corrigido à mão no quads.json vence sempre — pula o gate.
       if (!entry) {
         const meta = await sharp(imagePath).metadata();
         const W = meta.width ?? 0, H = meta.height ?? 0;
+        const surfaceType = opts.surfaceType ?? "poster";
         const det = await detectKeyColorQuad(imagePath, W, H);
         if (!det?.quad) { results.push({ filename, ok: false, error: "sem superfície magenta detectada" }); continue; }
+
         entry = {
-          quad: det.quad, method: det.method ?? "key-color", surfaceType: opts.surfaceType ?? "poster",
+          quad: det.quad, method: det.method ?? "key-color", surfaceType,
           source: "auto", hue: det.hue, confidence: det.confidence, imageWidth: W, imageHeight: H, savedAt: 0,
         };
+
+        // ── Gate de QA: reprovou o magenta ⇒ cascata pro SAM; senão marca review ──
+        if (det.qa.verdict !== "ok") {
+          const why = det.qa.reasons.join("; ");
+          log(`  ⚠ ${filename}: QA ${det.qa.verdict} (${why}) — tentando SAM`);
+          const sam = await detectQuadSAM(imagePath, undefined, surfaceType, W, H, "grounded");
+          if (sam?.quad) {
+            log(`  ✓ ${filename}: SAM recuperou a superfície`);
+            entry = { ...entry, quad: sam.quad, auto: det.quad, method: "sam", confidence: det.qa.confidence, qaReasons: det.qa.reasons };
+          } else if (opts.strict && det.qa.verdict === "reject") {
+            results.push({ filename, ok: false, error: `QA reject sem SAM: ${why}` });
+            continue;
+          } else {
+            // Lenient: baka mesmo assim, mas sinaliza pro /calibrate (não some da fila).
+            log(`  → ${filename}: sem SAM — bakando com needsReview`);
+            entry = { ...entry, needsReview: true, confidence: det.qa.confidence, qaReasons: det.qa.reasons };
+          }
+        }
       }
       const id = await finalizeScene(imagePath, entry, dir);
-      results.push({ filename, id, ok: true });
+      results.push({ filename, id, ok: true, needsReview: entry.needsReview, qaReasons: entry.qaReasons });
     } catch (e: unknown) {
       results.push({ filename, ok: false, error: e instanceof Error ? e.message : String(e) });
     }

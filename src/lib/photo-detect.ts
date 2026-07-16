@@ -13,6 +13,7 @@ import type { QuadPoints } from "./photo-analyze";
 import {
   rgbToHsl, isKeyColor, fitQuadFromBlob, blobFillRatio, DETECTOR_VERSION,
 } from "./key-color-core";
+import { assessDetection, type DetectionQA } from "./detect-qa";
 
 export interface SurfaceDetectionResult {
   quad: QuadPoints;
@@ -162,6 +163,8 @@ export interface KeyColorResult {
   method: "key-color";
   /** Versão do detector que gerou este quad. */
   detectorVersion: number;
+  /** Gate de qualidade: ambiguidade, fill, geometria → veredito. Base da cascata SAM. */
+  qa: DetectionQA;
 }
 
 /** Fallback extremal (método antigo min/max(x±y)) — usado quando o fit hull/DP degenera. */
@@ -223,12 +226,17 @@ export async function detectKeyColorQuad(
   const fitted = fitQuadFromBlob(filtered);
   const quad: QuadPoints = fitted ?? extremalQuad(filtered);
 
+  // QA sobre TODOS os pixels-chave (pts, não filtered) — enxerga o 2º painel/glow
+  // que o filtro de maior-blob descarta, então mede ambiguidade de verdade.
+  const qa = assessDetection(pts, quad, width, height);
+
   return {
     quad,
     hue: center ?? -1,
     confidence: blobFillRatio(filtered, quad),
     method: "key-color",
     detectorVersion: DETECTOR_VERSION,
+    qa,
   };
 }
 
