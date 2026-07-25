@@ -31,6 +31,12 @@ const SCENE_ROOTS = [
 ];
 const ID_RE = /^[a-f0-9]{16}$/;
 
+// Thumbnail do grid (card ~200px de largura na home) — nada de guardar o render full-res
+// (que tinha média 3,9 MB, pico 17,5 MB). 640px cobre até telas retina de um card pequeno
+// com folga, e WebP q80 é imperceptível nesse tamanho.
+export const PREVIEW_MAX_WIDTH = 640;
+export const PREVIEW_WEBP_QUALITY = 80;
+
 /** Resolve o diretório de uma cena (data/ tem prioridade sobre .tmp/). */
 export function resolveSceneDir(id: string): string | null {
   for (const root of SCENE_ROOTS) {
@@ -280,8 +286,14 @@ export async function finalizeScene(imagePath: string, entry: QuadEntry, sidecar
     assets.occluder ? writeFile(join(dir, "occluder.png"), assets.occluder) : Promise.resolve(),
   ]);
 
-  // settings.json — calibração de material/mesh do quads.json (o resto usa defaults do core)
-  await writeFile(join(dir, "settings.json"), JSON.stringify({
+  // settings.json — calibração de material/mesh do quads.json (o resto usa defaults do core).
+  // MERGE: `studio`/`tags` vivem neste mesmo arquivo (escritos por `tagScenes`) e um
+  // re-finalize não pode apagá-los — senão a cena some do filtro por estúdio do grid.
+  const settingsPath = join(dir, "settings.json");
+  let prevSettings: Record<string, unknown> = {};
+  try { if (existsSync(settingsPath)) prevSettings = JSON.parse(await readFile(settingsPath, "utf-8")); } catch { /* corrompido — recomeça */ }
+  await writeFile(settingsPath, JSON.stringify({
+    ...prevSettings,
     surfaceType, material: entry.material, materialIntensity: entry.materialIntensity,
     materialAngle: entry.materialAngle, materialScale: entry.materialScale, mesh: entry.mesh,
   }, null, 2));
@@ -382,8 +394,13 @@ export async function auditFolder(dir: string, opts: { only?: string[] } = {}): 
 }
 
 /**
- * Gera previews renderizados (com arte) em `public/photo-previews/<id>.png` pra cada cena
+ * Gera previews renderizados (com arte) em `public/photo-previews/<id>.webp` pra cada cena
  * — é o thumbnail que o grid da home mostra (como um PSD). Reusa createPhotoMockups.
+ *
+ * Antes isso era um `copyFile` cru do render FULL-RES pro thumbnail — 130 arquivos,
+ * ~507 MB, média 3,9 MB (pico 17,5 MB), pra um card de grid que mostra ~200px. A home
+ * pede 60 por página: era 60x mais bytes do que o card precisa. Passa por `sharp()`
+ * (já é dependência daqui) pra reduzir a largura e trocar pra WebP.
  */
 export async function generateScenePreviews(
   art: Buffer, sceneIds: string[], opts: { fit?: FitMode; bg?: string | null; padding?: number; onProgress?: (m: string) => void } = {},
@@ -395,11 +412,25 @@ export async function generateScenePreviews(
   });
   const pub = join(process.cwd(), "public", "photo-previews");
   await mkdir(pub, { recursive: true });
-  for (const r of results) if (r.ok && r.file) await copyFile(r.file, join(pub, `${r.sceneId}.png`));
+  for (const r of results) {
+    if (!r.ok || !r.file) continue;
+    await sharp(r.file)
+      .resize({ width: PREVIEW_MAX_WIDTH, withoutEnlargement: true })
+      .webp({ quality: PREVIEW_WEBP_QUALITY })
+      .toFile(join(pub, `${r.sceneId}.webp`));
+  }
   return results;
 }
 
-export interface SceneInfo { id: string; name: string; surfaceType: string; published: boolean; studio?: string; tags?: string[]; }
+export interface SceneInfo { id: string; name: string; surfaceType: string; published: boolean; studio?: string; tags?: string[]; aspect?: number; }
+
+/** Aspecto (w/h) do bbox de um quad — usado pra casar arte↔cena e filtrar por formato. */
+export function quadAspect(q: QuadCorners | undefined): number | undefined {
+  if (!q?.tl || !q.tr || !q.br || !q.bl) return undefined;
+  const xs = [q.tl.x, q.tr.x, q.br.x, q.bl.x], ys = [q.tl.y, q.tr.y, q.br.y, q.bl.y];
+  const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+  return h > 0 ? w / h : undefined;
+}
 
 /** Enumera as cenas calibradas disponíveis (data/ = publicadas, .tmp/ = rascunho).
  *  Lê `studio`/`tags` do settings.json (override do grouping no grid). */
@@ -423,7 +454,7 @@ export async function listPhotoScenes(): Promise<SceneInfo[]> {
           if (typeof s.studio === "string") studio = s.studio;
           if (Array.isArray(s.tags)) tags = s.tags;
         }
-        out.push({ id, name: m.originalName ?? id, surfaceType: a.surfaceType ?? "unknown", published: i === 0, studio, tags });
+        out.push({ id, name: m.originalName ?? id, surfaceType: a.surfaceType ?? "unknown", published: i === 0, studio, tags, aspect: quadAspect(a.quad) });
       } catch { /* cena corrompida — ignora */ }
     }
   }
@@ -505,7 +536,14 @@ export async function buildBrandKit(opts: {
         const name = `${p.kind}_${String(n).padStart(2, "0")}_${basename(p.art).replace(/\.[^.]+$/, "").replace(/[^\w]+/g, "_")}.png`;
         const dest = join(opts.outDir, name);
         await copyFile(r.file, dest);
-        await copyFile(r.file, join(process.cwd(), "public", "photo-previews", `${p.sceneId}.png`)).catch(() => {});
+        // Mesmo tratamento do `generateScenePreviews`: thumbnail do grid é WebP ~640px,
+        // não o render full-res (o `kit` gera N cenas de uma vez — sem isso, cada kit
+        // engordava public/photo-previews/ em dezenas de MB à toa).
+        await sharp(r.file)
+          .resize({ width: PREVIEW_MAX_WIDTH, withoutEnlargement: true })
+          .webp({ quality: PREVIEW_WEBP_QUALITY })
+          .toFile(join(process.cwd(), "public", "photo-previews", `${p.sceneId}.webp`))
+          .catch(() => {});
         results.push({ kind: p.kind, art: basename(p.art), sceneId: p.sceneId, file: dest, ok: true });
         log(`✓ ${name}`);
       } else results.push({ kind: p.kind, art: basename(p.art), sceneId: p.sceneId, ok: false, error: r?.error });

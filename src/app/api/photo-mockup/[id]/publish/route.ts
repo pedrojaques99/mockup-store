@@ -4,15 +4,18 @@
  *
  * Body: { name: string, renderBase64: string, tags?: string[] }
  * - Copies .tmp/photo-scenes/{id} → data/photo-scenes/{id} (permanent)
- * - Saves preview PNG to public/photo-previews/{id}.png
+ * - Saves preview WebP (thumbnail, ~640px) to public/photo-previews/{id}.webp
  * - Inserts community_presets document (type:"photo")
  */
 import { NextRequest, NextResponse } from "next/server";
 import { readFile, writeFile, mkdir, copyFile, readdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
+import sharp from "sharp";
 import { getDb } from "@/lib/db";
 import { logFeedback, relearn, hashImage } from "@/lib/engine-feedback";
+import { invalidateCatalog } from "@/lib/search-index";
+import { PREVIEW_MAX_WIDTH, PREVIEW_WEBP_QUALITY } from "@/lib/agent-mockup";
 
 const TMP_DIR  = join(process.cwd(), ".tmp", "photo-scenes");
 const DATA_DIR = join(process.cwd(), "data", "photo-scenes");
@@ -62,14 +65,30 @@ export async function POST(
     await Promise.all(files.map(f => copyFile(join(tmpDir, f), join(dataDir, f))));
   }
 
-  // 2. Save render PNG as grid thumbnail only
+  // 2. Save render as grid thumbnail only — NUNCA o PNG cru do render (full-res).
+  // Achado do audit de performance: public/photo-previews/ tinha 130 arquivos somando
+  // ~507 MB (média 3,9 MB, pico 17,5 MB) pra um card de grid que a home pede 60 por
+  // página. sharp() já é dependência do projeto — reduz pra ~640px de largura e grava
+  // WebP q80 (o card nunca precisou do full-res).
   await mkdir(PREV_DIR, { recursive: true });
   const renderBuf = Buffer.from(renderBase64.replace(/^data:image\/\w+;base64,/, ""), "base64");
+  const previewBuf = await sharp(renderBuf)
+    .resize({ width: PREVIEW_MAX_WIDTH, withoutEnlargement: true })
+    .webp({ quality: PREVIEW_WEBP_QUALITY })
+    .toBuffer();
   const saves: Promise<void>[] = [
-    writeFile(join(PREV_DIR, `${id}.png`), renderBuf),
+    writeFile(join(PREV_DIR, `${id}.webp`), previewBuf),
   ];
+  // MERGE, nunca overwrite: `studio`/`tags` do settings.json são escritos por fora
+  // (`photo-agent tag`) e a UI não os manda de volta. Sobrescrever o arquivo apagava o
+  // estúdio da cena no disco — e ela sumia do filtro por estúdio do grid, sem volta.
+  const settingsPath = join(dataDir, "settings.json");
+  let prevSettings: Record<string, unknown> = {};
+  if (existsSync(settingsPath)) {
+    try { prevSettings = JSON.parse(await readFile(settingsPath, "utf-8")); } catch { /* corrompido — recomeça */ }
+  }
   if (settings && typeof settings === "object") {
-    saves.push(writeFile(join(dataDir, "settings.json"), JSON.stringify(settings, null, 2)));
+    saves.push(writeFile(settingsPath, JSON.stringify({ ...prevSettings, ...settings }, null, 2)));
   }
   await Promise.all(saves);
 
@@ -79,17 +98,27 @@ export async function POST(
 
   const now = new Date().toISOString();
   const extraTags = Array.isArray(tags) ? tags.filter((t: unknown) => typeof t === "string") : [];
+  // `settings.json` é o SSoT de studio/tags da cena (quem escreve: `photo-agent tag`).
+  // Publicar NUNCA pode chapar isso — senão o filtro por estúdio do grid perde a cena.
+  const merged = { ...prevSettings, ...(settings ?? {}) } as Record<string, unknown>;
+  const sceneStudio =
+    (typeof merged.studio === "string" && merged.studio.trim()) ||
+    (typeof body.studio === "string" && body.studio.trim()) ||
+    "Photo Scene";
+  const settingsTags = Array.isArray(merged.tags)
+    ? (merged.tags as unknown[]).filter((t): t is string => typeof t === "string")
+    : [];
   const doc = {
     id,
     name: name.trim(),
-    studio: "Photo Scene",
+    studio: sceneStudio,
     description: `${surfaceType} photo mockup`,
-    referenceImageUrl: `/photo-previews/${id}.png`,
+    referenceImageUrl: `/photo-previews/${id}.webp`,
     category: "reference",
     isAdminCurated: true,
     type: "photo",
     photoSceneId: id,
-    tags: [surfaceType, "photo", "photo-pipeline", ...extraTags],
+    tags: [...new Set([surfaceType, "photo", "photo-pipeline", ...extraTags, ...settingsTags])],
     dimensions: { mockup_type: [surfaceType] },
     prompt: "",
     createdAt: now,
@@ -97,6 +126,10 @@ export async function POST(
   };
 
   await col.updateOne({ id }, { $set: doc }, { upsert: true });
+
+  // O catálogo da busca é cacheado — sem isto a cena recém-publicada demora o TTL pra
+  // aparecer no grid (e com o estúdio velho).
+  invalidateCatalog();
 
   // Retro-alimentação do engine: (auto = analysis.quad) × (final = settings.quad corrigido
   // pelo humano). Todo publish vira ground-truth pro detector aprender. Best-effort.
@@ -131,5 +164,5 @@ export async function POST(
     }
   } catch { /* feedback nunca bloqueia o publish */ }
 
-  return NextResponse.json({ id, previewUrl: `/photo-previews/${id}.png` });
+  return NextResponse.json({ id, previewUrl: `/photo-previews/${id}.webp` });
 }

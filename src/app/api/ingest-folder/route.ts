@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { addRuntimeDir } from "@/lib/psd-index";
 import { walkDir } from "@/lib/fs-walk";
 import { scanPsd, IMAGE_EXTS } from "@/lib/psd-scan";
+import { invalidateCatalog } from "@/lib/search-index";
 import { existsSync } from "fs";
 
 const ALL_EXTS = new Set([...IMAGE_EXTS, ".psd"]);
@@ -118,6 +119,9 @@ export async function POST(req: NextRequest) {
     );
     scanned++;
   }
+
+  // Acervo mudou → o catálogo cacheado da busca precisa ser refeito.
+  invalidateCatalog();
 
   return NextResponse.json({
     folder: normalizedPath,

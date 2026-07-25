@@ -1,0 +1,237 @@
+/**
+ * search-engine — o miolo PURO da busca: tipos, índice, ranking e facetas.
+ *
+ * Separado de `search-index.ts` (que carrega o catálogo do Mongo/disco e cuida do cache)
+ * por um motivo prático: assim dá pra testar ranking e recall contra um catálogo sintético,
+ * sem banco e sem filesystem. Toda regra de relevância que quebrou aqui (fuzzy que não
+ * pegava typo, sinônimo com hífen inflando o recall) virou teste porque este arquivo é
+ * puro — nada aqui faz I/O.
+ */
+import MiniSearch from "minisearch";
+import { expandTerm, foldTerm } from "./search-synonyms";
+
+export interface SearchDoc {
+  id: string;
+  name: string;
+  studio: string;
+  description: string;
+  referenceImageUrl?: string;
+  dimensions?: Record<string, unknown>;
+  tags: string[];
+  psdFileName?: string;
+  psdPath?: string;
+  psdSizeBytes?: number;
+  smartObjectName?: string;
+  soInnerWidth?: number;
+  soInnerHeight?: number;
+  type?: string;
+  photoSceneId?: string;
+  /** derivados, só pra busca/faceta */
+  mockupType: string[];
+  aspect?: number;
+  source: "mongo" | "fs";
+}
+
+/** Formato da superfície — a faceta que o pipeline mais usa ("casar arte↔cena por aspecto"). */
+export type AspectBucket = "square" | "portrait" | "landscape";
+
+export function aspectBucket(a: number | undefined): AspectBucket | undefined {
+  if (!a || !isFinite(a) || a <= 0) return undefined;
+  if (a < 0.85) return "portrait";
+  if (a > 1.18) return "landscape";
+  return "square";
+}
+
+export interface SearchQuery {
+  search?: string;
+  studio?: string;
+  tags?: string[];
+  tagMode?: "AND" | "OR";
+  aspect?: AspectBucket;
+  requirePsd?: boolean;
+  page?: number;
+  limit?: number;
+}
+
+export function matchesFacets(d: SearchDoc, q: SearchQuery) {
+  if (q.studio && d.studio !== q.studio) return false;
+  if (q.aspect && aspectBucket(d.aspect) !== q.aspect) return false;
+  if (q.requirePsd && !d.psdPath && d.type !== "photo") return false;
+  if (q.tags?.length) {
+    const pool = new Set([...d.tags.map(foldTerm), foldTerm(d.studio), ...d.mockupType.map(foldTerm)]);
+    const has = (t: string) => pool.has(foldTerm(t));
+    return q.tagMode === "OR" ? q.tags.some(has) : q.tags.every(has);
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------- índice
+
+const SEARCH_FIELDS = ["name", "studio", "tags", "mockupType", "description", "psdFileName", "smartObjectName"];
+
+export function buildIndex(docs: SearchDoc[]): MiniSearch<SearchDoc> {
+  const mini = new MiniSearch<SearchDoc>({
+    idField: "id",
+    fields: SEARCH_FIELDS,
+    storeFields: [],
+    // "prédio" ≡ "predio", "Soccer248" ≡ "soccer248". Mesma normalização na query.
+    processTerm: (term) => foldTerm(term) || null,
+    tokenize: (text) => text.split(/[\s\-_/.,()[\]{}|]+/).filter(Boolean),
+    extractField: (doc, field) => {
+      const v = (doc as unknown as Record<string, unknown>)[field];
+      if (Array.isArray(v)) return v.join(" ");
+      return v == null ? "" : String(v);
+    },
+  });
+  mini.addAll(docs);
+  return mini;
+}
+
+/**
+ * Query → expressão MiniSearch. Cada token vira um OR dos seus sinônimos, e os tokens
+ * se combinam com AND: "outdoor na rua" = (outdoor|billboard|…) AND (rua|street|urbano|…).
+ */
+export function buildQuery(search: string) {
+  const tokens = search.split(/[\s\-_/.,]+/).map(foldTerm).filter(Boolean);
+  if (!tokens.length) return null;
+  return {
+    combineWith: "AND" as const,
+    queries: tokens.map((t) => {
+      const syns = expandTerm(t);
+      return syns.length > 1 ? { combineWith: "OR" as const, queries: syns } : t;
+    }),
+  };
+}
+
+const BASE_OPTS = {
+  boost: { name: 6, tags: 4, studio: 3, mockupType: 2, psdFileName: 1.5, smartObjectName: 1, description: 1 },
+  prefix: true,
+  weights: { fuzzy: 0.5, prefix: 0.7 },
+};
+
+/**
+ * Cascata precisão → recall. Ligar fuzzy sempre inflava o resultado (uma query boa trazia
+ * 2/3 do acervo) e ainda assim errava typo de 2 edições. Então: primeiro exato+prefixo;
+ * só se vier pouco resultado é que afrouxa. Quem escreveu certo nunca paga o ruído de quem
+ * escreveu errado.
+ */
+const PASSES = [
+  { ...BASE_OPTS, fuzzy: 0, combineWith: "AND" as const },
+  // Tolerância a erro só em termo longo — em termo curto o fuzzy vira ruído puro.
+  { ...BASE_OPTS, fuzzy: (t: string) => (t.length <= 4 ? 0 : 0.34), combineWith: "AND" as const },
+  { ...BASE_OPTS, fuzzy: (t: string) => (t.length <= 4 ? 0 : 0.34), combineWith: "OR" as const },
+];
+const ENOUGH_HITS = 5;
+
+/** Sinal de popularidade por doc (0..1) — ver `search-signals.ts`. */
+export type BoostFn = (docId: string) => number;
+
+export interface RankedResult {
+  references: SearchDoc[];
+  total: number;
+  page: number;
+  pages: number;
+  /**
+   * Primeiro passe da cascata que devolveu algo (1 = exato, 3 = só resolveu no fuzzy+OR).
+   * Sinal de telemetria: query que só vive no passe 3 é buraco de vocabulário.
+   */
+  pass: number;
+}
+
+/**
+ * Busca + facetas + paginação sobre um catálogo já indexado. Puro: mesmas entradas,
+ * mesma saída, sem I/O.
+ */
+export function runSearch(
+  docs: SearchDoc[],
+  mini: MiniSearch<SearchDoc>,
+  q: SearchQuery,
+  boost?: BoostFn,
+): RankedResult {
+  const page = Math.max(1, q.page ?? 1);
+  const limit = Math.min(Math.max(1, q.limit ?? 60), 200);
+  const byId = new Map(docs.map((d) => [d.id, d]));
+
+  let hits: SearchDoc[];
+  let pass = 0;
+
+  const expr = q.search?.trim() ? buildQuery(q.search) : null;
+  if (expr) {
+    // filter DENTRO do MiniSearch: facetas cortam antes do rank, e o rank sobrevive.
+    const filter = (r: { id: unknown }) => {
+      const d = byId.get(String(r.id));
+      return !!d && matchesFacets(d, q);
+    };
+    // O que a galera abre/renderiza sobe: mesmo texto, ordem melhor. Multiplicador
+    // deliberadamente modesto — popularidade DESEMPATA, nunca sequestra a relevância.
+    const boostDocument = boost ? (id: string) => 1 + boost(id) : undefined;
+
+    // ACUMULA, não substitui. A versão anterior trocava o resultado do passe exato pelo
+    // do passe frouxo sempre que viesse pouca coisa — então uma query com 3 acertos
+    // perfeitos era inundada por fuzzy+OR, e os 3 certos afundavam no meio do ruído.
+    // Agora cada passe só ACRESCENTA na cauda: o que o passe exato achou fica no topo.
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < PASSES.length; i++) {
+      const results = mini.search(expr, { ...PASSES[i], filter, boostDocument });
+      for (const r of results) {
+        const id = String(r.id);
+        if (!seen.has(id)) { seen.add(id); ordered.push(id); }
+      }
+      if (results.length && !pass) pass = i + 1;
+      if (ordered.length >= ENOUGH_HITS) break;
+    }
+    hits = ordered.map((id) => byId.get(id)!).filter(Boolean);
+  } else {
+    hits = docs.filter((d) => matchesFacets(d, q)).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  const start = (page - 1) * limit;
+  return {
+    references: hits.slice(start, start + limit),
+    total: hits.length,
+    page,
+    pages: Math.max(1, Math.ceil(hits.length / limit)),
+    pass,
+  };
+}
+
+// ---------------------------------------------------------------- facetas
+
+export interface Facets {
+  studios: { name: string; count: number }[];
+  tags: { name: string; count: number }[];
+  aspects: { name: AspectBucket; count: number }[];
+}
+
+/** Estúdios que viraram lixo na ingestão (nomes de arquivo, não de estúdio). */
+const FILE_LIKE = /\.(png|jpe?g|gif|webp|psd|psb|tiff?)$/i;
+
+/**
+ * Contagens de faceta em UMA passada sobre o catálogo — substitui as agregações separadas
+ * (`/studios` e `/tags`) que ainda por cima discordavam do que o grid mostrava.
+ */
+export function computeFacets(docs: SearchDoc[], q: SearchQuery = {}): Facets {
+  // As facetas contam o universo ANTES do próprio corte, senão cada chip zeraria os outros.
+  const pool = docs.filter((d) => matchesFacets(d, { ...q, studio: undefined, tags: undefined, aspect: undefined }));
+
+  const studios = new Map<string, number>();
+  const tags = new Map<string, number>();
+  const aspects = new Map<AspectBucket, number>();
+
+  for (const d of pool) {
+    if (d.studio && !FILE_LIKE.test(d.studio)) studios.set(d.studio, (studios.get(d.studio) ?? 0) + 1);
+    for (const t of new Set(d.tags)) if (t) tags.set(t, (tags.get(t) ?? 0) + 1);
+    const b = aspectBucket(d.aspect);
+    if (b) aspects.set(b, (aspects.get(b) ?? 0) + 1);
+  }
+
+  const sorted = <T>(m: Map<T, number>) =>
+    [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+
+  return {
+    studios: sorted(studios),
+    tags: sorted(tags).slice(0, 120),
+    aspects: sorted(aspects) as { name: AspectBucket; count: number }[],
+  };
+}

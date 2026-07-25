@@ -94,10 +94,31 @@ npx tsx scripts/photo-agent.ts dedupe [--apply]            # 1 por nome (pub>mai
   `finalize` cai na cascata SAM (`detectQuadSAM`); sem SAM, baka com `needsReview`
   no `analysis.json` (`--strict` dropa em vez de bakar). Rode `qa` antes p/ triar.
   Plano: `docs/PLAN-detection-qa.md`.
-- **Grid (home)**: `/api/references` mescla Mongo (PSDs+publicadas) + filesystem
-  (`data/`+`.tmp/photo-scenes/`), resiliente a Mongo offline. Thumbnail =
-  `public/photo-previews/<id>.png`. `studio`/`tags` por cena vêm do `settings.json`
-  (grouping/filtro). "Esconder Duplicados" agrupa por nome.
+- **Grid (home)**: `/api/references` é adaptador fino sobre `src/lib/search-index.ts` —
+  UM catálogo unificado (Mongo PSDs+publicadas ⊕ filesystem `data/`+`.tmp/photo-scenes/`),
+  resiliente a Mongo offline, cacheado com stale-while-revalidate (TTL 60s). Busca =
+  MiniSearch (BM25, peso por campo, prefixo, fuzzy em cascata) + sinônimos PT/EN em
+  `search-synonyms.ts`. Facetas (estúdio/tag/aspecto) numa passada em
+  `/api/references/facets`. Thumbnail = `public/photo-previews/<id>.webp` (reduzido a
+  640px/q80 na escrita — o PNG cru chegava a 17 MB por card; leitura cai pro `.png`
+  legado, converta com `npx tsx scripts/regen-previews.ts`).
+  "Esconder Duplicados" agrupa por nome. Plano/medições: `docs/PLAN-search-facets.md`.
+- **A busca aprende e se mede** (`search-telemetry.ts`): toda query vira linha em
+  `.tmp/search/queries.jsonl`; todo clique num resultado vira sinal que reordena o
+  ranking (`boostDocument`). `npm run search:report` mostra queries com ZERO resultado
+  (buraco de vocabulário → vira sinônimo novo) e onde a cascata está resolvendo.
+  O miolo do ranking é puro e testável em `search-engine.ts` — `search-index.ts` só
+  carrega/cacheia o catálogo.
+- **Ferramentas de saúde**: `npm run doctor` (cena sem estúdio, Mongo divergindo do
+  settings.json, thumbnail faltando/gigante, nome duplicado — `--fix` só alinha o Mongo
+  ao arquivo, nunca inventa estúdio) · `npm run smoke -- --url http://localhost:3000`
+  (o app sobe? o grid lista? o filtro filtra? a busca acha?).
+- ⚠️ **`settings.json` é o SSoT de `studio`/`tags` da cena** — quem escreve é
+  `photo-agent tag`, e o doc do Mongo é só espelho (o grid faz overlay do arquivo por
+  cima). Todo write nesse arquivo é **merge, nunca overwrite**: publish e finalize já
+  apagaram o estúdio de cenas em produção sobrescrevendo-o. Escrita fora do processo
+  (CLI) não invalida o cache — quem cobre é o TTL. Dentro do app, chame
+  `invalidateCatalog()`.
 - **Refino manual**: card → "Abrir" → `/photo-mockup?scene=<id>` (quad/máscara/warp/
   material/luz). Salva no `settings.json`; o loop respeita (WYSIWYG).
 - **Lições de fit**: layout (creative full-bleed) = `cover`; logo = `contain` + `--bg`
