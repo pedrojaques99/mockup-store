@@ -3,8 +3,13 @@
  * and persist to MongoDB collection `psd_metadata`.
  *
  * Usage:
- *   bun scripts/scan-psds.ts
- *   DRY_RUN=1 bun scripts/scan-psds.ts
+ *   npx tsx --env-file=.env.local scripts/scan-psds.ts
+ *   DRY_RUN=1 npx tsx --env-file=.env.local scripts/scan-psds.ts
+ *   ONLY_NEW=1 npx tsx --env-file=.env.local scripts/scan-psds.ts
+ *
+ * ONLY_NEW=1 pula o que já está no psd_metadata → scan incremental, barato o
+ * bastante pra rodar sempre que caírem PSDs novos numa pasta do PSD_DIRS.
+ * Sem ele, relê os ~2k PSDs (dezenas de GB) — é por isso que ninguém rodava.
  */
 
 import { readFileSync } from "fs";
@@ -23,6 +28,7 @@ for (const line of envFile.split("\n")) {
 }
 
 const DRY_RUN = process.env.DRY_RUN === "1";
+const ONLY_NEW = process.env.ONLY_NEW === "1";
 const PSD_DIRS = (process.env.PSD_DIRS || "").split(",").map((d) => d.trim()).filter(Boolean);
 
 async function main() {
@@ -48,6 +54,8 @@ async function main() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let client: MongoClient | null = null;
+  // Conexão só-leitura pro ONLY_NEW quando DRY_RUN não abre a principal
+  let dryClient: MongoClient | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let col: any = null;
   if (!DRY_RUN) {
@@ -57,6 +65,32 @@ async function main() {
     col = db.collection("psd_metadata");
     await col.createIndex({ fileName: 1 }, { unique: true });
     await col.createIndex({ "smartObjects.name": 1 });
+  }
+
+  // ONLY_NEW: descarta o que já está no banco ANTES de abrir qualquer PSD —
+  // é o que torna o scan barato o suficiente pra rodar a cada arquivo novo.
+  let targets = unique;
+  if (ONLY_NEW) {
+    let readCol = col;
+    if (!readCol) {
+      dryClient = new MongoClient(process.env.MONGODB_URI!);
+      await dryClient.connect();
+      readCol = dryClient.db(process.env.MONGODB_DB_NAME!).collection("psd_metadata");
+    }
+    const known = new Set<string>(
+      (await readCol.find({}, { projection: { fileName: 1 } }).toArray()).map(
+        (d: { fileName: string }) => d.fileName
+      )
+    );
+    const before = targets.length;
+    targets = targets.filter((p) => !known.has(p.name));
+    console.log(`  ONLY_NEW: ${before - targets.length} já indexados · ${targets.length} novos\n`);
+    if (!targets.length) {
+      console.log("Nada novo — acervo já está em dia.");
+      await client?.close();
+      await dryClient?.close();
+      return;
+    }
   }
 
   let ok = 0, fail = 0;
@@ -72,9 +106,9 @@ async function main() {
     batch.length = 0;
   }
 
-  for (let i = 0; i < unique.length; i++) {
-    const entry = unique[i];
-    process.stdout.write(`[${i + 1}/${unique.length}] ${entry.name}...`);
+  for (let i = 0; i < targets.length; i++) {
+    const entry = targets[i];
+    process.stdout.write(`[${i + 1}/${targets.length}] ${entry.name}...`);
 
     const meta = scanPsd(entry.path);
     if (meta) {
@@ -99,6 +133,7 @@ async function main() {
     console.log(`  ${total} total documents in psd_metadata`);
     await client!.close();
   }
+  await dryClient?.close();
 }
 
 main().catch((err) => {

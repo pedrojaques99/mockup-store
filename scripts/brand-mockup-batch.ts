@@ -17,6 +17,9 @@
  *   --include <csv>      só estas categorias (billboard,poster,device,retail,signage)
  *   --square             ignora categorias; pega PSDs cuja face é ~1:1 (logo/ícone:
  *                        coaster, badge, sticker, selo, tag, mug, app icon, patch…)
+ *   --max-crop <f>       0-1: descarta cenas cuja face force o `cover` a cortar mais
+ *                        que isso da arte (0.12 = 12%). Default 0 = desligado.
+ *                        Essencial pra layout tipográfico: crop come o headline.
  *
  * Aprendizados embutidos (mantêm consistência entre lotes):
  *  - device = face com aspect de TELA (retrato ~0.40-0.65), não a maior →
@@ -48,6 +51,29 @@ const preview = has("preview");
 const fresh = has("fresh");
 const minKb = parseInt(flag("min-kb", "0")!);
 const includeCats = (flag("include") || "").split(",").map((s) => s.trim()).filter(Boolean);
+const maxCrop = parseFloat(flag("max-crop", "0")!);
+
+/** Fração do lado maior que o `cover` descarta ao encaixar `artAspect` em `faceAspect`. */
+const cropOf = (artAspect: number, faceAspect: number) => {
+  const r = artAspect / faceAspect;
+  return r > 1 ? 1 - 1 / r : 1 - r;
+};
+
+/**
+ * Tolerância POR ARTE, do sidecar `_layouts-meta.json` (scripts/layout-ingest.ts).
+ * O `--max-crop` global paga o pior caso pra todas: uma arte com margem folgada
+ * aguenta 20%, uma com texto na borda não aguenta 5%. Com o sidecar cada arte
+ * usa a sua. Sem sidecar, cai no global — comportamento antigo intacto.
+ */
+type LayoutMetaFile = { layouts?: Array<{ file: string; safeCrop?: number }> };
+function loadSafeCrops(dir: string): Map<string, number> {
+  const m = new Map<string, number>();
+  try {
+    const j = JSON.parse(readFileSync(join(dir, "_layouts-meta.json"), "utf-8")) as LayoutMetaFile;
+    for (const l of j.layouts ?? []) if (typeof l.safeCrop === "number") m.set(l.file, l.safeCrop);
+  } catch { /* sem sidecar — segue no global */ }
+  return m;
+}
 
 function die(msg: string): never { console.error(`✗ ${msg}`); process.exit(1); }
 
@@ -61,6 +87,8 @@ const ALL_PLAN: Array<{ label: string; rx: string; weight: number; faceMode: Fac
 ];
 
 const slug = (s: string) => s.replace(/[^\wÀ-ɏ-]+/g, "_").replace(/_+/g, "_").slice(0, 50);
+/** Chave de "família" do mockup: tira números/série → agrupa 31-sign / 28-sign. */
+const famKey = (s: string) => s.replace(/\.[^.]+$/, "").replace(/\d+/g, "").replace(/[-_\s]+/g, "-").replace(/^-|-$/g, "").toLowerCase().slice(0, 20);
 
 function renderJob(job: Record<string, unknown>) {
   return new Promise<{ ok?: boolean; error?: string }>((res, rej) => {
@@ -109,11 +137,32 @@ async function main() {
   if (!artPool.length) die("nenhum layout válido no pool");
   console.log(`pool: ${artPool.map((a) => `${a.name}(${a.aspect.toFixed(2)})`).join(", ")}`);
 
+  // Tolerância por arte (sidecar) com fallback pro --max-crop global.
+  const safeCrops = loadSafeCrops(layoutsArg);
+  if (safeCrops.size) console.log(`sidecar: safeCrop por arte em ${safeCrops.size}/${artPool.length} layouts`);
+  const tolOf = (art: { name: string }) => safeCrops.get(art.name) ?? maxCrop;
+  /** A arte cabe nessa face sem perder conteúdo? */
+  const artFits = (art: { name: string; aspect: number }, faceAspect: number) => {
+    const tol = tolOf(art);
+    return tol <= 0 ? true : cropOf(art.aspect, faceAspect) <= tol;
+  };
+
   const pickArt = (faceAspect: number, variant = 0) => {
     const sorted = [...artPool].sort((a, b) => Math.abs(Math.log(a.aspect / faceAspect)) - Math.abs(Math.log(b.aspect / faceAspect)));
-    const top = sorted.slice(0, Math.min(3, sorted.length));
+    // Sem tolerância o rodízio entre os 3 mais próximos pode cair numa arte que
+    // corta demais; com ela, só rodiziamos entre as que aguentam esta face.
+    const within = sorted.filter((a) => artFits(a, faceAspect));
+    const pool = within.length ? within : sorted;
+    const top = pool.slice(0, Math.min(3, pool.length));
     return top[variant % top.length];
   };
+
+  /** Toda face selecionada precisa ter ao menos uma arte que a suporte. */
+  const facesFitCrop = (all: ReturnType<typeof computeFaces>, mode: FaceMode) =>
+    (maxCrop <= 0 && !safeCrops.size) ||
+    selectFaces(all, mode).every((f) =>
+      artPool.some((a) => artFits(a, f.innerWidth / f.innerHeight))
+    );
 
   // Resume
   const used = new Set<string>();
@@ -133,9 +182,14 @@ async function main() {
   if (has("square")) {
     // Mockups com face ~1:1 — onde um logo/ícone brilha
     const LOGO_RX = "coaster|badge|sticker|stamp|\\bseal\\b|\\bpin\\b|button|label|\\bsign\\b|logo|patch|\\bcap\\b|\\bmug\\b|\\btag\\b|\\bcard\\b|emboss|deboss|tile|\\bcan\\b|\\bjar\\b|candle|soap|vinyl|coin|medal|\\bwax\\b|sleeve|\\bcd\\b|plate|disc|sphere|\\bball\\b|\\bcup\\b|napkin|keychain|sphere";
-    const docs = await col.find({ fileName: { $regex: LOGO_RX, $options: "i" } }).project({ fileName: 1, filePath: 1, smartObjects: 1 }).limit(count * 20).toArray();
-    // embaralha pra não cair só em "sign-mockup" (variedade de tipos)
-    for (let k = docs.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [docs[k], docs[j]] = [docs[j], docs[k]]; }
+    // $sample = sorteio real sobre TODO o acervo (varia a cada run, não a mesma ordem)
+    const docs = await col.aggregate([
+      { $match: { fileName: { $regex: LOGO_RX, $options: "i" } } },
+      { $sample: { size: count * 20 } },
+      { $project: { fileName: 1, filePath: 1, smartObjects: 1 } },
+    ]).toArray();
+    // teto por "família" (ex.: *-sign-mockup) pra não virar monocultura de placa
+    const famCount = new Map<string, number>();
     for (const d of docs) {
       if (targets.length >= count) break;
       const fp = (d.filePath as string)?.replace(/\//g, "\\");
@@ -145,6 +199,9 @@ async function main() {
       const primary = faces.reduce((a, b) => (b.innerWidth * b.innerHeight > a.innerWidth * a.innerHeight ? b : a));
       const ar = primary.innerWidth / primary.innerHeight;
       if (ar < 0.82 || ar > 1.22) continue; // só faces quadradas
+      const fam = famKey(d.fileName as string);
+      if ((famCount.get(fam) || 0) >= 2) continue; // máx 2 por família
+      famCount.set(fam, (famCount.get(fam) || 0) + 1);
       used.add(d.fileName);
       // 'all' = preenche TODAS as faces quadradas (coaster com 5, etc.), não só uma
       targets.push({ fileName: d.fileName, filePath: fp, smartObjects: d.smartObjects as never, label: "square", faceMode: "all" });
@@ -155,13 +212,21 @@ async function main() {
     const totalW = plan.reduce((s, c) => s + c.weight, 0);
     for (const cat of plan) {
       const want = Math.max(1, Math.round((cat.weight / totalW) * count));
-      const docs = await col.find({ fileName: { $regex: cat.rx, $options: "i" } }).project({ fileName: 1, filePath: 1, smartObjects: 1 }).limit(want * 8).toArray();
+      // $sample = cenas diferentes a cada run (antes: find().limit() = sempre as primeiras)
+      const docs = await col.aggregate([
+        { $match: { fileName: { $regex: cat.rx, $options: "i" } } },
+        // Com filtro de corte ligado a rejeição é alta — precisa de mais candidatos.
+        { $sample: { size: want * (maxCrop > 0 || safeCrops.size ? 30 : 8) } },
+        { $project: { fileName: 1, filePath: 1, smartObjects: 1 } },
+      ]).toArray();
       let taken = 0;
       for (const d of docs) {
         if (taken >= want || targets.length >= count) break;
         const fp = (d.filePath as string)?.replace(/\//g, "\\");
         if (!fp || used.has(d.fileName) || !existsSync(fp)) continue;
-        if (!computeFaces((d.smartObjects || []) as never).length) continue;
+        const faces = computeFaces((d.smartObjects || []) as never);
+        if (!faces.length) continue;
+        if (!facesFitCrop(faces, cat.faceMode)) continue;
         used.add(d.fileName);
         targets.push({ fileName: d.fileName, filePath: fp, smartObjects: d.smartObjects as never, label: cat.label, faceMode: cat.faceMode });
         taken++;

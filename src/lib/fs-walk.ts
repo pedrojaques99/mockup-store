@@ -24,6 +24,10 @@ export function walkDir(
       if (entry.isDirectory()) {
         results.push(...walkDir(fullPath, filterExts, depth + 1));
       } else {
+        // AppleDouble: o macOS grava um "._Foo.psd" ao lado de "Foo.psd" com o
+        // resource fork. O Drive sincroniza esse lixo e ele tem extensão .psd,
+        // mas não é PSD — o scan abria e falhava (18 FAILs no acervo).
+        if (entry.name.startsWith("._")) continue;
         const ext = extname(entry.name).toLowerCase();
         if (filterExts && !filterExts.has(ext)) continue;
         const stat = statSync(fullPath);
