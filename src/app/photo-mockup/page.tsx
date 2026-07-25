@@ -1040,7 +1040,12 @@ function PhotoMockupPageInner() {
     lq.setConsumer(async (params: { files?: FileSystemFileHandle[] }) => {
       const handle = params.files?.[0];
       if (!handle) return;
-      try { openProject(await handle.getFile()); } catch { /* handle revogado */ }
+      // Abrir arquivo é ação do usuário (double-click no .vsn) — se o handle foi
+      // revogado pelo browser, avisa em vez de deixar o clique não fazer nada.
+      try { openProject(await handle.getFile()); } catch (e) {
+        console.error("[launchQueue] falha ao abrir .vsn", e);
+        toast.error("Não foi possível abrir o arquivo. Tente novamente pelo botão Abrir.");
+      }
     });
   }, [openProject]);
 
@@ -1668,14 +1673,14 @@ function PhotoMockupPageInner() {
                   </button>
                 )}
 
-                {/* AI toggle badge */}
+                {/* Toggle de resultado Visant (mesmo rótulo usado no upscale, upMode "ai") */}
                 {aiBlendUrl && (
                   <button
                     onClick={() => setShowAiResult(v => !v)}
                     className={["absolute top-3 left-4 z-20 text-[11px] px-2 py-0.5 rounded-full backdrop-blur-sm flex items-center gap-1 transition-colors",
                       showAiResult ? "bg-acc/80 text-white" : "bg-black/50 text-zinc-400 hover:text-white"].join(" ")}
                   >
-                    <Wand2 size={9} /> {showAiResult ? "AI" : "Original"}
+                    <Wand2 size={9} /> {showAiResult ? "Visant" : "Original"}
                   </button>
                 )}
 
@@ -1690,7 +1695,7 @@ function PhotoMockupPageInner() {
                 {renderMs && renderState === "done" && !autoRenderPending && (
                   <span className="absolute top-3 right-4 z-20 text-[11px] font-mono bg-black/50 text-zinc-400 px-2 py-0.5 rounded-full backdrop-blur-sm">
                     {aiBlendUrl && showAiResult
-                      ? `AI · ${aiBlendMs ? (aiBlendMs / 1000).toFixed(1) : "?"}s`
+                      ? `Visant · ${aiBlendMs ? (aiBlendMs / 1000).toFixed(1) : "?"}s`
                       : `${(renderMs / 1000).toFixed(1)}s`}
                   </span>
                 )}

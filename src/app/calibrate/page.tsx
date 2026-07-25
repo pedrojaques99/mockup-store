@@ -696,7 +696,7 @@ export default function CalibratePage() {
               engine v{engineMeta.global.version}·{engineMeta.global.samples}
             </span>
           )}
-          <button onClick={() => setUseAI((v) => !v)} title="AI vision (Claude) — análise mais precisa, ~1s + custo" className={["p-1.5 rounded hover:bg-zinc-800", useAI ? "text-purple-400" : "text-zinc-500"].join(" ")}><Sparkles size={16} /></button>
+          <button onClick={() => setUseAI((v) => !v)} title="Visant vision — análise mais precisa, ~1s + custo" className={["p-1.5 rounded hover:bg-zinc-800", useAI ? "text-purple-400" : "text-zinc-500"].join(" ")}><Sparkles size={16} /></button>
           <button onClick={toggleMesh} title="Malha / Warp envelope (W)" className={["p-1.5 rounded hover:bg-zinc-800", meshMode ? "text-lime-400" : "text-zinc-500"].join(" ")}><Grid3x3 size={16} /></button>
           <button onClick={toggleMask} title="Máscara (K) — pen / brush / wand / SAM" className={["p-1.5 rounded hover:bg-zinc-800", maskMode ? "text-cyan-400" : "text-zinc-500"].join(" ")}><Lasso size={16} /></button>
           <button onClick={() => { setDispMode((v) => !v); setMatMode(false); }} title="Displacement (D)" className={["p-1.5 rounded hover:bg-zinc-800", dispMode ? "text-orange-400" : "text-zinc-500"].join(" ")}><Mountain size={16} /></button>

@@ -12,6 +12,17 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // Thumbnail do grid é imutável por id (o id É o hash da cena) — sem isto o browser
+  // revalidava os 60 cards da primeira página a cada visita. `must-revalidate` de fora
+  // porque o arquivo pode ser regravado por um republish da mesma cena.
+  async headers() {
+    return [
+      {
+        source: "/photo-previews/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=3600, stale-while-revalidate=86400" }],
+      },
+    ];
+  },
   serverExternalPackages: [
     "ag-psd", "sharp", "mongodb", "@printmadehq/mockup-generator",
     "puppeteer", "canvas", "@visant/psd-engine",

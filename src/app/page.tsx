@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import ArtFramePanel from "@/components/ArtFramePanel";
@@ -54,7 +54,15 @@ import { dedupeRefs } from "@/lib/dedup";
 import Lottie from "lottie-react";
 import boxLoaderData from "../../public/lottie/box-loader.json";
 
-function MockupCard({
+// Reveal-on-hover clássico (opacity-0 + group-hover) esconde a ação primária
+// pra sempre em tablet/touch (sem :hover) e não reage a foco de teclado — a
+// única rota até o editor ("Abrir") e a ação principal ("Aplicar") ficavam
+// inalcançáveis fora do mouse. `hover:hover` restringe o "começa escondido"
+// só a quem tem hover de verdade; touch/teclado sempre vê o botão.
+const REVEAL_OVERLAY =
+  "opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 group-focus-within:opacity-100";
+
+function MockupCardImpl({
   mockup,
   selected,
   hasArt,
@@ -69,18 +77,32 @@ function MockupCard({
   selected: boolean;
   hasArt: boolean;
   isRendering: boolean;
-  onSelect: () => void;
-  onApply: () => void;
-  onHide: () => void;
+  onSelect: (mockup: Reference) => void;
+  onApply: (mockup: Reference) => void;
+  onHide: (mockup: Reference) => void;
   thumbSize: number;
   renderedUrl?: string;
 }) {
   const hasImage = !!mockup.referenceImageUrl;
 
+  // Antes o card inteiro era um <button> envolvendo um <a> ("Abrir") e dois
+  // <button> (Aplicar/Pasta/Esconder) — HTML inválido (botão não pode conter
+  // conteúdo interativo), o que quebrava justamente o link "Abrir", única rota
+  // até o editor de foto. <div role="button"> não é "conteúdo interativo" pro
+  // parser HTML, então pode conter os controles reais como irmãos — mesma UX de
+  // clique (com stopPropagation nos controles internos), agora com teclado.
   return (
-    <button
-      onClick={onSelect}
-      className={`group relative rounded-2xl overflow-hidden border transition-all duration-300 text-left bg-neutral-900/40 hover:bg-neutral-900 ${
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(mockup)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(mockup);
+        }
+      }}
+      className={`group relative rounded-2xl overflow-hidden border transition-all duration-300 text-left bg-neutral-900/40 hover:bg-neutral-900 cursor-pointer ${
         selected ? "border-white ring-4 ring-white/10 shadow-2xl" : "border-neutral-800 hover:border-neutral-700"
       }`}
     >
@@ -92,7 +114,6 @@ function MockupCard({
             fill
             className="object-cover transition-transform duration-700 group-hover:scale-110"
             sizes={`${thumbSize * 1.5}px`}
-            unoptimized
             loading="lazy"
           />
         ) : (
@@ -108,7 +129,7 @@ function MockupCard({
             className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500"
           />
         )}
-        
+
         {(mockup.psdPath || mockup.type === "photo") && !isRendering && (
           <div className="absolute top-2 right-2 flex gap-1">
             {mockup.type === "photo"
@@ -130,7 +151,7 @@ function MockupCard({
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center backdrop-blur-[2px]"
+            className={`absolute inset-0 bg-black/40 transition-all duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
             <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-all active:scale-90 shadow-2xl uppercase tracking-widest">
               Abrir
@@ -139,20 +160,23 @@ function MockupCard({
         )}
 
         {hasArt && mockup.psdPath && !isRendering && (
-          <div
-            onClick={(e) => { e.stopPropagation(); onApply(); }}
-            className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center backdrop-blur-[2px]"
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onApply(mockup); }}
+            title="Aplicar arte neste mockup"
+            className={`absolute inset-0 bg-black/40 transition-all duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
             <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-all active:scale-90 shadow-2xl uppercase tracking-widest">
               Aplicar
             </span>
-          </div>
+          </button>
         )}
 
         {!isRendering && (
-          <div className="absolute top-2 left-2 z-20 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
+          <div className="absolute top-2 left-2 z-20 flex gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all">
             {mockup.psdPath && (
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: mockup.psdPath }) });
@@ -164,7 +188,8 @@ function MockupCard({
               </button>
             )}
             <button
-              onClick={(e) => { e.stopPropagation(); onHide(); }}
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onHide(mockup); }}
               title="Esconder este mockup"
               className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-all active:scale-90 shadow-xl"
             >
@@ -177,9 +202,17 @@ function MockupCard({
         <p className="text-[11px] font-bold truncate text-neutral-300 group-hover:text-white transition-colors">{mockup.name}</p>
         <p className="text-[9px] font-bold text-neutral-600 truncate uppercase tracking-widest mt-0.5">{mockup.studio || "General"}</p>
       </div>
-    </button>
+    </div>
   );
 }
+
+// Memoizado: sem isso, cada tecla digitada na busca (debounce de 300ms) e cada
+// mudança de estado não relacionada (thumbSize, seleção…) re-renderizava os
+// 60+ cards do grid — cada um com <Image>+backdrop-blur — o maior custo de INP
+// da home. Só funciona porque onSelect/onApply/onHide agora são funções
+// ESTÁVEIS do pai (useCallback) que recebem o mockup como argumento, em vez de
+// closures novas por item a cada render.
+const MockupCard = memo(MockupCardImpl);
 
 interface Reference {
   id: string;
@@ -225,10 +258,21 @@ function SuggestionCard({
   onApply: () => void;
 }) {
   const { ref, reasons } = suggestion;
+  // Mesmo problema do MockupCard: container não pode ser <button> se "Aplicar"
+  // vira um <button> real (botão-em-botão é HTML inválido). <div role="button">
+  // preserva clique/seleção + teclado sem aninhar interativo em interativo.
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className={`group relative w-48 shrink-0 rounded-2xl overflow-hidden border text-left transition-all duration-300 bg-neutral-900/40 hover:bg-neutral-900 ${
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={`group relative w-48 shrink-0 rounded-2xl overflow-hidden border text-left transition-all duration-300 bg-neutral-900/40 hover:bg-neutral-900 cursor-pointer ${
         selected ? "border-white ring-4 ring-white/10 shadow-2xl scale-105 z-10" : "border-neutral-800 hover:border-neutral-700"
       }`}
     >
@@ -238,10 +282,9 @@ function SuggestionCard({
             src={ref.referenceImageUrl} 
             alt={ref.name} 
             fill 
-            className="object-cover transition-transform duration-700 group-hover:scale-110" 
-            sizes="192px" 
-            unoptimized 
-            loading="lazy" 
+            className="object-cover transition-transform duration-700 group-hover:scale-110"
+            sizes="192px"
+            loading="lazy"
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-neutral-800">
@@ -260,14 +303,16 @@ function SuggestionCard({
         )}
 
         {ref.psdPath && !isRendering && (
-          <div
+          <button
+            type="button"
             onClick={(e) => { e.stopPropagation(); onApply(); }}
-            className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center backdrop-blur-[2px]"
+            title="Aplicar arte neste mockup"
+            className={`absolute inset-0 bg-black/40 transition-all duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
             <span className="bg-white text-black text-[10px] font-black px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition-all active:scale-90 shadow-2xl uppercase tracking-widest">
               Aplicar
             </span>
-          </div>
+          </button>
         )}
       </div>
       <div className="p-3">
@@ -278,7 +323,7 @@ function SuggestionCard({
           ))}
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -389,12 +434,18 @@ export default function Home() {
   const leftPanelRef = usePanelRef();
   const rightPanelRef = usePanelRef();
   const [studios, setStudios] = useState<Studio[]>([]);
+  const [aspects, setAspects] = useState<{ name: string; count: number }[]>([]);
   const [allTags, setAllTags] = useState<Record<string, TagEntry[]>>({});
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  // Erro do fetchPage (Mongo offline, 500 etc.) — distinto do empty-state real:
+  // "nenhum resultado pros filtros" não é a mesma coisa que "a API caiu".
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [studio, setStudio] = useState("");
+  // Formato da superfície — o critério que o pipeline usa o tempo todo pra casar arte↔cena.
+  const [aspect, setAspect] = useState<"" | "square" | "portrait" | "landscape">("");
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [tagMode, setTagMode] = useState<"AND" | "OR">("AND");
   const [hideDuplicates, setHideDuplicates] = useState(true);
@@ -599,6 +650,7 @@ export default function Home() {
     async (pageNum: number, append: boolean) => {
       if (loading) return;
       setLoading(true);
+      setFetchError(null);
 
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -610,6 +662,7 @@ export default function Home() {
       });
       if (search) params.set("search", search);
       if (studio) params.set("studio", studio);
+      if (aspect) params.set("aspect", aspect);
       if (activeTags.length) {
         params.set("tags", activeTags.join(","));
         params.set("tagMode", tagMode);
@@ -620,6 +673,7 @@ export default function Home() {
         const res = await fetch(`/api/references?${params}`, {
           signal: controller.signal,
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
         if (append) {
@@ -632,27 +686,75 @@ export default function Home() {
         setPage(pageNum);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
+        // Mongo offline é caminho documentado deste projeto (AGENTS.md), não
+        // exceção — antes só AbortError era tratado, então qualquer outro erro
+        // (Mongo caído, 500) deixava refs=[] com hasMore=true intocado: o
+        // IntersectionObserver via sentinelRef refazia fetchPage em loop contra
+        // uma API que já caiu, e o badge do header continuava com o total antigo
+        // enquanto o grid renderizava vazio. setHasMore(false) mata o loop; zerar
+        // o total (só em fetch não-incremental) evita o badge contradizer o grid.
+        setFetchError(String((err as Error).message || err));
+        setHasMore(false);
+        if (!append) setTotal(0);
       } finally {
         setLoading(false);
         setInitialLoad(false);
       }
     },
-    [search, studio, activeTags, tagMode, loading]
+    [search, studio, aspect, activeTags, tagMode, loading]
   );
 
+  // Busca/facetas na URL: sem isto o F5 jogava tudo fora e um filtro montado com
+  // cuidado não era compartilhável — o detalhe que separa "página" de "app".
+  // Lido no mount (não no useState, que rodaria na SSR e daria mismatch de hidratação)
+  // e o primeiro fetch espera esse parse pra não disparar duas vezes.
+  const [urlReady, setUrlReady] = useState(false);
   useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const q = p.get("q") ?? "";
+    if (q) setSearch(q);
+    if (p.get("studio")) setStudio(p.get("studio")!);
+    const a = p.get("aspect");
+    if (a === "square" || a === "portrait" || a === "landscape") setAspect(a);
+    const t = p.get("tags");
+    if (t) setActiveTags(t.split(",").filter(Boolean).slice(0, 5));
+    if (p.get("tagMode") === "OR") setTagMode("OR");
+    setUrlReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!urlReady) return;
+    const p = new URLSearchParams();
+    if (search) p.set("q", search);
+    if (studio) p.set("studio", studio);
+    if (aspect) p.set("aspect", aspect);
+    if (activeTags.length) {
+      p.set("tags", activeTags.join(","));
+      if (tagMode === "OR") p.set("tagMode", "OR");
+    }
+    const qs = p.toString();
+    // replaceState (não push): digitar na busca não pode encher o histórico de
+    // entradas — o "voltar" tem que sair da página, não desfazer letra por letra.
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  }, [urlReady, search, studio, aspect, activeTags, tagMode]);
+
+  useEffect(() => {
+    if (!urlReady) return;
     setRefs([]);
     setPage(1);
     setHasMore(true);
     setInitialLoad(true);
     fetchPage(1, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, studio, activeTags, tagMode]);
+  }, [urlReady, search, studio, aspect, activeTags, tagMode]);
 
   useEffect(() => {
-    fetch("/api/references/studios")
+    // Estúdios e aspectos saem do MESMO catálogo do grid — o dropdown não pode prometer
+    // um estúdio que a listagem não entrega.
+    fetch("/api/references/facets?has_psd=true")
       .then((r) => r.json())
-      .then(setStudios);
+      .then((f) => { setStudios(f.studios ?? []); setAspects(f.aspects ?? []); })
+      .catch(() => {});
     fetch("/api/references/tags")
       .then((r) => r.json())
       .then(setAllTags);
@@ -843,7 +945,24 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, refs, fullscreen]);
 
-  const selectRef = (ref: Reference) => {
+  // useCallback (não função solta): precisa de identidade ESTÁVEL — é passada
+  // direto como prop `onSelect` pro MockupCard memoizado (React.memo só evita
+  // re-render se a prop-função não mudar a cada render do pai).
+  const selectRef = useCallback((ref: Reference) => {
+    // Sinal de relevância: o resultado aberto A PARTIR de uma busca reordena o ranking
+    // da próxima vez (`search-telemetry`, mesmo princípio do `engine-feedback` que já
+    // aprende com cada publish). Lido de um ref pra não quebrar a identidade estável
+    // desta callback — ela é prop do MockupCard memoizado. keepalive: o beacon precisa
+    // sobreviver à navegação. Best-effort: nunca bloqueia nem atrasa a seleção.
+    const q = searchRef.current.trim();
+    if (q) {
+      void fetch("/api/references/click", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: q, id: ref.id }),
+        keepalive: true,
+      }).catch(() => {});
+    }
     setSelected(ref);
     setRenderResult(null);
     setRenderTime(null);
@@ -875,7 +994,21 @@ export default function Home() {
         })
         .catch(() => {});
     }
-  };
+  }, []);
+
+  // Idem selectRef: identidade estável pra virar prop `onApply` do MockupCard
+  // memoizado sem criar uma closure nova por card a cada render do grid.
+  const handleCardApply = useCallback(
+    (ref: Reference) => {
+      selectRef(ref);
+      pendingRenderRef.current = ref;
+    },
+    [selectRef]
+  );
+
+  // Espelho de `search` pra telemetria de clique — ver selectRef.
+  const searchRef = useRef("");
+  useEffect(() => { searchRef.current = search; }, [search]);
 
   const handleSearchInput = (value: string) => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -1473,6 +1606,34 @@ export default function Home() {
                 </select>
                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600 pointer-events-none" />
               </div>
+
+              {/* Formato da superfície — filtro que o pipeline usa o tempo todo ("casar
+                  arte↔cena por aspecto") e que só existia no CLI. Clicar de novo limpa. */}
+              <div className="flex items-center gap-1.5">
+                {([
+                  { key: "square", label: "1:1" },
+                  { key: "portrait", label: "Retrato" },
+                  { key: "landscape", label: "Paisagem" },
+                ] as const).map(({ key, label }) => {
+                  const on = aspect === key;
+                  const count = aspects.find((a) => a.name === key)?.count;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setAspect(on ? "" : key)}
+                      title={count ? `${count} mockups` : undefined}
+                      className={`flex-1 h-9 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all active:scale-[0.98] ${
+                        on
+                          ? "bg-neutral-900 border-neutral-700 text-neutral-300"
+                          : "bg-transparent border-neutral-800 text-neutral-600 hover:text-neutral-400"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
               <button
                 onClick={() => setHideDuplicates((v) => !v)}
                 className={`flex items-center justify-between gap-2 h-9 rounded-xl border px-3 text-[10px] font-black uppercase tracking-widest transition-all active:scale-[0.98] ${
@@ -1769,6 +1930,26 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+            ) : fetchError && refs.length === 0 ? (
+              // Distinto do empty-state: aqui a API falhou (Mongo offline, 500…),
+              // não é "sem resultados pros filtros". Badge do header já foi
+              // zerado no fetchPage pra não contradizer este grid vazio.
+              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-600 animate-in zoom-in-95 duration-500">
+                <div className="w-20 h-20 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                  <AlertTriangle className="w-8 h-8 text-red-400" />
+                </div>
+                <div className="text-center max-w-sm">
+                  <p className="text-base font-black uppercase tracking-widest text-red-400">Não foi possível carregar o catálogo</p>
+                  <p className="text-xs font-bold text-neutral-600 mt-2 uppercase tracking-widest break-words">{fetchError}</p>
+                </div>
+                <button
+                  onClick={() => fetchPage(1, false)}
+                  className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-all active:scale-[0.98]"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Tentar de novo
+                </button>
+              </div>
             ) : refs.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-600 animate-in zoom-in-95 duration-500">
                 <div className="w-20 h-20 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
@@ -1787,21 +1968,25 @@ export default function Home() {
                     gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` 
                   }}
                 >
-                  {displayRefs.map((ref, i) => (
+                  {displayRefs.map((ref) => (
+                    // key = ref.id sozinho (Mongo _id / scene id, já único por
+                    // item) — `${id}-${i}` quebrava a reconciliação no infinite
+                    // scroll porque o índice de posição muda a cada `load more`
+                    // e a cada resposta de busca, fazendo o React trocar o card
+                    // errado de lugar. dedupeRefs (hideDuplicates) já colapsa
+                    // nome+tamanho repetido ANTES disso chegar aqui, então não
+                    // há id repetido dentro da mesma lista renderizada.
                     <MockupCard
-                      key={`${ref.id}-${i}`}
+                      key={ref.id}
                       mockup={ref}
                       selected={selected?.id === ref.id}
                       hasArt={anyArt}
                       isRendering={renderingRefId === ref.id}
                       thumbSize={thumbSize}
                       renderedUrl={renderCache[ref.id]?.url}
-                      onSelect={() => selectRef(ref)}
-                      onApply={() => {
-                        selectRef(ref);
-                        pendingRenderRef.current = ref;
-                      }}
-                      onHide={() => hideMockup(ref)}
+                      onSelect={selectRef}
+                      onApply={handleCardApply}
+                      onHide={hideMockup}
                     />
                   ))}
                 </div>
@@ -1813,7 +1998,22 @@ export default function Home() {
                       Carregando Catálogo
                     </div>
                   )}
-                  {!hasMore && refs.length > 0 && (
+                  {fetchError && refs.length > 0 && (
+                    // Já tinha página carregada quando o scroll infinito bateu erro —
+                    // não mostra "Fim da Biblioteca" (mentira: não foi fim, foi falha)
+                    // nem refaz fetch sozinho (hasMore já foi pra false no fetchPage).
+                    <div className="flex flex-col items-center gap-3 text-red-400 text-[10px] font-black uppercase tracking-[0.2em]">
+                      <span>Falha ao carregar mais mockups — {fetchError}</span>
+                      <button
+                        onClick={() => fetchPage(page + 1, true)}
+                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-all active:scale-[0.98]"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Tentar de novo
+                      </button>
+                    </div>
+                  )}
+                  {!hasMore && !fetchError && refs.length > 0 && (
                     <div className="flex items-center gap-4 text-neutral-700 text-[10px] font-black uppercase tracking-[0.3em]">
                       <div className="h-[1px] w-12 bg-neutral-900" />
                       Fim da Biblioteca
@@ -1877,7 +2077,7 @@ export default function Home() {
                   <img src={renderResult} alt="Render" className="absolute inset-0 w-full h-full object-contain cursor-pointer transition-transform duration-500 group-hover/preview:scale-105" onClick={() => setFullscreen(true)} />
                 ) : selected.referenceImageUrl ? (
                   <>
-                    <Image src={selected.referenceImageUrl} alt={selected.name} fill className="object-contain" unoptimized priority />
+                    <Image src={selected.referenceImageUrl} alt={selected.name} fill className="object-contain" priority />
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-0 group-hover/preview:opacity-100 transition-opacity duration-200 bg-black/50">
                       <Upload className="w-6 h-6 text-white" />
                       <span className="text-[11px] font-bold text-white">Adicionar arte</span>

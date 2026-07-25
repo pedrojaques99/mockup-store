@@ -7,6 +7,7 @@
  */
 import { useState } from "react";
 import { Download, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { Segmented } from "@/components/ui/Segmented";
 
 type Fmt = "png" | "jpeg" | "webp";
@@ -46,8 +47,12 @@ export function ExportBar({ src }: { src: string | null }) {
       a.download = `mockup.${fmt}`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch {
-      /* noop */
+    } catch (e) {
+      // Este é o passo final do produto (download do mockup) — nunca pode falhar em
+      // silêncio. canvas "tainted" (CORS) ou toBlob retornando null viram um botão
+      // que só volta do estado busy, indistinguível de sucesso. Avisa e loga a causa real.
+      console.error("[ExportBar] falha ao exportar imagem", e);
+      toast.error("Não foi possível salvar a imagem. Tente novamente ou escolha outro formato (PNG/JPEG/WebP).");
     } finally {
       setBusy(false);
     }
