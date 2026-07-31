@@ -245,7 +245,7 @@ export function RenderPanel(p: RenderPanelProps) {
 
       {/* AI Enhance */}
       {p.renderUrl && (
-        <div className={["rounded-xl border transition-all overflow-hidden", p.showAiBlend ? "border-acc/40 bg-acc/5" : "border-zinc-800"].join(" ")}>
+        <div className={["rounded-xl border transition-colors overflow-hidden", p.showAiBlend ? "border-acc/40 bg-acc/5" : "border-zinc-800"].join(" ")}>
           <button onClick={() => p.setShowAiBlend((v) => !v)} className="w-full flex items-center justify-between px-3 py-2">
             <span className={["flex items-center gap-1.5 text-[11px] font-medium", p.showAiBlend ? "text-acc" : "text-zinc-400"].join(" ")}>
               <Wand2 size={10} className={p.showAiBlend ? "text-acc" : "text-zinc-500"} />

@@ -1,21 +1,39 @@
 @import "tailwindcss";
+/* `animate-in`, `fade-in`, `slide-in-from-*`, `zoom-in-*` eram usadas em 22 lugares
+ * e não existiam em stylesheet nenhum — Tailwind v4 não traz essas utilities e o
+ * projeto nunca instalou o plugin. O navegador descartava em silêncio: o código
+ * descrevia uma UI animada, a UI entregue não tinha nenhuma dessas transições.
+ * Este é o substituto oficial do `tailwindcss-animate` para a v4 — lib validada,
+ * não keyframes na mão. */
+@import "tw-animate-css";
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
-  /* Motion tokens — durações/easing padronizados pra tudo "respirar" igual. */
-  --motion-fast: 140ms;
-  --motion: 180ms;
-  --motion-slow: 260ms;
-  --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Tudo que anima por cor/opacidade/transform usa o mesmo easing — consistência. */
-.transition-colors,
-.transition-transform,
-.transition-opacity,
-.transition-all {
-  transition-timing-function: var(--ease);
+/* ─── SSoT de motion ────────────────────────────────────────────────────────
+ * Espelhado 1:1 em `src/lib/motion.ts` (a forma JS, para o `motion`/framer).
+ * Regra: nenhum componente escreve um cubic-bezier ou uma duração na unha —
+ * sempre um token daqui ou o símbolo equivalente de `@/lib/motion`.
+ *
+ * Os nomes `--default-transition-*` não são invenção: são as theme variables da
+ * própria Tailwind v4. Setá-las aqui faz TODA utility `transition-*` já nascer
+ * com o easing e a duração da casa, sem o override por classe que existia antes
+ * (que perdia pra qualquer `ease-*`/`duration-*` explícito e criava dois donos
+ * para a mesma decisão). */
+@theme {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --dur-press: 120ms;
+  --dur-fast: 160ms;
+  --dur-base: 200ms;
+  --dur-slow: 300ms;
+
+  --default-transition-duration: 200ms;
+  --default-transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 @theme inline {
@@ -23,6 +41,48 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+}
+
+/* Barra de progresso indeterminada. `animate-progress-indefinite` era usada no
+ * overlay do render e no scan de duplicatas — as duas operações mais longas do
+ * produto — e não existia: o usuário via um retângulo branco PARADO em 40%
+ * enquanto o trabalho rodava. Uma barra imóvel durante trabalho em andamento é
+ * a UI mentindo sobre o estado do sistema. */
+@keyframes progress-indefinite {
+  0%   { transform: translateX(-100%) scaleX(0.6); }
+  50%  { transform: translateX(60%)  scaleX(1); }
+  100% { transform: translateX(260%) scaleX(0.6); }
+}
+
+@utility animate-progress-indefinite {
+  animation: progress-indefinite 1.4s var(--ease-in-out) infinite;
+  transform-origin: left center;
+  will-change: transform;
+}
+
+/* Também nunca existiu — 7 lugares pediam para esconder a barra de rolagem e
+ * todos continuavam mostrando. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+}
+
+/* Reduced motion é sinal real, não "desligar": some o deslocamento, fica a
+ * opacidade/cor — o resultado da transição sempre acontece, só sem percurso. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Boxy theme — TWO accents only. Everything else is chumbo (zinc) + off-white.
@@ -46,7 +106,12 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* O `layout.tsx` BAIXA Geist e Geist Mono do Google e publica
+   * `--font-geist-sans`/`--font-geist-mono`; esta regra sobrescrevia tudo com
+   * Arial. O app pagava duas webfonts e renderizava na fonte de sistema — não
+   * era escolha de tipografia, era a cascata comendo a decisão que o layout já
+   * tinha tomado. O fallback continua aí para o intervalo até a fonte carregar. */
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, Helvetica, Arial, sans-serif;
 }
 
 * {

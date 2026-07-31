@@ -82,7 +82,7 @@ export function ToolRail<T extends string>({
                       else { onSelect(t.id); onPanelOpenChange(true); }
                     }}
                     className={cn(
-                      "flex flex-col items-center justify-center gap-0.5 w-12 h-12 rounded-xl transition-all active:scale-90",
+                      "flex flex-col items-center justify-center gap-0.5 w-12 h-12 rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] [transition-duration:var(--dur-fast)] active:scale-90",
                       isActive ? "bg-acc2 text-zinc-950 shadow-md shadow-acc2/20" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
                     )}
                   >

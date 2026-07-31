@@ -1259,13 +1259,13 @@ function PhotoMockupPageInner() {
           <nav className="flex items-center gap-1">
             <Link
               href="/"
-              className="px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-all"
+              className="px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-colors"
             >
               Store
             </Link>
             <Link
               href="/photo-mockup"
-              className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 bg-white/8 text-white border border-white/10 transition-all"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 bg-white/8 text-white border border-white/10 transition-colors"
             >
               <Camera size={11} />
               Scene Maker
@@ -1283,7 +1283,7 @@ function PhotoMockupPageInner() {
             <button
               onClick={() => document.getElementById("vsn-input")?.click()}
               title="Abrir projeto (.vsn)"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-colors"
             >
               <FolderOpen size={11} />
               Abrir
@@ -1292,7 +1292,7 @@ function PhotoMockupPageInner() {
               <button
                 onClick={saveProject}
                 title="Salvar projeto em arquivo (.vsn) — foto + luz + máscaras + ajustes"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-colors"
               >
                 <Save size={11} />
                 Salvar
@@ -1303,7 +1303,7 @@ function PhotoMockupPageInner() {
             <button
               onClick={resetPhoto}
               title="Recomeçar — descarta esta cena e sobe uma nova foto"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-colors"
             >
               <RefreshCw size={11} />
               Novo projeto

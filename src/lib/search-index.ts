@@ -232,3 +232,28 @@ export async function searchRefs(q: SearchQuery) {
 export async function getFacets(q: SearchQuery = {}): Promise<Facets> {
   return computeFacets(await getCatalog(), q);
 }
+
+/**
+ * Busca por id, **preservando a ordem pedida**.
+ *
+ * É o que sustenta a busca por imagem: o ranking vem do índice vetorial da
+ * Visant (`/api/search-by-image`), que devolve ids ordenados por similaridade, e
+ * a renderização continua sendo a do catálogo de sempre — um formato de card só.
+ * Ordenar aqui pelo catálogo (alfabético) jogaria fora exatamente a informação
+ * pela qual se chamou o vetor.
+ *
+ * Id que não está no catálogo simplesmente não volta: é item sem PSD resolvido
+ * ou fora do recorte do grid, e inventar um card vazio seria a UI mentindo sobre
+ * o que ela tem.
+ */
+export async function refsByIds(ids: string[]): Promise<SearchDoc[]> {
+  if (!ids.length) return [];
+  const docs = await getCatalog();
+  const byId = new Map(docs.map((d) => [d.id, d]));
+  const out: SearchDoc[] = [];
+  for (const id of ids) {
+    const doc = byId.get(id);
+    if (doc) out.push(doc);
+  }
+  return out;
+}

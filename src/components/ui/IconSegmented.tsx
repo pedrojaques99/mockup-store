@@ -59,7 +59,7 @@ export function IconSegmented<T extends string>({
               aria-pressed={on}
               onClick={() => onChange(o.value)}
               className={cn(
-                "flex items-center justify-center py-1.5 rounded-lg border text-[10px] font-medium transition-all active:scale-95",
+                "flex items-center justify-center py-1.5 rounded-lg border text-[10px] font-medium transition-[color,background-color,border-color,box-shadow,opacity,transform] [transition-duration:var(--dur-fast)] active:scale-95",
                 on ? SELECTED[o.variant ?? variant] : IDLE,
               )}
             >

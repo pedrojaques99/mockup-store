@@ -140,21 +140,21 @@ export default function ArtFramePanel({
         <div className="flex gap-0.5 shrink-0 bg-neutral-950 border border-neutral-800 rounded-lg p-0.5">
           <button
             onClick={() => setMode("cover")}
-            className={`p-1.5 rounded-md transition-all ${frame.mode === "cover" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
+            className={`p-1.5 rounded-md transition-colors ${frame.mode === "cover" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
             title="Cover — preenche cortando"
           >
             <Crop className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setMode("contain")}
-            className={`p-1.5 rounded-md transition-all ${frame.mode === "contain" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
+            className={`p-1.5 rounded-md transition-colors ${frame.mode === "contain" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
             title="Fit — arte inteira visível"
           >
             <Minimize2 className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setMode("stretch")}
-            className={`p-1.5 rounded-md transition-all ${frame.mode === "stretch" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
+            className={`p-1.5 rounded-md transition-colors ${frame.mode === "stretch" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
             title="Esticar — distorce para preencher"
           >
             <Maximize2 className="w-3.5 h-3.5" />
@@ -164,7 +164,7 @@ export default function ArtFramePanel({
         {onClear && (
           <button
             onClick={onClear}
-            className="p-1.5 rounded-lg text-neutral-600 hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0"
+            className="p-1.5 rounded-lg text-neutral-600 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0"
             title="Remover arte"
           >
             <X className="w-3.5 h-3.5" />
@@ -185,12 +185,12 @@ export default function ArtFramePanel({
             return (
               <button key={String(o.v)} type="button" title={o.title}
                 onClick={() => onFrameChange((f) => ({ ...f, bg: o.v }))}
-                className={`w-5 h-5 rounded-full border transition-all ${on ? "ring-2 ring-acc2 border-acc2" : "border-neutral-700 hover:border-neutral-500"}`}
+                className={`w-5 h-5 rounded-full border transition-colors ${on ? "ring-2 ring-acc2 border-acc2" : "border-neutral-700 hover:border-neutral-500"}`}
                 style={o.style} />
             );
           })}
           {/* Cor personalizada */}
-          <label className={`w-5 h-5 rounded-full border grid place-items-center cursor-pointer overflow-hidden transition-all ${frame.bg && !["#ffffff", "#000000"].includes(frame.bg.toLowerCase()) ? "ring-2 ring-acc2 border-acc2" : "border-neutral-700 hover:border-neutral-500"}`}
+          <label className={`w-5 h-5 rounded-full border grid place-items-center cursor-pointer overflow-hidden transition-colors ${frame.bg && !["#ffffff", "#000000"].includes(frame.bg.toLowerCase()) ? "ring-2 ring-acc2 border-acc2" : "border-neutral-700 hover:border-neutral-500"}`}
             title="Cor personalizada"
             style={{ background: frame.bg && !["#ffffff", "#000000"].includes(frame.bg.toLowerCase()) ? frame.bg : "conic-gradient(red,orange,yellow,lime,cyan,blue,magenta,red)" }}>
             <input type="color" value={frame.bg ?? "#ffffff"} onChange={(e) => onFrameChange((f) => ({ ...f, bg: e.target.value }))}

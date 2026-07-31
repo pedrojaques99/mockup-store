@@ -50,9 +50,13 @@ import {
   type FrameConfig,
   renderFramedArt,
 } from "@/lib/art-frame";
+import { decideFraming, sampleArtStats, type FramingDecision } from "@/lib/art-classify";
 import { dedupeRefs } from "@/lib/dedup";
 import Lottie from "lottie-react";
 import boxLoaderData from "../../public/lottie/box-loader.json";
+import IngestReviewSheet from "@/components/IngestReviewSheet";
+import { DropOverlay } from "@/components/ui/DropOverlay";
+import { Toaster, toast } from "sonner";
 
 // Reveal-on-hover clássico (opacity-0 + group-hover) esconde a ação primária
 // pra sempre em tablet/touch (sem :hover) e não reage a foco de teclado — a
@@ -72,6 +76,7 @@ function MockupCardImpl({
   onHide,
   thumbSize,
   renderedUrl,
+  enterDelay,
 }: {
   mockup: Reference;
   selected: boolean;
@@ -82,6 +87,7 @@ function MockupCardImpl({
   onHide: (mockup: Reference) => void;
   thumbSize: number;
   renderedUrl?: string;
+  enterDelay: number;
 }) {
   const hasImage = !!mockup.referenceImageUrl;
 
@@ -102,7 +108,12 @@ function MockupCardImpl({
           onSelect(mockup);
         }
       }}
-      className={`group relative rounded-2xl overflow-hidden border transition-all duration-300 text-left bg-neutral-900/40 hover:bg-neutral-900 cursor-pointer ${
+      // Cascata de entrada CURTA e capada (ver `enterDelay` no grid). Em CSS e
+      // não num `motion.div`: envolver 60 cards memoizados num componente de
+      // animação desfaz exatamente a memoização que segurou o INP desta página.
+      // `fill-mode-backwards` para o card não piscar visível antes do delay.
+      style={{ animationDelay: `${enterDelay}ms` }}
+      className={`group relative rounded-2xl overflow-hidden border transition-colors [transition-duration:var(--dur-slow)] text-left bg-neutral-900/40 hover:bg-neutral-900 cursor-pointer animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards ${
         selected ? "border-white ring-4 ring-white/10 shadow-2xl" : "border-neutral-800 hover:border-neutral-700"
       }`}
     >
@@ -112,7 +123,7 @@ function MockupCardImpl({
             src={mockup.referenceImageUrl}
             alt={mockup.name}
             fill
-            className="object-cover transition-transform duration-700 group-hover:scale-110"
+            className="object-cover transition-transform [transition-duration:var(--dur-slow)] group-hover:scale-[1.04]"
             sizes={`${thumbSize * 1.5}px`}
             loading="lazy"
           />
@@ -126,7 +137,7 @@ function MockupCardImpl({
           <img
             src={renderedUrl}
             alt="Render aplicado"
-            className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500"
+            className="absolute inset-0 w-full h-full object-cover transition-opacity [transition-duration:var(--dur-slow)]"
           />
         )}
 
@@ -151,9 +162,9 @@ function MockupCardImpl({
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className={`absolute inset-0 bg-black/40 transition-all duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
+            className={`absolute inset-0 bg-black/40 transition-colors duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-all active:scale-90 shadow-2xl uppercase tracking-widest">
+            <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl uppercase tracking-widest">
               Abrir
             </span>
           </a>
@@ -164,16 +175,16 @@ function MockupCardImpl({
             type="button"
             onClick={(e) => { e.stopPropagation(); onApply(mockup); }}
             title="Aplicar arte neste mockup"
-            className={`absolute inset-0 bg-black/40 transition-all duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
+            className={`absolute inset-0 bg-black/40 transition-colors duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-all active:scale-90 shadow-2xl uppercase tracking-widest">
+            <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl uppercase tracking-widest">
               Aplicar
             </span>
           </button>
         )}
 
         {!isRendering && (
-          <div className="absolute top-2 left-2 z-20 flex gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all">
+          <div className="absolute top-2 left-2 z-20 flex gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-[color,background-color,border-color,opacity]">
             {mockup.psdPath && (
               <button
                 type="button"
@@ -182,7 +193,7 @@ function MockupCardImpl({
                   fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: mockup.psdPath }) });
                 }}
                 title="Abrir pasta do PSD"
-                className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-all active:scale-90 shadow-xl"
+                className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl"
               >
                 <Folder className="w-3.5 h-3.5" />
               </button>
@@ -191,7 +202,7 @@ function MockupCardImpl({
               type="button"
               onClick={(e) => { e.stopPropagation(); onHide(mockup); }}
               title="Esconder este mockup"
-              className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-all active:scale-90 shadow-xl"
+              className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl"
             >
               <EyeOff className="w-3.5 h-3.5" />
             </button>
@@ -272,7 +283,7 @@ function SuggestionCard({
           onSelect();
         }
       }}
-      className={`group relative w-48 shrink-0 rounded-2xl overflow-hidden border text-left transition-all duration-300 bg-neutral-900/40 hover:bg-neutral-900 cursor-pointer ${
+      className={`group relative w-48 shrink-0 rounded-2xl overflow-hidden border text-left transition-colors duration-300 bg-neutral-900/40 hover:bg-neutral-900 cursor-pointer ${
         selected ? "border-white ring-4 ring-white/10 shadow-2xl scale-105 z-10" : "border-neutral-800 hover:border-neutral-700"
       }`}
     >
@@ -282,7 +293,7 @@ function SuggestionCard({
             src={ref.referenceImageUrl} 
             alt={ref.name} 
             fill 
-            className="object-cover transition-transform duration-700 group-hover:scale-110"
+            className="object-cover transition-transform [transition-duration:var(--dur-slow)] group-hover:scale-[1.04]"
             sizes="192px"
             loading="lazy"
           />
@@ -307,9 +318,9 @@ function SuggestionCard({
             type="button"
             onClick={(e) => { e.stopPropagation(); onApply(); }}
             title="Aplicar arte neste mockup"
-            className={`absolute inset-0 bg-black/40 transition-all duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
+            className={`absolute inset-0 bg-black/40 transition-colors duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[10px] font-black px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition-all active:scale-90 shadow-2xl uppercase tracking-widest">
+            <span className="bg-white text-black text-[10px] font-black px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl uppercase tracking-widest">
               Aplicar
             </span>
           </button>
@@ -454,15 +465,14 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [expandedDims, setExpandedDims] = useState<Set<string>>(new Set());
-  const [ingesting, setIngesting] = useState(false);
   const [ingestResult, setIngestResult] = useState<string | null>(null);
   const [folderInput, setFolderInput] = useState("");
-  const [showFolderInput, setShowFolderInput] = useState(false);
-  // Wizard: step 0=hidden, 1=path input, 2=confirm preview
+  // Wizard: step 0=escondido, 1=caminho da pasta. O antigo passo 2 ("confirmar"
+  // com duas contagens) virou a tela de revisão — confirmar uma escrita
+  // irreversível vendo só dois números não é confirmar, é apostar.
   const [wizardStep, setWizardStep] = useState(0);
-  const [wizardPreview, setWizardPreview] = useState<{ psdCount: number; refCount: number } | null>(null);
-  const [wizardScanError, setWizardScanError] = useState<string | null>(null);
-  const [wizardScanning, setWizardScanning] = useState(false);
+  /** Pasta em revisão — abre o IngestReviewSheet, que faz o pré-voo sozinho. */
+  const [reviewPath, setReviewPath] = useState<string | null>(null);
 
   const [visantConnected, setVisantConnected] = useState<boolean | null>(null);
   const [visantLoginUrl, setVisantLoginUrl] = useState<string | null>(null);
@@ -639,6 +649,17 @@ export default function Home() {
 
   const pendingRenderRef = useRef<Reference | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Contexto do enquadramento automático em REFS: `handleArtSelect` é chamada de
+  // dentro de listeners registrados uma vez (colar, soltar na página), que
+  // congelariam a closure na primeira renderização e decidiriam o enquadramento
+  // com o mockup e a marca de quando a página abriu.
+  const psdInfoRef = useRef<PsdInfo | null>(null);
+  const soDimsRef = useRef<{ w?: number; h?: number }>({});
+  const brandColorRef = useRef<string | null>(null);
+  /** Última decisão automática — mostrada ao usuário, nunca silenciosa. */
+  const [framingHint, setFramingHint] = useState<(FramingDecision & { slot: number }) | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -744,6 +765,10 @@ export default function Home() {
     setPage(1);
     setHasMore(true);
     setInitialLoad(true);
+    // Mexer num filtro textual sai da busca por imagem — os dois disputam o
+    // mesmo grid, e manter o chip aceso enquanto a lista já é outra seria a UI
+    // dizendo que está filtrando por algo que não está mais valendo.
+    setImageSearch(null);
     fetchPage(1, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlReady, search, studio, aspect, activeTags, tagMode]);
@@ -922,10 +947,31 @@ export default function Home() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing =
+        !!el &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+
+      // `/` e ⌘K/Ctrl+K levam ao campo de busca — o gesto que todo app de
+      // catálogo já colocou no dedo do usuário. Nunca sequestra o `/` de quem
+      // está digitando.
+      if (!typing && (e.key === "/" || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k"))) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
       if (e.key === "Escape") {
         if (fullscreen) { setFullscreen(false); return; }
+        if (typing && el === searchInputRef.current) { el.blur(); return; }
         if (selected) { setSelected(null); return; }
       }
+
+      // Setas navegam o grid — mas não enquanto se digita (senão a seta que
+      // deveria mover o cursor no campo troca o mockup selecionado) e não com
+      // modificador (⌥→ é "pular palavra" do sistema, não "próximo card").
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
       if (!selected || !refs.length) return;
       const idx = refs.findIndex((r) => r.id === selected.id);
       if (idx === -1) return;
@@ -1015,6 +1061,97 @@ export default function Home() {
     searchTimerRef.current = setTimeout(() => setSearch(value), 300);
   };
 
+  // ── Busca por imagem ──────────────────────────────────────────────────────
+  // `/api/search-by-image` (índice vetorial da Visant) existia desde o commit da
+  // busca unificada e NUNCA teve interface: capacidade construída, paga e nunca
+  // entregue. Aqui ela vira um botão ao lado da busca textual.
+  const [imageSearch, setImageSearch] = useState<{ thumb: string; count: number } | null>(null);
+  const [imageSearching, setImageSearching] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Reduz a imagem antes de mandar. O embedding olha estrutura, não pixel a
+   * pixel — subir 20 MB de PNG só compra latência. 512px no maior lado é o
+   * suficiente e cabe folgado no corpo da requisição.
+   */
+  const toSearchPayload = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Não deu para ler o arquivo"));
+      reader.onload = () => {
+        const img = new window.Image();
+        img.onerror = () => reject(new Error("Arquivo de imagem inválido"));
+        img.onload = () => {
+          const scale = Math.min(1, 512 / Math.max(img.naturalWidth, img.naturalHeight));
+          const cv = document.createElement("canvas");
+          cv.width = Math.max(1, Math.round(img.naturalWidth * scale));
+          cv.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          cv.getContext("2d")!.drawImage(img, 0, 0, cv.width, cv.height);
+          resolve(cv.toDataURL("image/jpeg", 0.82));
+        };
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const runImageSearch = useCallback(async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Busca por imagem precisa de uma imagem", { description: file.name });
+      return;
+    }
+    setImageSearching(true);
+    try {
+      const dataUrl = await toSearchPayload(file);
+      const res = await fetch("/api/search-by-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: dataUrl, limit: 60 }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        // 401 é "faça login", 502 é "o serviço caiu" — a rota já separa os dois
+        // e a mensagem tem de separar também, senão manda tentar de novo quem
+        // só precisa conectar.
+        if (res.status === 401) {
+          toast.error("Conecte a Visant para buscar por imagem", {
+            description: "A busca visual usa o índice vetorial da conta.",
+          });
+        } else {
+          toast.error("A busca por imagem falhou", { description: d.error });
+        }
+        return;
+      }
+      const ids: string[] = (d.matches ?? []).map((m: { id: string }) => m.id).filter(Boolean);
+      if (!ids.length) {
+        toast("Nenhum mockup parecido", { description: "Nada no índice se aproximou dessa imagem." });
+        return;
+      }
+      const hydrate = await fetch(`/api/references?ids=${encodeURIComponent(ids.join(","))}`);
+      const page = await hydrate.json();
+      const found: Reference[] = page.references ?? [];
+
+      setRefs(found);
+      setTotal(found.length);
+      setHasMore(false);
+      setFetchError(null);
+      setInitialLoad(false);
+      setImageSearch({ thumb: dataUrl, count: found.length });
+    } catch (err) {
+      toast.error("A busca por imagem falhou", {
+        description: String((err as Error)?.message ?? err),
+      });
+    } finally {
+      setImageSearching(false);
+    }
+  }, []);
+
+  /** Volta pro catálogo normal — o filtro por imagem é sempre reversível. */
+  const clearImageSearch = useCallback(() => {
+    setImageSearch(null);
+    setHasMore(true);
+    fetchPage(1, false);
+  }, [fetchPage]);
+
   // Copia o render pro clipboard como PNG (preview vem em JPEG → converte)
   const copyRenderAsPng = async () => {
     if (!renderResult) return;
@@ -1035,12 +1172,26 @@ export default function Home() {
       setCopiedPng(true);
       setTimeout(() => setCopiedPng(false), 1500);
     } catch (err) {
+      // Só o console não serve: o botão voltava ao normal e nada ia pro
+      // clipboard — indistinguível de sucesso pra quem está olhando a tela.
       console.error("Copiar PNG falhou:", err);
+      toast.error("Não deu para copiar o PNG", {
+        description: String((err as Error)?.message ?? err),
+      });
     }
   };
 
   const handleArtSelect = (file: File, slotIdx?: number) => {
-    if (!file.type.startsWith("image/")) return;
+    // Antes esta guarda era um `return` mudo: arrastar um PDF (ou um .ai, ou uma
+    // pasta) na ação PRIMÁRIA do produto não dava retorno nenhum — o usuário
+    // ficava olhando para uma tela que não mudou, sem saber se o arquivo não
+    // serve ou se o app travou. Falha silenciosa é a pior das mentiras de estado.
+    if (!file.type.startsWith("image/")) {
+      toast.error("Esse arquivo não é uma imagem", {
+        description: `${file.name} — use PNG, JPG, WEBP ou SVG.`,
+      });
+      return;
+    }
     const idx = slotIdx ?? activeSlotRef.current;
     setRenderResult(null);
     const reader = new FileReader();
@@ -1048,16 +1199,47 @@ export default function Home() {
       const url = reader.result as string;
       const img = new window.Image();
       img.onload = () => {
+        // Enquadramento decidido na entrada, não deixado no default.
+        //
+        // A regra do projeto (AGENTS.md: *layout = cover; logo = contain + fundo
+        // da marca*) existia só em documento — toda arte caía em `DEFAULT_FRAME`
+        // (cover, sem fundo) e o logo do cliente saía CORTADO nas bordas do
+        // billboard. É o erro mais caro e mais silencioso deste produto: o PNG
+        // fica bonito e a marca, decepada.
+        //
+        // A superfície ativa entra na conta: arte na proporção da face não
+        // precisa de tarja, e é isso que separa "logo" de "layout full-bleed
+        // com fundo sólido" — que as duas heurísticas de pixel confundiriam.
+        const faceNow = psdInfoRef.current?.faces?.[idx];
+        const soW = faceNow?.innerWidth || soDimsRef.current.w;
+        const soH = faceNow?.innerHeight || soDimsRef.current.h;
+        let frame = DEFAULT_FRAME;
+        let decision: FramingDecision | null = null;
+        try {
+          const isVector = file.type.includes("svg") || /\.svgz?$/i.test(file.name);
+          decision = decideFraming(sampleArtStats(img, isVector), {
+            soAspect: soW && soH ? soW / soH : undefined,
+            brandColor: brandColorRef.current,
+          });
+          frame = { ...DEFAULT_FRAME, mode: decision.mode, bg: decision.bg };
+        } catch {
+          // Heurística é conveniência: se ela falhar, o comportamento antigo
+          // continua valendo. Nunca impede a arte de entrar.
+        }
+
         setArtSlots((s) => ({
           ...s,
           [idx]: {
             file,
             preview: url,
             dims: { width: img.naturalWidth, height: img.naturalHeight },
-            frame: DEFAULT_FRAME,
+            frame,
             img,
           },
         }));
+        // A decisão é automática, então tem de ser VISÍVEL e reversível — o
+        // painel de enquadramento continua mandando mais que a heurística.
+        if (decision) setFramingHint({ ...decision, slot: idx });
       };
       img.src = url;
     };
@@ -1075,6 +1257,54 @@ export default function Home() {
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
+  }, []);
+
+  // Soltar arte em QUALQUER lugar da página.
+  //
+  // O contador de profundidade não é capricho: `dragleave` dispara toda vez que
+  // o ponteiro cruza a borda de um filho, então um `setDragging(false)` direto
+  // faz o overlay piscar sem parar por cima de um grid com 60 cards. Contar
+  // enter/leave é o único jeito estável de saber que o arrasto saiu da janela.
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+  useEffect(() => {
+    const hasFile = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types || []).includes("Files");
+
+    const onEnter = (e: DragEvent) => {
+      if (!hasFile(e)) return;
+      dragDepth.current++;
+      setDragging(true);
+    };
+    const onOver = (e: DragEvent) => {
+      // Sem isto o navegador ABRE o arquivo solto e o trabalho da sessão some.
+      if (hasFile(e)) e.preventDefault();
+    };
+    const onLeave = (e: DragEvent) => {
+      if (!hasFile(e)) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (dragDepth.current === 0) setDragging(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      dragDepth.current = 0;
+      setDragging(false);
+      if (!hasFile(e)) return;
+      e.preventDefault();
+      const file = e.dataTransfer?.files?.[0];
+      if (file) handleArtSelect(file);
+    };
+
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Builds the arts array (framed art per slot) — shared between preview and export.
@@ -1205,6 +1435,9 @@ export default function Home() {
       if (!res.ok) {
         const err = await res.json();
         setRenderLogs([{ step: "error", detail: err.error }]);
+        // O log só aparece se o usuário abrir o painel de logs — o entregável
+        // final falhando precisa avisar sozinho.
+        toast.error("O render falhou", { description: err.error });
         return;
       }
 
@@ -1242,10 +1475,14 @@ export default function Home() {
         const url = `/api/render?jobId=${completedJobId}`;
         setRenderResult(url);
         setIsPreviewResult(false);
+        // Só o render FINAL entra na sessão. Antes o cache guardava preview e
+        // final com a mesma cara, então "Baixar todos" misturava JPEG de prévia
+        // com PNG de entrega e ninguém via a diferença até abrir os arquivos.
         setRenderCache((c) => ({ ...c, [selected.id]: { url, name: selected.name } }));
       }
     } catch (err) {
       setRenderLogs((prev) => [...prev, { step: "error", detail: String(err) }]);
+      toast.error("O render falhou", { description: String((err as Error)?.message ?? err) });
     } finally {
       if (renderTimerRef.current) clearInterval(renderTimerRef.current);
       setRendering(false);
@@ -1307,6 +1544,18 @@ export default function Home() {
     [hiddenIds, persistHidden]
   );
 
+  /** Há algum recorte aplicado? Separa "acervo vazio" de "filtro sem resultado". */
+  const hasActiveFilters = !!(search || studio || aspect || activeTags.length || imageSearch);
+
+  const clearAllFilters = useCallback(() => {
+    setSearch("");
+    setStudio("");
+    setAspect("");
+    setActiveTags([]);
+    setImageSearch(null);
+    if (searchInputRef.current) searchInputRef.current.value = "";
+  }, []);
+
   // Grid: tira ocultados manualmente, depois colapsa duplicados.
   const { kept: displayRefs, hiddenDupes } = useMemo(() => {
     const visible = hiddenIds.size ? refs.filter((r) => !hiddenIds.has(r.id)) : refs;
@@ -1326,72 +1575,44 @@ export default function Home() {
   const toggleTag = (tag: string) => {
     setActiveTags((prev) => {
       if (prev.includes(tag)) return prev.filter((t) => t !== tag);
-      if (prev.length >= MAX_TAGS) return prev; // teto de 5 tags simultâneas
+      // No teto, a versão anterior devolvia `prev` — o clique não fazia NADA e
+      // o usuário não tinha como saber por quê. Agora a tag mais antiga sai e a
+      // nova entra: o teto continua valendo e o clique sempre tem consequência.
+      if (prev.length >= MAX_TAGS) return [...prev.slice(1), tag];
       return [...prev, tag];
     });
-  };
-
-  const handleIngestFolder = async () => {
-    const path = folderInput.trim();
-    if (!path) return;
-    setIngesting(true);
-    setIngestResult(null);
-    try {
-      const res = await fetch("/api/ingest-folder", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folderPath: path }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setIngestResult(`Erro: ${data.error}`);
-        return;
-      }
-      setIngestResult(
-        `+${data.referencesCreated} refs, ${data.psdOnlyCreated} PSDs, ${data.psdMetadataScanned} scanned`
-      );
-      setFolderInput("");
-      setShowFolderInput(false);
-      setWizardStep(0);
-      fetch("/api/references/studios").then((r) => r.json()).then(setStudios);
-      fetchPage(1, false);
-    } catch (err) {
-      setIngestResult(`Erro: ${String(err)}`);
-    } finally {
-      setIngesting(false);
-    }
   };
 
   const openFolderWizard = () => {
     setFolderInput("");
     setWizardStep(1);
-    setWizardPreview(null);
-    setWizardScanError(null);
     setIngestResult(null);
   };
 
-  const wizardScan = async () => {
+  /** Abre a revisão. O pré-voo (hash + triagem) roda dentro da folha. */
+  const openReview = () => {
     const path = folderInput.trim();
     if (!path) return;
-    setWizardScanning(true);
-    setWizardScanError(null);
-    try {
-      const res = await fetch(`/api/ingest-folder/scan?path=${encodeURIComponent(path)}`);
-      const data = await res.json();
-      if (!res.ok) { setWizardScanError(data.error || `HTTP ${res.status}`); return; }
-      setWizardPreview({ psdCount: data.psdCount ?? 0, refCount: data.refCount ?? 0 });
-      setWizardStep(2);
-    } catch (err) {
-      setWizardScanError(String(err));
-    } finally {
-      setWizardScanning(false);
-    }
+    setReviewPath(path);
   };
 
-  const wizardConfirm = async () => {
-    await handleIngestFolder();
-    setWizardStep(0);
-  };
+  const handleIngested = useCallback(
+    (report: { referencesCreated: number; psdOnlyCreated: number; psdMetadataScanned: number }) => {
+      setIngestResult(
+        `+${report.referencesCreated} refs · ${report.psdOnlyCreated} PSDs · ${report.psdMetadataScanned} analisados`,
+      );
+      setFolderInput("");
+      setWizardStep(0);
+      // Facetas saem do MESMO catálogo do grid — recarrega as duas ou o dropdown
+      // passa a prometer estúdio que a listagem ainda não conhece.
+      fetch("/api/references/facets?has_psd=true")
+        .then((r) => r.json())
+        .then((f) => { setStudios(f.studios ?? []); setAspects(f.aspects ?? []); })
+        .catch(() => {});
+      fetchPage(1, false);
+    },
+    [fetchPage],
+  );
 
   const activeSoName = selectedSo || selected?.smartObjectName || "";
   const selectedSoInfo =
@@ -1403,10 +1624,44 @@ export default function Home() {
   const soWidth = activeFace?.innerWidth || selectedSoInfo?.innerWidth || selected?.soInnerWidth;
   const soHeight = activeFace?.innerHeight || selectedSoInfo?.innerHeight || selected?.soInnerHeight;
 
+  // Espelhos para o enquadramento automático (ver os refs lá em cima).
+  useEffect(() => { psdInfoRef.current = psdInfo; }, [psdInfo]);
+  useEffect(() => { soDimsRef.current = { w: soWidth, h: soHeight }; }, [soWidth, soHeight]);
+  useEffect(() => {
+    // A cor de fundo do logo é a da marca — prefere a que estiver marcada como
+    // primária; sem papel declarado, a primeira da paleta.
+    const cols = brands.find((b) => b.id === brandId)?.colors ?? [];
+    const primary = cols.find((c) => /primary|primária|principal/i.test(c.role ?? ""));
+    brandColorRef.current = (primary ?? cols[0])?.hex ?? null;
+  }, [brandId, brands]);
+
+  // A dica de enquadramento acompanha a arte: trocar de slot ou limpar a arte
+  // não pode deixar na tela uma explicação sobre algo que não está mais lá.
+  useEffect(() => {
+    if (!framingHint) return;
+    if (framingHint.slot !== activeSlot || !artSlots[framingHint.slot]?.preview) {
+      setFramingHint(null);
+    }
+  }, [framingHint, activeSlot, artSlots]);
+
   const renderDisabled =
     filledCount === 0 ||
     rendering ||
     (faces.length === 0 && psdInfo != null && psdInfo.smartObjects.length > 1 && !selectedSo);
+
+  /**
+   * Aviso de baixa resolução.
+   *
+   * As duas pontas já eram conhecidas — as dimensões internas do Smart Object
+   * (`soWidth/soHeight`) e as da arte (`artDims`) — e ninguém as comparava: o
+   * render saía borrado e o usuário só descobria abrindo o PNG final. Acima de
+   * 1.5× de ampliação o artefato fica visível a olho nu no mockup.
+   */
+  const upscale =
+    artDims && soWidth && soHeight
+      ? Math.max(soWidth / artDims.width, soHeight / artDims.height)
+      : 0;
+  const lowRes = upscale > 1.5;
 
   // Auto-preview: dispara handleRender(true) 600ms após crop/zoom parar
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1429,35 +1684,41 @@ export default function Home() {
   return (
     <div className="flex flex-col h-screen bg-neutral-950 text-white selection:bg-white/10 selection:text-white overflow-hidden">
       {/* Top Header */}
-      <header className="h-14 border-b border-neutral-900 bg-neutral-950/50 backdrop-blur-md flex items-center justify-between px-4 shrink-0 z-20">
-        <div className="flex items-center gap-4">
+      <header className="h-14 border-b border-neutral-900 bg-neutral-950/50 backdrop-blur-md flex items-center justify-between gap-2 px-4 shrink-0 z-20">
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0 shrink">
           <button 
             onClick={() => {
               const panel = leftPanelRef.current;
               if (panel) panel.isCollapsed() ? panel.expand() : panel.collapse();
             }}
-            className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-all active:scale-95"
+            className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
             title="Toggle Sidebar"
           >
             <PanelLeft className="w-5 h-5" />
           </button>
           
-          <div className="flex items-center gap-2 pr-4 border-r border-neutral-900">
+          <div className="flex items-center gap-2 pr-2 sm:pr-4 border-r border-neutral-900 shrink-0">
             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center">
               <div className="w-3.5 h-3.5 bg-black rounded-sm" />
             </div>
-            <h1 className="text-sm font-black tracking-tighter uppercase">Boxy Store</h1>
+            <h1 className="text-sm font-black tracking-tighter uppercase hidden sm:block">Boxy Store</h1>
           </div>
 
           <Link
             href="/photo-mockup"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-all border border-neutral-800 hover:border-neutral-600"
+            title="Scene Maker"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-colors border border-neutral-800 hover:border-neutral-600 shrink-0"
           >
-            <Camera className="w-3.5 h-3.5" />
-            Scene Maker
+            <Camera className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden lg:inline">Scene Maker</span>
           </Link>
 
-          <div className="flex items-center gap-6 pl-2">
+          {/* O header não cabia numa janela estreita: a raiz é `overflow-hidden`,
+              então nada rolava — o campo de busca simplesmente saía da tela e
+              ficava INALCANÇÁVEL (medido a 390px: 24 elementos cortados, busca
+              começando em x≈676). O que é secundário desaparece primeiro; o que
+              é a ação de todo dia fica. */}
+          <div className="hidden xl:flex items-center gap-6 pl-2 shrink-0">
             <div className="flex items-center gap-3">
               <LayoutGrid className="w-4 h-4 text-neutral-600" />
               <input 
@@ -1474,30 +1735,92 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="flex-1 max-w-xl px-8">
-          <div className="relative group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500 group-focus-within:text-white transition-colors" />
-            <input
-              type="search"
-              placeholder="Buscar mockups..."
-              defaultValue={search}
-              onChange={(e) => handleSearchInput(e.target.value)}
-              className="w-full h-9 rounded-full bg-neutral-900/50 border border-neutral-800 pl-10 pr-4 text-xs placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600 focus:bg-neutral-900 transition-all"
-            />
-          </div>
+        <div className="flex-1 min-w-0 max-w-xl px-2 lg:px-8">
+          {imageSearch ? (
+            // O chip SUBSTITUI o campo: com um ranking por imagem no grid, um
+            // campo de texto vazio ao lado convidaria a digitar e derrubar o
+            // resultado sem avisar. A saída é explícita e sempre reversível.
+            <div className="flex items-center gap-3 h-9 rounded-full bg-acc/10 border border-acc/25 pl-1.5 pr-1.5 animate-in fade-in zoom-in-95 duration-200">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imageSearch.thumb} alt="" className="w-6 h-6 rounded-full object-cover border border-acc/30 shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-acc truncate">
+                Parecidos com a imagem · {imageSearch.count}
+              </span>
+              <button
+                onClick={clearImageSearch}
+                title="Voltar ao catálogo"
+                className="ml-auto w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-acc/70 hover:text-white hover:bg-acc/20 transition-colors active:scale-90"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <div className="relative group flex items-center gap-2">
+              <div className="relative flex-1 min-w-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500 group-focus-within:text-white transition-colors" />
+                <input
+                  ref={searchInputRef}
+                  type="search"
+                  placeholder="Buscar mockups…    /"
+                  defaultValue={search}
+                  onChange={(e) => handleSearchInput(e.target.value)}
+                  className="w-full h-9 rounded-full bg-neutral-900/50 border border-neutral-800 pl-10 pr-9 text-xs placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600 focus:bg-neutral-900 transition-colors"
+                />
+                {/* A busca é debounced: sem isto, digitar dá 300ms de tela parada
+                    sem nenhum sinal de que algo está sendo procurado. */}
+                {loading && !initialLoad && (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600 animate-spin" />
+                )}
+              </div>
+              <button
+                onClick={() => imageInputRef.current?.click()}
+                disabled={imageSearching}
+                title="Buscar mockups parecidos com uma imagem"
+                className="shrink-0 w-9 h-9 rounded-full bg-neutral-900/50 border border-neutral-800 flex items-center justify-center text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-90 disabled:opacity-40"
+              >
+                {imageSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+              </button>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) runImageSearch(f);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+          )}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Dois números mediam coisas diferentes sem rótulo: este vinha do
+              servidor (total do recorte) e o "N ocultos" da sidebar era
+              client-side sobre a página carregada. Agora o badge diz de qual
+              universo está falando, e mostra o que está à vista quando os dois
+              divergem. */}
           {total > 0 && (
-            <div className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-[10px] font-bold text-neutral-400">
-              {total.toLocaleString()} Mockups
+            <div
+              className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-[10px] font-bold text-neutral-400"
+              title={
+                displayRefs.length !== refs.length
+                  ? `${displayRefs.length} à vista de ${refs.length} carregados · ${total.toLocaleString()} no recorte`
+                  : `${total.toLocaleString()} no recorte atual`
+              }
+            >
+              {displayRefs.length !== refs.length && (
+                <span className="text-white">{displayRefs.length} à vista · </span>
+              )}
+              {total.toLocaleString()} {hasActiveFilters ? "no filtro" : "no acervo"}
             </div>
           )}
 
           {Object.keys(renderCache).length > 0 && (
             <button
               onClick={() => { setShowSession(true); setSessionSelected(new Set()); }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300 transition-all active:scale-95"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
               title="Renders desta sessão"
             >
               <Download className="w-3.5 h-3.5" />
@@ -1507,22 +1830,27 @@ export default function Home() {
 
           <button
             onClick={() => setShowSettings(true)}
-            className="p-2 rounded-lg hover:bg-white/5 text-neutral-500 hover:text-white transition-all active:scale-95"
+            className="p-2 rounded-lg hover:bg-white/5 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
             title="Configurações avançadas"
           >
             <Settings2 className="w-4.5 h-4.5" />
           </button>
           
-          <button 
-            onClick={() => {
-              const panel = rightPanelRef.current;
-              if (panel) panel.isCollapsed() ? panel.expand() : panel.collapse();
-            }}
-            className={`p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-all active:scale-95 ${!selected ? 'opacity-20 pointer-events-none' : ''}`}
-            title="Toggle Details"
-          >
-            <PanelRight className="w-5 h-5" />
-          </button>
+          {/* Controle morto não renderiza. Sem seleção não existe painel de
+              detalhes para alternar, e um botão inerte a 20% de opacidade só
+              ocupa espaço dizendo que não serve. */}
+          {selected && (
+            <button
+              onClick={() => {
+                const panel = rightPanelRef.current;
+                if (panel) panel.isCollapsed() ? panel.expand() : panel.collapse();
+              }}
+              className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-colors active:scale-95"
+              title="Alternar painel de detalhes"
+            >
+              <PanelRight className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </header>
 
@@ -1543,7 +1871,7 @@ export default function Home() {
                 <button
                   onClick={connectVisant}
                   disabled={visantConnecting}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white text-black text-[11px] font-black px-3 py-2.5 hover:bg-neutral-200 transition-all disabled:opacity-50 active:scale-[0.98] uppercase tracking-wider"
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white text-black text-[11px] font-black px-3 py-2.5 hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] disabled:opacity-50 active:scale-[0.98] uppercase tracking-wider"
                 >
                   {visantConnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5 fill-current" />}
                   {visantConnecting ? "Aguardando..." : "Conectar Visant"}
@@ -1622,7 +1950,7 @@ export default function Home() {
                       key={key}
                       onClick={() => setAspect(on ? "" : key)}
                       title={count ? `${count} mockups` : undefined}
-                      className={`flex-1 h-9 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all active:scale-[0.98] ${
+                      className={`flex-1 h-9 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98] ${
                         on
                           ? "bg-neutral-900 border-neutral-700 text-neutral-300"
                           : "bg-transparent border-neutral-800 text-neutral-600 hover:text-neutral-400"
@@ -1636,7 +1964,7 @@ export default function Home() {
 
               <button
                 onClick={() => setHideDuplicates((v) => !v)}
-                className={`flex items-center justify-between gap-2 h-9 rounded-xl border px-3 text-[10px] font-black uppercase tracking-widest transition-all active:scale-[0.98] ${
+                className={`flex items-center justify-between gap-2 h-9 rounded-xl border px-3 text-[10px] font-black uppercase tracking-widest transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98] ${
                   hideDuplicates
                     ? "bg-neutral-900 border-neutral-700 text-neutral-300"
                     : "bg-transparent border-neutral-800 text-neutral-600 hover:text-neutral-400"
@@ -1651,14 +1979,14 @@ export default function Home() {
                     <span className="text-neutral-500 normal-case tracking-normal">{hiddenDupes} ocultos</span>
                   )}
                   <span className={`w-7 h-4 rounded-full relative transition-colors ${hideDuplicates ? "bg-emerald-500/80" : "bg-neutral-700"}`}>
-                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${hideDuplicates ? "left-3.5" : "left-0.5"}`} />
+                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-colors ${hideDuplicates ? "left-3.5" : "left-0.5"}`} />
                   </span>
                 </span>
               </button>
               {hiddenIds.size > 0 && (
                 <button
                   onClick={() => persistHidden(new Set())}
-                  className="flex items-center justify-between gap-2 h-9 rounded-xl border border-neutral-800 px-3 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-neutral-300 hover:border-neutral-600 transition-all active:scale-[0.98]"
+                  className="flex items-center justify-between gap-2 h-9 rounded-xl border border-neutral-800 px-3 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-neutral-300 hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
                 >
                   <span className="flex items-center gap-2">
                     <RotateCcw className="w-3.5 h-3.5" />
@@ -1674,7 +2002,7 @@ export default function Home() {
               <>
                 <button
                   onClick={openFolderWizard}
-                  className="w-full flex items-center justify-center gap-2.5 h-11 rounded-xl border-2 border-dashed border-neutral-800 px-4 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:border-neutral-600 hover:bg-neutral-900/50 hover:text-neutral-300 transition-all mb-2 group shadow-sm"
+                  className="w-full flex items-center justify-center gap-2.5 h-11 rounded-xl border-2 border-dashed border-neutral-800 px-4 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:border-neutral-600 hover:bg-neutral-900/50 hover:text-neutral-300 transition-colors mb-2 group shadow-sm"
                 >
                   <FolderPlus className="w-4 h-4 group-hover:scale-110 transition-transform" />
                   Adicionar pasta
@@ -1688,63 +2016,35 @@ export default function Home() {
               </>
             )}
             {wizardStep === 1 && (
-              <div className="flex flex-col gap-2 mb-2 animate-in slide-in-from-top-1 duration-300">
+              <div className="flex flex-col gap-2 mb-2 animate-in fade-in slide-in-from-top-1 duration-200">
                 <div className="flex items-center gap-2 px-1 mb-0.5">
-                  <div className="w-4 h-4 rounded-full bg-white text-black flex items-center justify-center text-[9px] font-black shrink-0">1</div>
                   <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Caminho da pasta</p>
-                  <button onClick={() => setWizardStep(0)} className="ml-auto text-neutral-600 hover:text-neutral-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => setWizardStep(0)} title="Fechar" className="ml-auto text-neutral-600 hover:text-neutral-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
                 </div>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={folderInput}
                     onChange={(e) => setFolderInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && wizardScan()}
+                    onKeyDown={(e) => e.key === "Enter" && openReview()}
                     placeholder="ex: H:/Mockups/Layouts"
                     autoFocus
                     className="flex-1 min-w-0 h-10 rounded-xl bg-neutral-900 border border-neutral-700 px-4 text-xs focus:outline-none focus:border-neutral-500 shadow-xl"
                   />
-                  <button
-                    onClick={wizardScan}
-                    disabled={wizardScanning || !folderInput.trim()}
-                    className="shrink-0 h-10 rounded-xl bg-white text-black text-[11px] font-black px-4 disabled:opacity-30 active:scale-90 transition-all shadow-lg"
-                  >
-                    {wizardScanning ? <Loader2 className="w-4 h-4 animate-spin" /> : "Scan"}
-                  </button>
+                  {/* Sem caminho não há botão morto: o primário só existe quando
+                      tem o que revisar (um primário desabilitado é mentira). */}
+                  {folderInput.trim() ? (
+                    <button
+                      onClick={openReview}
+                      className="shrink-0 h-10 rounded-xl bg-white text-black text-[11px] font-black px-4 active:scale-95 transition-[color,background-color,transform] shadow-lg uppercase tracking-widest"
+                    >
+                      Revisar
+                    </button>
+                  ) : null}
                 </div>
-                {wizardScanError && <p className="text-[10px] text-red-400 font-bold px-1">{wizardScanError}</p>}
-              </div>
-            )}
-            {wizardStep === 2 && wizardPreview && (
-              <div className="flex flex-col gap-2 mb-2 animate-in slide-in-from-top-1 duration-300">
-                <div className="flex items-center gap-2 px-1 mb-0.5">
-                  <div className="w-4 h-4 rounded-full bg-white text-black flex items-center justify-center text-[9px] font-black shrink-0">2</div>
-                  <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Confirmar</p>
-                  <button onClick={() => setWizardStep(1)} className="ml-auto text-neutral-600 hover:text-neutral-400 transition-colors text-[10px] font-bold">← voltar</button>
-                </div>
-                <div className="rounded-2xl bg-neutral-900 border border-neutral-800 p-3 flex flex-col gap-1.5">
-                  <p className="text-[10px] text-neutral-500 truncate font-mono">{folderInput}</p>
-                  <div className="flex gap-3">
-                    <div className="flex-1 bg-neutral-800/60 rounded-xl p-2 text-center">
-                      <p className="text-sm font-black text-white">{wizardPreview.psdCount}</p>
-                      <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-widest">PSDs</p>
-                    </div>
-                    <div className="flex-1 bg-neutral-800/60 rounded-xl p-2 text-center">
-                      <p className="text-sm font-black text-white">{wizardPreview.refCount}</p>
-                      <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-widest">Refs</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => setWizardStep(0)} className="flex-1 h-9 rounded-xl border border-neutral-800 text-[11px] font-black text-neutral-500 hover:bg-neutral-900 transition-all active:scale-95">Cancelar</button>
-                  <button
-                    onClick={wizardConfirm}
-                    disabled={ingesting}
-                    className="flex-1 h-9 rounded-xl bg-white text-black text-[11px] font-black disabled:opacity-30 active:scale-90 transition-all shadow-lg"
-                  >
-                    {ingesting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Ingerir"}
-                  </button>
-                </div>
+                <p className="text-[9px] text-neutral-700 font-bold uppercase tracking-widest px-1">
+                  Nada é gravado antes de você revisar
+                </p>
               </div>
             )}
           </div>
@@ -1763,7 +2063,7 @@ export default function Home() {
                           <button
                             key={m}
                             onClick={() => setTagMode(m)}
-                            className={`text-[9px] font-black px-2.5 py-1 rounded-full transition-all ${
+                            className={`text-[9px] font-black px-2.5 py-1 rounded-full transition-colors ${
                               tagMode === m ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
                             }`}
                           >
@@ -1785,7 +2085,7 @@ export default function Home() {
                     <button
                       key={t}
                       onClick={() => toggleTag(t)}
-                      className="inline-flex items-center gap-2 bg-white text-black text-[10px] font-black px-3.5 py-1.5 rounded-full hover:bg-neutral-200 transition-all shadow-xl active:scale-95"
+                      className="inline-flex items-center gap-2 bg-white text-black text-[10px] font-black px-3.5 py-1.5 rounded-full hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] shadow-xl active:scale-95"
                     >
                       {t}
                       <X className="w-3 h-3" />
@@ -1817,18 +2117,25 @@ export default function Home() {
                     <div className="flex flex-wrap gap-2 pl-7">
                       {visible.map((t) => {
                         const isActive = activeTags.includes(t.value);
-                        const capped = !isActive && activeTags.length >= MAX_TAGS;
+                        // No teto de 5 tags a versão anterior renderizava DEZENAS
+                        // de chips `disabled` — um campo de controles mortos que
+                        // o olho precisa varrer para achar os vivos. Agora o chip
+                        // continua clicável e troca a tag mais antiga: entrega a
+                        // ação que o usuário quis, em vez de uma parede.
+                        // (`scale-110` também saiu: escala dentro de flex-wrap
+                        // reflui a linha inteira a cada toggle.)
+                        const willSwap = !isActive && activeTags.length >= MAX_TAGS;
                         return (
                           <button
                             key={`${dim}-${t.value}`}
                             onClick={() => toggleTag(t.value)}
-                            disabled={capped}
-                            title={capped ? `Máximo de ${MAX_TAGS} tags` : undefined}
-                            className={`text-[10px] px-3 py-1.5 rounded-lg transition-all font-bold ${
+                            aria-pressed={isActive}
+                            title={willSwap ? `Substitui «${activeTags[0]}» (teto de ${MAX_TAGS} tags)` : undefined}
+                            className={`text-[10px] px-3 py-1.5 rounded-lg font-bold transition-[color,background-color,border-color,box-shadow] ${
                               isActive
-                                ? "bg-white text-black shadow-2xl scale-110 z-10"
-                                : capped
-                                ? "bg-neutral-900/40 text-neutral-700 border border-neutral-900 cursor-not-allowed opacity-50"
+                                ? "bg-white text-black shadow-2xl z-10"
+                                : willSwap
+                                ? "bg-neutral-900 text-neutral-600 border border-dashed border-neutral-700 hover:text-neutral-300 hover:border-neutral-500"
                                 : "bg-neutral-900 text-neutral-500 border border-neutral-800 hover:border-neutral-600 hover:text-neutral-300"
                             }`}
                           >
@@ -1854,7 +2161,7 @@ export default function Home() {
         <Panel className="relative flex flex-col bg-neutral-950 min-w-0 overflow-hidden">
           <main className="flex-1 overflow-y-auto p-8 no-scrollbar">
             {brandId && (
-              <div className="mb-12 animate-in fade-in slide-in-from-left-4 duration-700">
+              <div className="mb-12 animate-in fade-in slide-in-from-left-4 duration-300">
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-4">
                     <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-lg shadow-emerald-500/50" />
@@ -1868,12 +2175,12 @@ export default function Home() {
                       onClick={() => loadSuggestions({ force: true })}
                       disabled={loadingSuggestions}
                       title="Regenerar matches (re-analisa a marca)"
-                      className="flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-400 hover:text-white hover:border-neutral-600 transition-all active:scale-90 disabled:opacity-40"
+                      className="flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-400 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 disabled:opacity-40"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${loadingSuggestions ? "animate-spin" : ""}`} />
                       Regenerar
                     </button>
-                    <button onClick={() => setBrandId("")} className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-600 hover:text-white hover:border-neutral-600 transition-all active:scale-90"><X className="w-4 h-4" /></button>
+                    <button onClick={() => setBrandId("")} className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-600 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"><X className="w-4 h-4" /></button>
                   </div>
                 </div>
                 {suggestError ? (
@@ -1907,7 +2214,7 @@ export default function Home() {
                           loadSuggestions({ limit: next });
                         }}
                         disabled={loadingSuggestions}
-                        className="shrink-0 w-32 rounded-2xl border border-dashed border-neutral-800 flex flex-col items-center justify-center gap-2 text-neutral-600 hover:text-neutral-300 hover:border-neutral-600 transition-all active:scale-95 disabled:opacity-40"
+                        className="shrink-0 w-32 rounded-2xl border border-dashed border-neutral-800 flex flex-col items-center justify-center gap-2 text-neutral-600 hover:text-neutral-300 hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 disabled:opacity-40"
                       >
                         {loadingSuggestions ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5" />}
                         <span className="text-[10px] font-black uppercase tracking-widest">Ver mais</span>
@@ -1915,6 +2222,51 @@ export default function Home() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Filtros ativos ONDE O OLHO ESTÁ.
+                Eles moram na sidebar esquerda, que o usuário colapsa — e aí o
+                grid mostra um recorte sem dizer que é um recorte, o que faz
+                parecer que o acervo encolheu. Aqui só rendeiza o que está
+                LIGADO: filtro nenhum, barra nenhuma. */}
+            {hasActiveFilters && !initialLoad && (
+              <div className="flex flex-wrap items-center gap-2 mb-6 animate-in fade-in slide-in-from-top-1 duration-200">
+                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-700">
+                  Filtrando por
+                </span>
+                {[
+                  search && { k: "q", label: `“${search}”`, clear: () => { setSearch(""); if (searchInputRef.current) searchInputRef.current.value = ""; } },
+                  studio && { k: "studio", label: studio, clear: () => setStudio("") },
+                  aspect && {
+                    k: "aspect",
+                    label: aspect === "square" ? "1:1" : aspect === "portrait" ? "Retrato" : "Paisagem",
+                    clear: () => setAspect(""),
+                  },
+                  imageSearch && { k: "img", label: "Imagem parecida", clear: clearImageSearch },
+                  ...activeTags.map((t) => ({ k: `tag-${t}`, label: t, clear: () => toggleTag(t) })),
+                ]
+                  .filter(Boolean)
+                  .map((f) => {
+                    const chip = f as { k: string; label: string; clear: () => void };
+                    return (
+                      <button
+                        key={chip.k}
+                        onClick={chip.clear}
+                        title="Remover este filtro"
+                        className="group inline-flex items-center gap-1.5 h-7 pl-3 pr-2 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-bold text-neutral-300 hover:border-neutral-600 hover:text-white transition-colors active:scale-95"
+                      >
+                        <span className="max-w-[14rem] truncate">{chip.label}</span>
+                        <X className="w-3 h-3 text-neutral-600 group-hover:text-white transition-colors" />
+                      </button>
+                    );
+                  })}
+                <button
+                  onClick={clearAllFilters}
+                  className="h-7 px-3 rounded-full text-[9px] font-black uppercase tracking-widest text-neutral-600 hover:text-white transition-colors"
+                >
+                  Limpar tudo
+                </button>
               </div>
             )}
 
@@ -1934,7 +2286,7 @@ export default function Home() {
               // Distinto do empty-state: aqui a API falhou (Mongo offline, 500…),
               // não é "sem resultados pros filtros". Badge do header já foi
               // zerado no fetchPage pra não contradizer este grid vazio.
-              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-600 animate-in zoom-in-95 duration-500">
+              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-600 animate-in fade-in zoom-in-95 duration-200">
                 <div className="w-20 h-20 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center">
                   <AlertTriangle className="w-8 h-8 text-red-400" />
                 </div>
@@ -1944,14 +2296,38 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => fetchPage(1, false)}
-                  className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-all active:scale-[0.98]"
+                  className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   Tentar de novo
                 </button>
               </div>
+            ) : refs.length === 0 && !hasActiveFilters ? (
+              // PRIMEIRO USO — sem nenhum filtro aplicado, "redefina seus
+              // filtros" é conselho para um problema que o usuário não tem: ele
+              // não filtrou nada, o acervo é que está vazio. O estado vazio é o
+              // argumento, e o argumento aqui é a ação que resolve.
+              <div className="flex flex-col items-center justify-center h-full gap-5 animate-in fade-in zoom-in-95 duration-200">
+                <div className="w-20 h-20 rounded-3xl bg-acc/10 border border-acc/20 flex items-center justify-center">
+                  <FolderPlus className="w-9 h-9 text-acc" />
+                </div>
+                <div className="text-center max-w-sm">
+                  <p className="text-base font-black uppercase tracking-widest text-neutral-200">Seu acervo está vazio</p>
+                  <p className="text-xs font-bold text-neutral-600 mt-2 leading-relaxed">
+                    Aponte uma pasta com PSDs ou imagens de mockup. Nada é gravado antes de você
+                    revisar o que entra — duplicata e lixo já vêm desmarcados.
+                  </p>
+                </div>
+                <button
+                  onClick={() => { leftPanelRef.current?.expand(); openFolderWizard(); }}
+                  className="flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.97] shadow-xl shadow-white/5"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                  Adicionar pasta
+                </button>
+              </div>
             ) : refs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-600 animate-in zoom-in-95 duration-500">
+              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-600 animate-in fade-in zoom-in-95 duration-200">
                 <div className="w-20 h-20 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
                   <Search className="w-8 h-8 opacity-20" />
                 </div>
@@ -1959,16 +2335,64 @@ export default function Home() {
                   <p className="text-base font-black uppercase tracking-widest text-neutral-400">Nenhum mockup encontrado</p>
                   <p className="text-xs font-bold text-neutral-600 mt-2 uppercase tracking-widest">Tente redefinir seus filtros ou buscar outro termo</p>
                 </div>
+                <button
+                  onClick={clearAllFilters}
+                  className="flex items-center gap-2 h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Limpar filtros
+                </button>
+              </div>
+            ) : displayRefs.length === 0 ? (
+              // O grid renderiza `displayRefs`, mas o estado vazio testava
+              // `refs`: esconder tudo o que estava carregado dava TELA BRANCA,
+              // sem mensagem e sem caminho de volta.
+              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-600 animate-in fade-in zoom-in-95 duration-200">
+                <div className="w-20 h-20 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
+                  <EyeOff className="w-8 h-8 opacity-20" />
+                </div>
+                <div className="text-center">
+                  <p className="text-base font-black uppercase tracking-widest text-neutral-400">Tudo oculto nesta página</p>
+                  <p className="text-xs font-bold text-neutral-600 mt-2 uppercase tracking-widest">
+                    {refs.length} carregados · {hiddenDupes > 0 && `${hiddenDupes} duplicados · `}
+                    {hiddenIds.size > 0 && `${hiddenIds.size} escondidos`}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  {hideDuplicates && hiddenDupes > 0 && (
+                    <button
+                      onClick={() => setHideDuplicates(false)}
+                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                    >
+                      Mostrar duplicados
+                    </button>
+                  )}
+                  {hiddenIds.size > 0 && (
+                    <button
+                      onClick={() => persistHidden(new Set())}
+                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                    >
+                      Restaurar ocultos
+                    </button>
+                  )}
+                </div>
               </div>
             ) : (
               <>
-                <div 
-                  className="grid gap-8 transition-all duration-500"
-                  style={{ 
-                    gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` 
+                <div
+                  // Enquanto o refetch está em voo o grid mostra a lista ANTIGA
+                  // como se fosse o resultado do filtro novo. Meio-tom + cursor
+                  // de espera dizem "isto ainda é o anterior" sem tirar a lista
+                  // da tela (piscar para skeleton a cada tecla seria pior).
+                  className={`grid gap-8 transition-opacity [transition-duration:var(--dur-base)] ${
+                    loading && !initialLoad ? "opacity-50 cursor-wait" : "opacity-100"
+                  }`}
+                  aria-busy={loading}
+                  style={{
+                    gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`
                   }}
                 >
-                  {displayRefs.map((ref) => (
+                  {displayRefs.map((ref, i) => (
                     // key = ref.id sozinho (Mongo _id / scene id, já único por
                     // item) — `${id}-${i}` quebrava a reconciliação no infinite
                     // scroll porque o índice de posição muda a cada `load more`
@@ -1984,6 +2408,10 @@ export default function Home() {
                       isRendering={renderingRefId === ref.id}
                       thumbSize={thumbSize}
                       renderedUrl={renderCache[ref.id]?.url}
+                      // Teto de 240ms no atraso acumulado: `i * step` sem teto
+                      // faria o 60º card entrar quase 2s depois do primeiro —
+                      // isso não lê como cascata, lê como app travando.
+                      enterDelay={Math.min((i % 24) * 20, 240)}
                       onSelect={selectRef}
                       onApply={handleCardApply}
                       onHide={hideMockup}
@@ -2006,7 +2434,7 @@ export default function Home() {
                       <span>Falha ao carregar mais mockups — {fetchError}</span>
                       <button
                         onClick={() => fetchPage(page + 1, true)}
-                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-all active:scale-[0.98]"
+                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         Tentar de novo
@@ -2033,7 +2461,7 @@ export default function Home() {
               </span>
               <button
                 onClick={() => unhideMockup(lastHidden.id)}
-                className="flex items-center gap-2 bg-white text-black text-[10px] font-black uppercase tracking-widest px-3.5 py-2 rounded-xl hover:bg-neutral-200 transition-all active:scale-90"
+                className="flex items-center gap-2 bg-white text-black text-[10px] font-black uppercase tracking-widest px-3.5 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Desfazer
@@ -2054,17 +2482,31 @@ export default function Home() {
             maxSize="40%"
             collapsible={true}
             collapsedSize="0%"
-            className="flex flex-col bg-neutral-950 border-l border-neutral-900 shadow-2xl z-10 animate-in slide-in-from-right-8 duration-500 overflow-hidden"
+            className="flex flex-col bg-neutral-950 border-l border-neutral-900 shadow-2xl z-10 animate-in slide-in-from-right-4 duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] overflow-hidden"
           >
             <div className="p-4 border-b border-neutral-900 flex justify-between items-center shrink-0">
               <div className="min-w-0">
                 <h2 className="font-bold text-sm truncate pr-2">{selected.name}</h2>
                 <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{selected.studio}</p>
               </div>
-              <button onClick={() => setSelected(null)} className="p-1.5 rounded-lg hover:bg-neutral-900 text-neutral-500 hover:text-white transition-all active:scale-90">
+              <button onClick={() => setSelected(null)} className="p-1.5 rounded-lg hover:bg-neutral-900 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {/* O seletor de arquivo vivia DENTRO do bloco `faces.length > 0`.
+                Num PSD com smart object mas sem face editável — que renderiza
+                normalmente, via `selectedSo` — o input não existia, e o
+                "Adicionar arte" do preview chamava `fileInputRef.current?.click()`
+                num ref nulo: a ação primária do produto não fazia nada, em
+                silêncio. Fora do bloco, ele existe sempre que há mockup aberto. */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleArtSelect(f); e.target.value = ""; }}
+            />
 
             <div className="flex-1 overflow-y-auto no-scrollbar">
               <div
@@ -2074,7 +2516,7 @@ export default function Home() {
               >
                 {renderResult ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={renderResult} alt="Render" className="absolute inset-0 w-full h-full object-contain cursor-pointer transition-transform duration-500 group-hover/preview:scale-105" onClick={() => setFullscreen(true)} />
+                  <img src={renderResult} alt="Render" className="absolute inset-0 w-full h-full object-contain cursor-pointer transition-transform [transition-duration:var(--dur-slow)] group-hover/preview:scale-[1.03]" onClick={() => setFullscreen(true)} />
                 ) : selected.referenceImageUrl ? (
                   <>
                     <Image src={selected.referenceImageUrl} alt={selected.name} fill className="object-contain" priority />
@@ -2107,16 +2549,16 @@ export default function Home() {
                   </div>
                 )}
                 
-                <div className="absolute top-3 left-3 flex gap-2 opacity-0 group-hover/preview:opacity-100 transition-all translate-y-2 group-hover/preview:translate-y-0 duration-300">
+                <div className="absolute top-3 left-3 flex gap-2 opacity-0 group-hover/preview:opacity-100 transition-colors translate-y-2 group-hover/preview:translate-y-0 duration-300">
                   {renderResult && (
                     <>
-                      <button onClick={() => setFullscreen(true)} className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90">
+                      <button onClick={() => setFullscreen(true)} className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
                         <Maximize2 className="w-4 h-4" />
                       </button>
                       <button
                         onClick={copyRenderAsPng}
                         title="Copiar como PNG"
-                        className={`backdrop-blur shadow-xl w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 ${copiedPng ? "bg-emerald-500 text-black" : "bg-black/80 hover:bg-white hover:text-black text-white"}`}
+                        className={`backdrop-blur shadow-xl w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 ${copiedPng ? "bg-emerald-500 text-black" : "bg-black/80 hover:bg-white hover:text-black text-white"}`}
                       >
                         {copiedPng ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                       </button>
@@ -2125,7 +2567,7 @@ export default function Home() {
                   {selected.psdPath && (
                     <button
                       onClick={() => fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: selected.psdPath }) })}
-                      className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90"
+                      className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
                     >
                       <Folder className="w-4 h-4" />
                     </button>
@@ -2173,7 +2615,7 @@ export default function Home() {
                                   setFrame((f) => ({ ...f, cropPixels: undefined }));
                                   setArtSectionCollapsed(false);
                                 }}
-                                className={`flex items-center gap-3 px-3 py-2.5 border-b border-neutral-900/70 last:border-b-0 transition-all select-none ${
+                                className={`flex items-center gap-3 px-3 py-2.5 border-b border-neutral-900/70 last:border-b-0 transition-colors select-none ${
                                   isFace
                                     ? isActive
                                       ? "bg-white/8 cursor-pointer"
@@ -2195,7 +2637,7 @@ export default function Home() {
                                 {/* Face slot thumbnail */}
                                 {isFace ? (
                                   <div
-                                    className={`shrink-0 w-8 h-8 rounded-lg overflow-hidden border transition-all ${isActive ? "border-white/40 shadow-lg shadow-white/5" : "border-neutral-800"}`}
+                                    className={`shrink-0 w-8 h-8 rounded-lg overflow-hidden border transition-colors ${isActive ? "border-white/40 shadow-lg shadow-white/5" : "border-neutral-800"}`}
                                     onClick={(e) => { e.stopPropagation(); setActiveSlot(faceIdx); setArtSectionCollapsed(false); if (!slot?.preview) fileInputRef.current?.click(); }}
                                   >
                                     {slot?.preview ? (
@@ -2220,7 +2662,7 @@ export default function Home() {
 
                   {/* Section: Adjustments */}
                   {psdInfo && psdInfo.adjustments.filter(a => !a.hidden).length > 0 && (
-                    <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden transition-all duration-300">
+                    <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden transition-colors duration-300">
                       <button 
                         onClick={() => setShowAdjustments(!showAdjustments)}
                         className="w-full flex items-center justify-between p-4 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500 hover:bg-white/5 transition-colors"
@@ -2228,10 +2670,10 @@ export default function Home() {
                         <div className="flex items-center gap-2 text-neutral-300"><Settings2 className="w-3.5 h-3.5 text-neutral-500" /> Camadas de ajuste</div>
                         <ChevronDown className={`w-4 h-4 transition-transform duration-300 ${showAdjustments ? "" : "-rotate-90"}`} />
                       </button>
-                      <div className={`overflow-hidden transition-all duration-300 ${showAdjustments ? "max-h-[500px] border-t border-neutral-800" : "max-h-0"}`}>
+                      <div className={`overflow-hidden transition-colors duration-300 ${showAdjustments ? "max-h-[500px] border-t border-neutral-800" : "max-h-0"}`}>
                         <div className="p-2 space-y-0.5">
                           {psdInfo.adjustments.filter(a => !a.hidden).map((a, i) => (
-                            <label key={i} className={`flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer transition-all ${hiddenLayers.has(a.path || a.name) ? "opacity-40" : "hover:bg-white/5"}`}>
+                            <label key={i} className={`flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer transition-colors ${hiddenLayers.has(a.path || a.name) ? "opacity-40" : "hover:bg-white/5"}`}>
                               <input type="checkbox" checked={!hiddenLayers.has(a.path || a.name)} onChange={() => toggleLayer(a.path || a.name)} className="accent-white w-3.5 h-3.5" />
                               <span className={`text-[11px] font-bold truncate flex-1 ${hiddenLayers.has(a.path || a.name) ? "line-through" : "text-neutral-300"}`}>{a.name}</span>
                               <span className="text-[9px] font-bold text-neutral-700 uppercase">{a.type}</span>
@@ -2273,7 +2715,7 @@ export default function Home() {
                 <p className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-600 group-hover:text-neutral-400 transition-colors">
                   {faces.length > 1 && activeFace ? `Arte · ${activeFace.name}` : "Sua Arte"}
                 </p>
-                <ChevronDown className={`w-3.5 h-3.5 text-neutral-700 group-hover:text-neutral-500 transition-all duration-200 ${artSectionCollapsed ? "" : "rotate-180"}`} />
+                <ChevronDown className={`w-3.5 h-3.5 text-neutral-700 group-hover:text-neutral-500 transition-colors duration-200 ${artSectionCollapsed ? "" : "rotate-180"}`} />
               </button>
 
               {/* Conteúdo colapsável */}
@@ -2284,7 +2726,7 @@ export default function Home() {
                       onDrop={handleDrop}
                       onDragOver={(e) => e.preventDefault()}
                       onClick={() => !artPreview && fileInputRef.current?.click()}
-                      className={`rounded-2xl flex flex-col gap-2 transition-all relative ${
+                      className={`rounded-2xl flex flex-col gap-2 transition-colors relative ${
                         artPreview
                           ? "border border-neutral-800 bg-neutral-900/40 p-2"
                           : `border-2 border-dashed cursor-pointer flex items-center justify-center px-3 py-3 group ${brandId ? "flex-1" : ""} border-neutral-800 hover:border-neutral-600 bg-neutral-900/30 hover:bg-neutral-900/50`
@@ -2316,14 +2758,13 @@ export default function Home() {
                           </div>
                         </div>
                       )}
-                      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleArtSelect(f); }} />
                     </div>
 
                     {/* Brand shortcuts — só quando sem arte */}
                     {brandId && !artPreview && (
                       <div className="flex flex-col gap-2 shrink-0 w-[4.5rem]">
-                        <button onClick={(e) => { e.stopPropagation(); loadBrandLogoAsArt(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-all active:scale-95 py-1"><Zap className="w-4 h-4" /><span>Logo</span></button>
-                        <button onClick={(e) => { e.stopPropagation(); openLibrary(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-all active:scale-95 py-1"><Library className="w-4 h-4" /><span>Library</span></button>
+                        <button onClick={(e) => { e.stopPropagation(); loadBrandLogoAsArt(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 py-1"><Zap className="w-4 h-4" /><span>Logo</span></button>
+                        <button onClick={(e) => { e.stopPropagation(); openLibrary(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 py-1"><Library className="w-4 h-4" /><span>Library</span></button>
                       </div>
                     )}
                   </div>
@@ -2334,18 +2775,55 @@ export default function Home() {
 
             {/* Actions Footer */}
             <div className="p-4 border-t border-neutral-900 bg-neutral-950/80 backdrop-blur shrink-0 space-y-4 shadow-[0_-8px_24px_rgba(0,0,0,0.5)]">
+              {/* A decisão automática de enquadramento é dita em voz alta e tem
+                  desfazer ao lado. Automatismo silencioso numa etapa que produz
+                  o entregável final vira surpresa no PNG. */}
+              {framingHint && artPreview && (
+                <div className="flex items-start gap-2.5 p-3 rounded-xl bg-acc/8 border border-acc/20 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                  <Zap className="w-3.5 h-3.5 text-acc shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold text-acc leading-relaxed">
+                      {framingHint.kind === "logo" ? "Marca detectada" : "Layout detectado"} ·{" "}
+                      <span className="text-neutral-300 font-medium">{framingHint.reason}</span>
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setFrame((f) => ({
+                        ...f,
+                        mode: framingHint.mode === "cover" ? "contain" : "cover",
+                        bg: framingHint.mode === "cover" ? brandColorRef.current : null,
+                      }));
+                      setFramingHint(null);
+                    }}
+                    className="shrink-0 text-[9px] font-black uppercase tracking-widest text-neutral-500 hover:text-white transition-colors"
+                  >
+                    {framingHint.mode === "cover" ? "Encaixar" : "Preencher"}
+                  </button>
+                </div>
+              )}
+
+              {lowRes && artDims && (
+                <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-[10px] font-bold text-amber-300 leading-relaxed">
+                    Arte com {artDims.width}×{artDims.height} para uma superfície de {soWidth}×{soHeight} —
+                    ampliação de {upscale.toFixed(1)}×. O render vai sair borrado.
+                  </p>
+                </div>
+              )}
               <div className="flex gap-3">
                 <button
                   onClick={() => handleRender(true)}
                   disabled={renderDisabled}
-                  className="flex-1 py-3 rounded-xl border border-neutral-800 text-xs font-bold text-neutral-300 disabled:opacity-30 hover:bg-neutral-900 hover:text-white transition-all active:scale-[0.97]"
+                  className="flex-1 py-3 rounded-xl border border-neutral-800 text-xs font-bold text-neutral-300 disabled:opacity-30 hover:bg-neutral-900 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.97]"
                 >
                   Preview Rápido
                 </button>
                 <button
                   onClick={() => handleRender(false)}
                   disabled={renderDisabled}
-                  className="flex-1 py-3 rounded-xl bg-white text-black font-black text-xs disabled:opacity-30 hover:bg-neutral-200 transition-all active:scale-[0.97] shadow-xl shadow-white/5"
+                  className="flex-1 py-3 rounded-xl bg-white text-black font-black text-xs disabled:opacity-30 hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.97] shadow-xl shadow-white/5"
                 >
                   RENDER FINAL{faces.length > 1 ? ` · ${filledCount}/${faces.length}` : ""}
                 </button>
@@ -2353,7 +2831,7 @@ export default function Home() {
                   <button
                     onClick={() => setShowLogs(true)}
                     title="Ver logs do render"
-                    className={`px-3 py-3 rounded-xl border text-xs font-bold transition-all active:scale-[0.97] ${renderLogs.some(l => l.step === "error") ? "border-red-500/40 text-red-400 hover:bg-red-500/10" : "border-neutral-800 text-neutral-500 hover:bg-neutral-900 hover:text-white"}`}
+                    className={`px-3 py-3 rounded-xl border text-xs font-bold transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.97] ${renderLogs.some(l => l.step === "error") ? "border-red-500/40 text-red-400 hover:bg-red-500/10" : "border-neutral-800 text-neutral-500 hover:bg-neutral-900 hover:text-white"}`}
                   >
                     <Terminal className="w-4 h-4" />
                   </button>
@@ -2364,10 +2842,22 @@ export default function Home() {
                 <a
                   href={renderResult}
                   download={`${selected.name.replace(/\s+/g, "_")}_mockup.png`}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500 text-black text-xs font-black hover:bg-emerald-400 transition-all active:scale-[0.97] shadow-lg shadow-emerald-500/10"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500 text-black text-xs font-black hover:bg-emerald-400 transition-[color,background-color,transform] active:scale-[0.97] shadow-lg shadow-emerald-500/10"
                 >
                   <Download className="w-4 h-4" /> DOWNLOAD PNG
                 </a>
+              )}
+
+              {/* Depois de um preview não havia caminho até o arquivo: o botão de
+                  download só existe no render final e nada dizia isso. O beco sem
+                  saída vira a próxima ação. */}
+              {renderResult && !rendering && isPreviewResult && (
+                <button
+                  onClick={() => handleRender(false)}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-black hover:bg-emerald-500/25 transition-[color,background-color,border-color] active:scale-[0.97]"
+                >
+                  <Download className="w-4 h-4" /> GERAR PNG FINAL PARA BAIXAR
+                </button>
               )}
 
               {renderLogs.some((l) => l.step === "error") && (
@@ -2442,24 +2932,24 @@ export default function Home() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setSessionSelected(allSelected ? new Set() : new Set(entries.map(([id]) => id)))}
-                    className="px-3 py-1.5 rounded-lg border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-all"
+                    className="px-3 py-1.5 rounded-lg border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-colors"
                   >
                     {allSelected ? "Desmarcar tudo" : "Selecionar tudo"}
                   </button>
                   <button
                     onClick={() => triggerDownloads(downloadTargets)}
-                    className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-white text-black text-[10px] font-black hover:bg-neutral-200 transition-all active:scale-95"
+                    className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-white text-black text-[10px] font-black hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
                   >
                     <Download className="w-3.5 h-3.5" />
                     {sessionSelected.size > 0 ? `Baixar selecionados (${sessionSelected.size})` : "Baixar todos"}
                   </button>
                   <button
                     onClick={() => { setRenderCache({}); setShowSession(false); }}
-                    className="px-3 py-1.5 rounded-lg border border-red-500/20 text-[10px] font-bold text-red-400 hover:bg-red-500/10 transition-all"
+                    className="px-3 py-1.5 rounded-lg border border-red-500/20 text-[10px] font-bold text-red-400 hover:bg-red-500/10 transition-colors"
                   >
                     Limpar sessão
                   </button>
-                  <button onClick={() => setShowSession(false)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-white/5 transition-all ml-1">
+                  <button onClick={() => setShowSession(false)} className="p-1.5 rounded-lg text-neutral-500 hover:text-white hover:bg-white/5 transition-colors ml-1">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
@@ -2474,18 +2964,18 @@ export default function Home() {
                       <div
                         key={id}
                         onClick={() => setSessionSelected((s) => { const n = new Set(s); isChecked ? n.delete(id) : n.add(id); return n; })}
-                        className={`relative rounded-2xl overflow-hidden border cursor-pointer transition-all duration-200 group ${isChecked ? "border-white ring-2 ring-white/20" : "border-neutral-800 hover:border-neutral-600"}`}
+                        className={`relative rounded-2xl overflow-hidden border cursor-pointer transition-colors duration-200 group ${isChecked ? "border-white ring-2 ring-white/20" : "border-neutral-800 hover:border-neutral-600"}`}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={url} alt={name} className="w-full aspect-[4/3] object-cover" />
                         {/* Checkbox */}
-                        <div className={`absolute top-2 left-2 w-5 h-5 rounded-md border flex items-center justify-center transition-all ${isChecked ? "bg-white border-white" : "bg-black/50 border-neutral-600 opacity-0 group-hover:opacity-100"}`}>
+                        <div className={`absolute top-2 left-2 w-5 h-5 rounded-md border flex items-center justify-center transition-[color,background-color,border-color,opacity] ${isChecked ? "bg-white border-white" : "bg-black/50 border-neutral-600 opacity-0 group-hover:opacity-100"}`}>
                           {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-black" />}
                         </div>
                         {/* Download button */}
                         <button
                           onClick={(e) => { e.stopPropagation(); triggerDownloads([[id, { url, name }]]); }}
-                          className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-white opacity-0 group-hover:opacity-100 hover:bg-white hover:text-black transition-all"
+                          className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-white opacity-0 group-hover:opacity-100 hover:bg-white hover:text-black transition-[color,background-color,border-color,opacity]"
                           title="Download"
                         >
                           <Download className="w-3.5 h-3.5" />
@@ -2517,7 +3007,7 @@ export default function Home() {
             <div className="flex gap-2">
               <button
                 onClick={(e) => { e.stopPropagation(); copyRenderAsPng(); }}
-                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl transition-all active:scale-95 ${copiedPng ? "bg-emerald-500 text-black" : "bg-neutral-800 hover:bg-neutral-700 text-white"}`}
+                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 ${copiedPng ? "bg-emerald-500 text-black" : "bg-neutral-800 hover:bg-neutral-700 text-white"}`}
               >
                 {copiedPng ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copiedPng ? "Copiado!" : "Copiar PNG"}
               </button>
@@ -2525,13 +3015,13 @@ export default function Home() {
                 href={renderResult}
                 download={`${selected?.name || "render"}-render.${isPreviewResult ? "jpg" : "png"}`}
                 onClick={(e) => e.stopPropagation()}
-                className="flex items-center gap-2 bg-white text-black text-xs font-bold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-all active:scale-95"
+                className="flex items-center gap-2 bg-white text-black text-xs font-bold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
               >
                 <Download className="w-3.5 h-3.5" /> Download
               </a>
               <button
                 onClick={() => setFullscreen(false)}
-                className="bg-neutral-800 hover:bg-neutral-700 text-white w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90"
+                className="bg-neutral-800 hover:bg-neutral-700 text-white w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2566,14 +3056,14 @@ export default function Home() {
                 </div>
                 <p className="text-sm font-black text-white">Configurações avançadas</p>
               </div>
-              <button onClick={() => setShowSettings(false)} className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-all active:scale-90">
+              <button onClick={() => setShowSettings(false)} className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="p-5 flex flex-col gap-3">
               <button
                 onClick={() => { setShowSettings(false); setShowDupes(true); if (!dupesGroups.length && !dupesScanning) scanDuplicates(); }}
-                className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 hover:bg-amber-500/15 hover:border-amber-500/30 transition-all active:scale-[0.98] group text-left"
+                className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 hover:bg-amber-500/15 hover:border-amber-500/30 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98] group text-left"
               >
                 <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0 group-hover:bg-amber-500/25 transition-colors">
                   <Copy className="w-4.5 h-4.5 text-amber-400" />
@@ -2627,12 +3117,12 @@ export default function Home() {
                 <button
                   onClick={() => scanDuplicates(true)}
                   disabled={dupesScanning}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-all active:scale-95 disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 disabled:opacity-40"
                 >
                   <RefreshCw className={`w-3 h-3 ${dupesScanning ? "animate-spin" : ""}`} />
                   {dupesScanning ? "Escaneando..." : "Re-escanear"}
                 </button>
-                <button onClick={() => setShowDupes(false)} className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-600 hover:text-white transition-all active:scale-90">
+                <button onClick={() => setShowDupes(false)} className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-600 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -2649,7 +3139,7 @@ export default function Home() {
                 </div>
                 <div className="w-full h-[3px] bg-neutral-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                    className="h-full bg-amber-500 rounded-full transition-colors duration-300"
                     style={{ width: `${dupesProgress.pct}%` }}
                   />
                 </div>
@@ -2680,7 +3170,7 @@ export default function Home() {
                     <button
                       key={s}
                       onClick={() => setDupesSort(s)}
-                      className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                      className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-colors ${
                         dupesSort === s ? "bg-white text-black" : "bg-neutral-900 text-neutral-600 hover:text-white border border-neutral-800"
                       }`}
                     >
@@ -2713,7 +3203,7 @@ export default function Home() {
                 <div className="flex flex-col items-center justify-center py-16 gap-4">
                   <div className="p-4 rounded-full bg-red-500/10 text-red-500"><AlertTriangle className="w-7 h-7" /></div>
                   <p className="text-red-400 text-xs font-bold text-center px-8">{dupesError}</p>
-                  <button onClick={() => scanDuplicates()} className="text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-all active:scale-95">
+                  <button onClick={() => scanDuplicates()} className="text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95">
                     Tentar novamente
                   </button>
                 </div>
@@ -2742,7 +3232,7 @@ export default function Home() {
                     </div>
                     <div className="w-full h-1 bg-neutral-900 rounded-full overflow-hidden">
                       {dupesProgress ? (
-                        <div className="h-full bg-amber-500 rounded-full transition-all duration-300" style={{ width: `${dupesProgress.pct}%` }} />
+                        <div className="h-full bg-amber-500 rounded-full transition-colors duration-300" style={{ width: `${dupesProgress.pct}%` }} />
                       ) : (
                         <div className="h-full bg-amber-500/60 animate-progress-indefinite rounded-full" style={{ width: "40%" }} />
                       )}
@@ -2795,7 +3285,7 @@ export default function Home() {
                     >
                       <span className="text-[10px] font-black text-neutral-700">{gi + 1}</span>
                       <div className="flex items-center gap-2 min-w-0 pr-4">
-                        <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-neutral-700 group-hover:text-neutral-400 transition-all duration-200 ${isExpanded ? "rotate-90 text-neutral-400" : ""}`} />
+                        <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-neutral-700 group-hover:text-neutral-400 transition-colors duration-200 ${isExpanded ? "rotate-90 text-neutral-400" : ""}`} />
                         <span className="text-[11px] font-bold text-neutral-200 truncate">{fileName}</span>
                         <span className="shrink-0 text-[8px] font-black text-neutral-700 bg-neutral-800/80 px-1.5 py-0.5 rounded">{ext}</span>
                       </div>
@@ -2857,7 +3347,7 @@ export default function Home() {
                                 </span>
                                 <button
                                   onClick={(e) => { e.stopPropagation(); fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: filePath }) }); }}
-                                  className="p-1 rounded-lg hover:bg-neutral-800 text-neutral-700 hover:text-white transition-all"
+                                  className="p-1 rounded-lg hover:bg-neutral-800 text-neutral-700 hover:text-white transition-colors"
                                   title="Abrir localização"
                                 >
                                   <Folder className="w-3 h-3" />
@@ -2908,7 +3398,7 @@ export default function Home() {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setShowLibrary(false)} className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-all active:scale-90">
+              <button onClick={() => setShowLibrary(false)} className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -2925,7 +3415,7 @@ export default function Home() {
                   <p className="text-red-400 text-sm font-bold text-center px-10">{assetError}</p>
                   <button 
                     onClick={openLibrary}
-                    className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-all active:scale-95"
+                    className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
                   >
                     Tentar novamente
                   </button>
@@ -2943,12 +3433,12 @@ export default function Home() {
                       onClick={() => loadAssetAsArt(asset)}
                       className="group flex flex-col gap-3 text-left animate-in fade-in slide-in-from-bottom-2"
                     >
-                      <div className="aspect-square relative bg-white/5 border border-white/5 rounded-2xl overflow-hidden group-hover:border-white/20 group-hover:bg-white/10 transition-all p-6 shadow-sm group-hover:shadow-2xl group-hover:-translate-y-1 duration-300">
+                      <div className="aspect-square relative bg-white/5 border border-white/5 rounded-2xl overflow-hidden group-hover:border-white/20 group-hover:bg-white/10 transition-[color,background-color,border-color,box-shadow,opacity,transform] p-6 shadow-sm group-hover:shadow-2xl group-hover:-translate-y-1 duration-300">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img 
                           src={asset.thumbnail} 
                           alt={asset.label} 
-                          className="w-full h-full object-contain filter drop-shadow-2xl transition-transform duration-500 group-hover:scale-110"
+                          className="w-full h-full object-contain filter drop-shadow-2xl transition-transform [transition-duration:var(--dur-slow)] group-hover:scale-105"
                         />
                       </div>
                       <div className="px-1">
@@ -2968,6 +3458,31 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* Revisão do ingest — pré-voo, triagem e commit seletivo. */}
+      {reviewPath && (
+        <IngestReviewSheet
+          folderPath={reviewPath}
+          onClose={() => setReviewPath(null)}
+          onIngested={handleIngested}
+        />
+      )}
+
+      {/* Alvo de soltar da PÁGINA. Antes só o retângulo do painel direito
+          aceitava a arte — e só quando o mockup tinha faces editáveis; soltar um
+          PNG no grid fazia o navegador abrir o arquivo e perder o trabalho. */}
+      <DropOverlay
+        visible={dragging}
+        message="Solte a arte"
+        hint={selected ? `Aplicar em ${selected.name}` : "Escolha um mockup depois"}
+      />
+
+      {/* Mesma config do editor — um só jeito de dar retorno no produto inteiro. */}
+      <Toaster
+        theme="dark"
+        position="bottom-right"
+        toastOptions={{ style: { background: "rgba(24,24,27,0.92)", border: "1px solid rgba(63,63,70,0.6)", color: "#e4e4e7", backdropFilter: "blur(8px)" } }}
+      />
     </div>
   );
 }

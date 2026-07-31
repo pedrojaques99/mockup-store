@@ -6,12 +6,22 @@
  * dois algoritmos de busca concorrentes e um merge que descartava o score de relevância.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { searchRefs, type AspectBucket } from "@/lib/search-index";
+import { searchRefs, refsByIds, type AspectBucket } from "@/lib/search-index";
 
 const ASPECTS = new Set<AspectBucket>(["square", "portrait", "landscape"]);
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
+
+  // `ids` — hidratação de um ranking que veio de fora (busca por imagem). A
+  // ordem do parâmetro É o resultado; nada aqui reordena.
+  const idsParam = searchParams.get("ids");
+  if (idsParam) {
+    const ids = idsParam.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 200);
+    const references = await refsByIds(ids);
+    return NextResponse.json({ references, total: references.length, page: 1, pages: 1 });
+  }
+
   const page = parseInt(searchParams.get("page") || "1");
   const limit = Math.min(parseInt(searchParams.get("limit") || "60"), 200);
   const search = searchParams.get("search") || "";
