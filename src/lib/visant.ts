@@ -256,3 +256,60 @@ export function summarizeBrand(g: VisantBrandGuideline): string {
 
   return parts.join("\n");
 }
+
+// ── Busca visual (Pinecone, do lado da Visant) ───────────────────────────────
+/**
+ * Busca por imagem: manda uma imagem e recebe as referências visualmente
+ * parecidas, ranqueadas por embedding multimodal.
+ *
+ * Por que delegar em vez de indexar aqui: a busca local (`search-engine.ts`) é
+ * MiniSearch — léxica, sem embeddings, e o próprio `search-synonyms.ts` diz que
+ * é assim de propósito. Montar um índice vetorial neste repo significaria uma
+ * segunda cópia do acervo, um segundo custo de embedding e duas verdades que
+ * divergem. A Visant já mantém esse índice (namespace `reference-examples`) e
+ * indexa a MESMA coleção `community_presets` que este projeto lê.
+ *
+ * O que volta é a lista de ids — e eles casam 1:1 com o catálogo local, porque
+ * o `id` é a mesma chave nos dois lados. Então o chamador ranqueia o próprio
+ * índice em vez de renderizar registros de outro formato.
+ *
+ * Cena PSD APARECE aqui: o guard que a esconde (`BROWSABLE`) vive no feed
+ * humano do app da Visant, e a hidratação da busca vetorial não o aplica.
+ * Só entra o que tem vetor — ou seja, o que já passou pelo enriquecimento.
+ */
+export interface VisualMatch {
+  id: string;
+  score: number;
+  name?: string;
+  referenceImageUrl?: string;
+}
+
+export async function searchByImage(
+  imageBase64: string,
+  opts: { limit?: number } = {}
+): Promise<VisualMatch[]> {
+  const token = await getAccessToken();
+  if (!token) {
+    throw new Error("Não conectado à Visant — use o botão Conectar Visant");
+  }
+
+  const res = await fetch(`${API_BASE}/references/search-by-image`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ imageBase64, limit: opts.limit ?? 48 }),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`Busca visual falhou (${res.status}): ${text.slice(0, 200)}`);
+  }
+
+  const json = JSON.parse(text) as { references?: Array<Record<string, unknown>> };
+  return (json.references ?? []).map((r) => ({
+    id: String(r.id),
+    score: typeof r.score === "number" ? r.score : 0,
+    name: typeof r.name === "string" ? r.name : undefined,
+    referenceImageUrl:
+      typeof r.referenceImageUrl === "string" ? r.referenceImageUrl : undefined,
+  }));
+}
