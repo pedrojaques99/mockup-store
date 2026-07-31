@@ -10,6 +10,7 @@
  *
  * Atalhos: S salva · ←/→ navega · O overlay magenta · D displacement · R re-detecta.
  */
+import { Select } from "@/components/ui/Select";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Loader2, Save, ChevronLeft, ChevronRight, RefreshCw, Eye, EyeOff, CheckCircle2,
@@ -652,7 +653,7 @@ export default function CalibratePage() {
             const p = data.analysis.preset;
             const matches = data.method === p.method && data.surfaceType === subP.surfaceType && data.material === subP.material;
             return (
-              <div className={["flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px]", k.bg, k.color].join(" ")}
+              <div className={["flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-[11px]", k.bg, k.color].join(" ")}
                 title={`${data.analysis.placeholder.hint} · ${subP.hint}`}>
                 <span className="font-mono font-semibold">{k.tag}</span>
                 <span>{k.label}</span>
@@ -669,7 +670,7 @@ export default function CalibratePage() {
 
           {/* método de detecção */}
           {data && (
-            <div className="flex items-center gap-0.5 bg-zinc-900 rounded-md p-0.5 ml-1">
+            <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5 ml-1">
               {METHODS.map((m) => (
                 <button key={m.id} onClick={() => runDetect(m.id)}
                   className={["px-2 py-1 rounded text-[11px] transition-colors", data.method === m.id ? "bg-sky-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{m.label}</button>
@@ -681,7 +682,7 @@ export default function CalibratePage() {
 
           {/* surfaceType */}
           {data && (
-            <div className="flex items-center gap-0.5 bg-zinc-900 rounded-md p-0.5">
+            <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
               {SURFACE_TYPES.map((t) => (
                 <button key={t} onClick={() => editData((d) => ({ ...d, surfaceType: t }))}
                   className={["px-2 py-1 rounded text-[11px] capitalize transition-colors", data.surfaceType === t ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{t}</button>
@@ -715,7 +716,7 @@ export default function CalibratePage() {
           <div className="flex items-center gap-4 px-4 py-2 border-b border-zinc-800 bg-zinc-900/50 text-xs">
             <span className="text-lime-400 flex items-center gap-1"><Grid3x3 size={13} /> Malha (warp envelope)</span>
             <span className="text-zinc-400">densidade</span>
-            <div className="flex items-center gap-0.5 bg-zinc-900 rounded-md p-0.5">
+            <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
               {[2, 3, 4, 5].map((n) => (
                 <button key={n} onClick={() => setMeshDensity(n)}
                   className={["px-2 py-1 rounded text-[11px] transition-colors", (data.mesh?.rows ?? 3) === n ? "bg-lime-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{n}×{n}</button>
@@ -748,11 +749,10 @@ export default function CalibratePage() {
               );
             })}
             <span className="w-px h-4 bg-zinc-800 mx-1 shrink-0" />
-            <select value={data.substrate ?? data.analysis.substrate.kind}
-              onChange={(e) => setSubstrate(e.target.value as SubstrateKind)}
-              className="shrink-0 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[11px] text-zinc-300">
-              {SUBSTRATE_KEYS.map((k) => <option key={k} value={k}>{SUBSTRATES[k].label}</option>)}
-            </select>
+            <Select skin="zinc" boxed ariaLabel="Substrato" className="shrink-0 w-40"
+              value={data.substrate ?? data.analysis.substrate.kind}
+              onChange={(v) => setSubstrate(v as SubstrateKind)}
+              options={SUBSTRATE_KEYS.map((k) => ({ value: k, label: SUBSTRATES[k].label }))} />
           </div>
         )}
 
@@ -791,7 +791,7 @@ export default function CalibratePage() {
         {matMode && data && (
           <div className="flex items-center gap-4 px-4 py-2 border-b border-zinc-800 bg-zinc-900/50 text-xs flex-wrap">
             <span className="text-fuchsia-400 flex items-center gap-1"><Shirt size={13} /> Material</span>
-            <div className="flex items-center gap-0.5 bg-zinc-900 rounded-md p-0.5">
+            <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
               {MATERIALS.map((m) => (
                 <button key={m.id} onClick={() => editData((d) => ({ ...d, material: m.id }))}
                   className={["px-2 py-1 rounded text-[11px] transition-colors", data.material === m.id ? "bg-fuchsia-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{m.label}</button>
@@ -820,7 +820,7 @@ export default function CalibratePage() {
         {renderMode && data && (
           <div className="flex items-center gap-4 px-4 py-2 border-b border-zinc-800 bg-zinc-900/50 text-xs">
             <span className="text-cyan-400 flex items-center gap-1"><Play size={13} /> Render final</span>
-            <div className="flex items-center gap-0.5 bg-zinc-900 rounded-md p-0.5">
+            <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
               {(["grid", "poster", "checker"] as const).map((k) => (
                 <button key={k} onClick={() => setArtKind(k)}
                   className={["px-2 py-1 rounded text-[11px] capitalize transition-colors", artKind === k ? "bg-cyan-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{k}</button>

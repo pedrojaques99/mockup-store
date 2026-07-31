@@ -81,7 +81,7 @@ export function MaskCalibrate({
     <div className="absolute inset-0 flex flex-col bg-zinc-950">
       {/* toolbar mask */}
       <div className="flex items-center gap-3 px-3 py-2 border-b border-zinc-800 text-xs flex-wrap">
-        <div className="flex items-center gap-0.5 bg-zinc-900 rounded-md p-0.5">
+        <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
           {INSTRUMENTS.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setInstr(id)} title={label}
               className={["flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors", instr === id ? "bg-cyan-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>
@@ -90,7 +90,7 @@ export function MaskCalibrate({
           ))}
         </div>
 
-        <div className="flex items-center gap-0.5 bg-zinc-900 rounded-md p-0.5">
+        <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
           <button onClick={() => setMode("add")} title="Somar (Shift = +)" className={["flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors", mode === "add" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}><Plus size={12} /></button>
           <button onClick={() => setMode("sub")} title="Subtrair (Alt = −)" className={["flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors", mode === "sub" ? "bg-red-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}><Minus size={12} /></button>
         </div>

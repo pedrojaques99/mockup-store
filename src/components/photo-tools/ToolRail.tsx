@@ -82,14 +82,14 @@ export function ToolRail<T extends string>({
                       else { onSelect(t.id); onPanelOpenChange(true); }
                     }}
                     className={cn(
-                      "flex flex-col items-center justify-center gap-0.5 w-12 h-12 rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] [transition-duration:var(--dur-fast)] active:scale-90",
+                      // Só-ícone: o rótulo de 7,5px que morava aqui era ilegível e
+                      // redundante três vezes (tooltip com atalho, título do painel,
+                      // chip do canvas). O nome sobrevive onde dá pra ler.
+                      "grid place-items-center w-10 h-10 rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] [transition-duration:var(--dur-fast)] active:scale-90",
                       isActive ? "bg-acc2 text-zinc-950 shadow-md shadow-acc2/20" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
                     )}
                   >
                     <Icon size={17} strokeWidth={2} />
-                    <span className={cn("text-[7.5px] font-medium leading-none tracking-tight", isActive ? "text-zinc-900" : "text-zinc-500")}>
-                      {t.label}
-                    </span>
                   </button>
                 </Tooltip>
               );
@@ -108,21 +108,16 @@ export function ToolRail<T extends string>({
             {/* Barra de título — handle de drag + fechar */}
             <div className="panel-drag cursor-grab active:cursor-grabbing flex items-center justify-between px-3 py-2 border-b border-zinc-800 select-none">
               <span className="text-[10px] text-zinc-400 font-medium uppercase tracking-widest">{activeLabel}</span>
-              <div className="flex items-center gap-2">
-                <span className="flex gap-0.5">
-                  <span className="w-1 h-1 rounded-full bg-zinc-600" />
-                  <span className="w-1 h-1 rounded-full bg-zinc-600" />
-                  <span className="w-1 h-1 rounded-full bg-zinc-600" />
-                </span>
-                <button
-                  type="button"
-                  aria-label="Fechar painel"
-                  onClick={() => onPanelOpenChange(false)}
-                  className="text-zinc-500 hover:text-white transition-colors"
-                >
-                  <X size={13} />
-                </button>
-              </div>
+              {/* Os três pontinhos que viviam aqui imitavam um handle que a barra
+                  inteira já é. Não moviam nada — saíram. */}
+              <button
+                type="button"
+                aria-label="Fechar painel"
+                onClick={() => onPanelOpenChange(false)}
+                className="text-zinc-500 hover:text-white transition-colors"
+              >
+                <X size={13} />
+              </button>
             </div>
 
             <div className="p-3 overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>

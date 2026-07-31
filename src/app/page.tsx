@@ -12,7 +12,6 @@ import {
 } from "react-resizable-panels";
 import {
   Search,
-  Filter,
   FolderPlus,
   ChevronRight,
   ChevronDown,
@@ -27,7 +26,6 @@ import {
   Download,
   Loader2,
   AlertTriangle,
-  History,
   Library,
   Zap,
   ExternalLink,
@@ -56,6 +54,11 @@ import Lottie from "lottie-react";
 import boxLoaderData from "../../public/lottie/box-loader.json";
 import IngestReviewSheet from "@/components/IngestReviewSheet";
 import { DropOverlay } from "@/components/ui/DropOverlay";
+import { MasonryGallery } from "@/components/ui/masonry-gallery";
+import { Select } from "@/components/ui/Select";
+import { Dialog, DialogContent, DialogClose } from "@/components/ui/Dialog";
+import { Switch } from "@/components/ui/Switch";
+import { useContainerColumns } from "@/hooks/use-container-columns";
 import { Toaster, toast } from "sonner";
 
 // Reveal-on-hover clássico (opacity-0 + group-hover) esconde a ação primária
@@ -65,6 +68,21 @@ import { Toaster, toast } from "sonner";
 // só a quem tem hover de verdade; touch/teclado sempre vê o botão.
 const REVEAL_OVERLAY =
   "opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 group-focus-within:opacity-100";
+
+/** Sentinela de "sem filtro" nos selects: o Radix reserva a string vazia para o
+ *  placeholder e recusa um `<Item value="">`. O estado da página continua usando
+ *  `""` — a tradução vive só na borda do componente. */
+const ALL = "__all";
+
+/** Espaço entre cards do grid, em px. Precisa ser um número porque o masonry usa o
+ *  mesmo valor para o gap das colunas e para a conta de quantas colunas cabem —
+ *  apertar o gap também faz caber mais uma coluna na mesma largura. */
+const GRID_GAP = 16;
+
+/** Aspecto medido da imagem de preview, por id. Vive no módulo (e não em estado)
+ *  porque o card é memoizado e desmonta ao rolar/refiltrar: sem este cache o
+ *  masonry reajustaria a altura toda vez que o mesmo item voltasse à tela. */
+const PREVIEW_ASPECT = new Map<string, number>();
 
 function MockupCardImpl({
   mockup,
@@ -90,6 +108,17 @@ function MockupCardImpl({
   enterDelay: number;
 }) {
   const hasImage = !!mockup.referenceImageUrl;
+
+  // O card enquadrava TODA thumbnail em 4/3 com `object-cover`: um outdoor 16:9 e
+  // um pôster 2:3 chegavam ao olho recortados, e a escolha do mockup — a decisão
+  // inteira desta tela — era feita sobre um pedaço da cena. O aspecto verdadeiro
+  // só é conhecido quando a imagem carrega, então ele é medido no `onLoad` e
+  // guardado num Map de módulo: rolar de volta (ou refiltrar) não repete o pulo.
+  //
+  // Cuidado registrado: NÃO usar o `aspect` do catálogo aqui. Aquele é o aspecto
+  // do quad/face do smart object, não o da imagem de preview — usá-lo recortaria
+  // exatamente o que este trecho existe para deixar de recortar.
+  const [aspect, setAspect] = useState(() => PREVIEW_ASPECT.get(mockup.id) ?? 4 / 3);
 
   // Antes o card inteiro era um <button> envolvendo um <a> ("Abrir") e dois
   // <button> (Aplicar/Pasta/Esconder) — HTML inválido (botão não pode conter
@@ -117,7 +146,7 @@ function MockupCardImpl({
         selected ? "border-white ring-4 ring-white/10 shadow-2xl" : "border-neutral-800 hover:border-neutral-700"
       }`}
     >
-      <div className="relative bg-neutral-900 overflow-hidden" style={{ aspectRatio: '4/3' }}>
+      <div className="relative bg-neutral-900 overflow-hidden" style={{ aspectRatio: aspect }}>
         {hasImage ? (
           <Image
             src={mockup.referenceImageUrl}
@@ -126,6 +155,14 @@ function MockupCardImpl({
             className="object-cover transition-transform [transition-duration:var(--dur-slow)] group-hover:scale-[1.04]"
             sizes={`${thumbSize * 1.5}px`}
             loading="lazy"
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              if (!img.naturalWidth || !img.naturalHeight) return;
+              const a = img.naturalWidth / img.naturalHeight;
+              if (PREVIEW_ASPECT.get(mockup.id) === a) return;
+              PREVIEW_ASPECT.set(mockup.id, a);
+              setAspect(a);
+            }}
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">
@@ -162,7 +199,7 @@ function MockupCardImpl({
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className={`absolute inset-0 bg-black/40 transition-colors duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
+            className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
             <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl uppercase tracking-widest">
               Abrir
@@ -175,7 +212,7 @@ function MockupCardImpl({
             type="button"
             onClick={(e) => { e.stopPropagation(); onApply(mockup); }}
             title="Aplicar arte neste mockup"
-            className={`absolute inset-0 bg-black/40 transition-colors duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
+            className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
             <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl uppercase tracking-widest">
               Aplicar
@@ -186,17 +223,40 @@ function MockupCardImpl({
         {!isRendering && (
           <div className="absolute top-2 left-2 z-20 flex gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-[color,background-color,border-color,opacity]">
             {mockup.psdPath && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: mockup.psdPath }) });
-                }}
-                title="Abrir pasta do PSD"
-                className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl"
-              >
-                <Folder className="w-3.5 h-3.5" />
-              </button>
+              <>
+                {/* Abrir no Photoshop. Sem rótulo, como as vizinhas — o `title` é o
+                    rótulo. A marca é o wordmark "Ps" no azul do app e não o logo
+                    da Adobe: o `simple-icons`, que é a fonte da casa para ícones de
+                    marca, **removeu os ícones da Adobe** por questão de marca
+                    registrada, e não existe hoje um logo do Photoshop licenciado
+                    para empacotar. O "Ps" é reconhecível e não distribui o ativo. */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: mockup.psdPath, mode: "open" }) })
+                      .then((r) => { if (!r.ok) toast.error("Não foi possível abrir o PSD."); })
+                      .catch(() => toast.error("Não foi possível abrir o PSD."));
+                  }}
+                  title="Abrir no Photoshop"
+                  aria-label="Abrir no Photoshop"
+                  className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm flex items-center justify-center hover:bg-[#001E36] transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl"
+                >
+                  <span className="text-[10px] font-black leading-none tracking-tighter text-[#31A8FF]">Ps</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: mockup.psdPath }) });
+                  }}
+                  title="Mostrar na pasta"
+                  aria-label="Mostrar na pasta"
+                  className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl"
+                >
+                  <Folder className="w-3.5 h-3.5" />
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -283,7 +343,7 @@ function SuggestionCard({
           onSelect();
         }
       }}
-      className={`group relative w-48 shrink-0 rounded-2xl overflow-hidden border text-left transition-colors duration-300 bg-neutral-900/40 hover:bg-neutral-900 cursor-pointer ${
+      className={`group relative w-48 shrink-0 rounded-2xl overflow-hidden border text-left transition-colors [transition-duration:var(--dur-slow)] bg-neutral-900/40 hover:bg-neutral-900 cursor-pointer ${
         selected ? "border-white ring-4 ring-white/10 shadow-2xl scale-105 z-10" : "border-neutral-800 hover:border-neutral-700"
       }`}
     >
@@ -318,7 +378,7 @@ function SuggestionCard({
             type="button"
             onClick={(e) => { e.stopPropagation(); onApply(); }}
             title="Aplicar arte neste mockup"
-            className={`absolute inset-0 bg-black/40 transition-colors duration-300 flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
+            className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
             <span className="bg-white text-black text-[10px] font-black px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl uppercase tracking-widest">
               Aplicar
@@ -442,6 +502,9 @@ function ResizeHandle({ className = "", id }: { className?: string, id?: string 
 export default function Home() {
   const [refs, setRefs] = useState<Reference[]>([]);
   const [thumbSize, setThumbSize] = useState(250);
+  // O masonry precisa saber quantas colunas existem; a largura útil é a do
+  // contêiner (entre painéis colapsáveis), nunca a da janela.
+  const [gridRef, gridCols] = useContainerColumns(thumbSize, GRID_GAP);
   const leftPanelRef = usePanelRef();
   const rightPanelRef = usePanelRef();
   const [studios, setStudios] = useState<Studio[]>([]);
@@ -459,6 +522,8 @@ export default function Home() {
   const [aspect, setAspect] = useState<"" | "square" | "portrait" | "landscape">("");
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [tagMode, setTagMode] = useState<"AND" | "OR">("AND");
+  /** Ordem da LISTAGEM. Com busca ativa quem ordena é a relevância (o motor ignora). */
+  const [sort, setSort] = useState<"popular" | "name">("popular");
   const [hideDuplicates, setHideDuplicates] = useState(true);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [lastHidden, setLastHidden] = useState<{ id: string; name: string } | null>(null);
@@ -688,6 +753,7 @@ export default function Home() {
         params.set("tags", activeTags.join(","));
         params.set("tagMode", tagMode);
       }
+      if (sort !== "popular") params.set("sort", sort);
       params.set("has_psd", "true");
 
       try {
@@ -722,7 +788,7 @@ export default function Home() {
         setInitialLoad(false);
       }
     },
-    [search, studio, aspect, activeTags, tagMode, loading]
+    [search, studio, aspect, activeTags, tagMode, sort, loading]
   );
 
   // Busca/facetas na URL: sem isto o F5 jogava tudo fora e um filtro montado com
@@ -740,6 +806,7 @@ export default function Home() {
     const t = p.get("tags");
     if (t) setActiveTags(t.split(",").filter(Boolean).slice(0, 5));
     if (p.get("tagMode") === "OR") setTagMode("OR");
+    if (p.get("sort") === "name") setSort("name");
     setUrlReady(true);
   }, []);
 
@@ -753,11 +820,12 @@ export default function Home() {
       p.set("tags", activeTags.join(","));
       if (tagMode === "OR") p.set("tagMode", "OR");
     }
+    if (sort !== "popular") p.set("sort", sort);
     const qs = p.toString();
     // replaceState (não push): digitar na busca não pode encher o histórico de
     // entradas — o "voltar" tem que sair da página, não desfazer letra por letra.
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [urlReady, search, studio, aspect, activeTags, tagMode]);
+  }, [urlReady, search, studio, aspect, activeTags, tagMode, sort]);
 
   useEffect(() => {
     if (!urlReady) return;
@@ -771,7 +839,7 @@ export default function Home() {
     setImageSearch(null);
     fetchPage(1, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlReady, search, studio, aspect, activeTags, tagMode]);
+  }, [urlReady, search, studio, aspect, activeTags, tagMode, sort]);
 
   useEffect(() => {
     // Estúdios e aspectos saem do MESMO catálogo do grid — o dropdown não pode prometer
@@ -1000,15 +1068,19 @@ export default function Home() {
     // aprende com cada publish). Lido de um ref pra não quebrar a identidade estável
     // desta callback — ela é prop do MockupCard memoizado. keepalive: o beacon precisa
     // sobreviver à navegação. Best-effort: nunca bloqueia nem atrasa a seleção.
-    const q = searchRef.current.trim();
-    if (q) {
-      void fetch("/api/references/click", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ query: q, id: ref.id }),
-        keepalive: true,
-      }).catch(() => {});
-    }
+    // O `if (q)` que morava aqui quebrava o laço inteiro: só o clique vindo DE UMA
+    // BUSCA era contado, e navegar o grid — que é como a maior parte das sessões
+    // acontece — não ensinava nada. Resultado real: `signals.json` com dois docs no
+    // acervo inteiro, um deles do smoke test. Sem isto a ordenação "Mais usados"
+    // seria idêntica ao alfabético para sempre.
+    // A query continua importando: `logClick("")` só incrementa a popularidade
+    // global; com termo, também grava a afinidade query↔doc.
+    void fetch("/api/references/click", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: searchRef.current.trim(), id: ref.id }),
+      keepalive: true,
+    }).catch(() => {});
     setSelected(ref);
     setRenderResult(null);
     setRenderTime(null);
@@ -1407,6 +1479,17 @@ export default function Home() {
       return handlePreviewWorker(selected, arts);
     }
 
+    // Render final é o sinal MAIS FORTE de "este mockup serve" — muito acima de
+    // abrir o card. Como o contador é incremental, renderizar simplesmente conta
+    // de novo: quem foi aberto E renderizado acumula o dobro de quem só foi olhado,
+    // sem precisar de peso especial nenhum.
+    void fetch("/api/references/click", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: searchRef.current.trim(), id: selected.id }),
+      keepalive: true,
+    }).catch(() => {});
+
     // Full export → render-server TCP (full-res, node-canvas)
     setRendering(true);
     setRenderingRefId(selected.id);
@@ -1583,11 +1666,16 @@ export default function Home() {
     });
   };
 
-  const openFolderWizard = () => {
+  const openFolderWizard = useCallback(() => {
     setFolderInput("");
     setWizardStep(1);
     setIngestResult(null);
-  };
+    // O gatilho vive no header e o campo de caminho vive na sidebar: com a
+    // sidebar colapsada, clicar não faria NADA visível — uma ação primária em
+    // silêncio. Abrir o painel faz parte da ação.
+    const panel = leftPanelRef.current;
+    if (panel?.isCollapsed()) panel.expand();
+  }, [leftPanelRef]);
 
   /** Abre a revisão. O pré-voo (hash + triagem) roda dentro da folha. */
   const openReview = () => {
@@ -1728,9 +1816,11 @@ export default function Home() {
                 step="10"
                 value={thumbSize}
                 onChange={(e) => setThumbSize(parseInt(e.target.value))}
+                title={`Tamanho do card · ${thumbSize}px`}
                 className="w-32 accent-white h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
               />
-              <span className="text-[10px] font-bold text-neutral-600 w-8">{thumbSize}px</span>
+              {/* O readout "230px" saiu: o feedback deste controle é o grid inteiro
+                  mudando de tamanho na hora. O número era ruído de engenheiro. */}
             </div>
           </div>
         </div>
@@ -1828,6 +1918,21 @@ export default function Home() {
             </button>
           )}
 
+          {/* Ingerir pasta é ação GLOBAL do acervo, não um filtro — vivia como uma
+              laje tracejada de 44px no meio dos filtros da sidebar, disputando peso
+              com controles do dia a dia por algo que se faz uma vez por sessão. */}
+          <button
+            onClick={openFolderWizard}
+            className={`p-2 rounded-lg hover:bg-white/5 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 ${
+              wizardStep === 1 ? "text-white bg-white/5" : "text-neutral-500 hover:text-white"
+            }`}
+            title="Adicionar pasta ao acervo"
+            aria-label="Adicionar pasta ao acervo"
+            aria-pressed={wizardStep === 1}
+          >
+            <FolderPlus className="w-4.5 h-4.5" />
+          </button>
+
           <button
             onClick={() => setShowSettings(true)}
             className="p-2 rounded-lg hover:bg-white/5 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
@@ -1888,28 +1993,36 @@ export default function Home() {
               </div>
             )}
 
+            {/* Contexto (marca · estúdio) — linhas, não caixas.
+                Antes eram cinco blocos empilhados com o mesmo peso e três estilos de
+                borda diferentes: `h-10 rounded-xl bg-neutral-900 border` para os
+                selects, `h-9 border` para os chips, `h-11 border-2 dashed` para a
+                pasta. Cinco caixas de peso igual não têm hierarquia — o olho lê uma
+                pilha e não uma estrutura. O agrupamento agora é o ESPAÇO (`gap`
+                pequeno dentro da zona, grande entre zonas) e o valor é o próprio
+                controle, como numa lista de ajustes. */}
             {brands.length > 0 && (
-              <div className="mb-4 space-y-2.5">
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-600 px-1">Marca Selecionada</p>
-                <select
-                  value={brandId}
-                  onChange={(e) => setBrandId(e.target.value)}
-                  className="w-full h-10 rounded-xl bg-neutral-900 border border-neutral-800 px-3 text-xs font-bold focus:outline-none focus:border-neutral-600 transition-colors appearance-none cursor-pointer shadow-inner"
-                >
-                  <option value="">Sem marca</option>
-                  {brands.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
+              <div className="mb-1">
+                {/* Radix, não `<select>`: a lista do nativo é desenhada pelo SO
+                    (fundo branco, realce azul do Windows) e nenhum CSS alcança. */}
+                <Select
+                  ariaLabel="Marca"
+                  value={brandId || ALL}
+                  onChange={(v) => setBrandId(v === ALL ? "" : v)}
+                  options={[
+                    { value: ALL, label: "Sem marca" },
+                    ...brands.map((b) => ({ value: b.id, label: b.name })),
+                  ]}
+                />
                 {brandId && (
-                  <div className="flex items-center gap-2 px-1">
+                  <div className="flex items-center gap-1.5 px-1 pb-1">
                     {(brands.find((b) => b.id === brandId)?.colors || [])
                       .slice(0, 8)
                       .map((c, i) => (
                         <span
                           key={`${c.hex}-${i}`}
                           title={c.name}
-                          className="w-4 h-4 rounded-full border border-white/10 ring-2 ring-black/50 shadow-lg"
+                          className="w-3 h-3 rounded-full border border-white/10"
                           style={{ backgroundColor: c.hex }}
                         />
                       ))}
@@ -1918,26 +2031,28 @@ export default function Home() {
               </div>
             )}
 
-            <div className="flex flex-col gap-2 mb-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-600 px-1">Filtros</p>
-              <div className="relative">
-                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-500" />
-                <select
-                  value={studio}
-                  onChange={(e) => setStudio(e.target.value)}
-                  className="w-full h-10 rounded-xl bg-neutral-900 border border-neutral-800 pl-9 pr-3 text-xs font-bold focus:outline-none appearance-none cursor-pointer shadow-inner"
-                >
-                  <option value="">Todos Estúdios</option>
-                  {studios.map((s) => (
-                    <option key={s.name} value={s.name}>{s.name} ({s.count})</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600 pointer-events-none" />
-              </div>
+            {/* A régua só existe para separar marca de estúdio. Sem marca conectada
+                ela vira um traço solto logo abaixo da borda do header. */}
+            <div className={`mb-5 ${brands.length > 0 ? "border-t border-neutral-900 pt-1" : ""}`}>
+              <Select
+                ariaLabel="Estúdio"
+                value={studio || ALL}
+                onChange={(v) => setStudio(v === ALL ? "" : v)}
+                options={[
+                  { value: ALL, label: "Todos os estúdios" },
+                  // A contagem vai na coluna da direita, não colada no nome entre
+                  // parênteses — assim os números alinham e o nome pode truncar.
+                  ...studios.map((s) => ({ value: s.name, label: s.name, hint: s.count })),
+                ]}
+              />
+            </div>
 
+            <div className="flex flex-col gap-2.5 mb-5">
               {/* Formato da superfície — filtro que o pipeline usa o tempo todo ("casar
-                  arte↔cena por aspecto") e que só existia no CLI. Clicar de novo limpa. */}
-              <div className="flex items-center gap-1.5">
+                  arte↔cena por aspecto") e que só existia no CLI. Clicar de novo limpa.
+                  Sem caixa quando desligado: o chip aceso É a informação, e três
+                  molduras vazias só competem com ele. */}
+              <div className="flex items-center gap-1">
                 {([
                   { key: "square", label: "1:1" },
                   { key: "portrait", label: "Retrato" },
@@ -1949,11 +2064,12 @@ export default function Home() {
                     <button
                       key={key}
                       onClick={() => setAspect(on ? "" : key)}
+                      aria-pressed={on}
                       title={count ? `${count} mockups` : undefined}
-                      className={`flex-1 h-9 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98] ${
+                      className={`flex-1 h-7 rounded-lg text-[11px] font-bold transition-colors ${
                         on
-                          ? "bg-neutral-900 border-neutral-700 text-neutral-300"
-                          : "bg-transparent border-neutral-800 text-neutral-600 hover:text-neutral-400"
+                          ? "bg-white text-black"
+                          : "text-neutral-500 hover:text-neutral-200 hover:bg-white/5"
                       }`}
                     >
                       {label}
@@ -1962,51 +2078,37 @@ export default function Home() {
                 })}
               </div>
 
+              {/* Linha, não botão-caixa: o rótulo quebrava em duas linhas assim que a
+                  contagem entrava ao lado, dentro de um bloco de 36px em caixa alta. */}
               <button
                 onClick={() => setHideDuplicates((v) => !v)}
-                className={`flex items-center justify-between gap-2 h-9 rounded-xl border px-3 text-[10px] font-black uppercase tracking-widest transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98] ${
-                  hideDuplicates
-                    ? "bg-neutral-900 border-neutral-700 text-neutral-300"
-                    : "bg-transparent border-neutral-800 text-neutral-600 hover:text-neutral-400"
-                }`}
+                aria-pressed={hideDuplicates}
+                className="flex items-center gap-2 px-1 text-left group/dup"
               >
-                <span className="flex items-center gap-2">
-                  <Copy className="w-3.5 h-3.5" />
+                <span className={`text-[11px] font-bold truncate transition-colors ${hideDuplicates ? "text-neutral-300" : "text-neutral-500 group-hover/dup:text-neutral-300"}`}>
                   Esconder duplicados
                 </span>
-                <span className="flex items-center gap-2">
-                  {hideDuplicates && hiddenDupes > 0 && (
-                    <span className="text-neutral-500 normal-case tracking-normal">{hiddenDupes} ocultos</span>
-                  )}
-                  <span className={`w-7 h-4 rounded-full relative transition-colors ${hideDuplicates ? "bg-emerald-500/80" : "bg-neutral-700"}`}>
-                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-colors ${hideDuplicates ? "left-3.5" : "left-0.5"}`} />
-                  </span>
-                </span>
+                {hideDuplicates && hiddenDupes > 0 && (
+                  <span className="text-[10px] text-neutral-600 shrink-0">{hiddenDupes}</span>
+                )}
+                <span className="ml-auto shrink-0"><Switch checked={hideDuplicates} onCheckedChange={setHideDuplicates} label="Esconder duplicados" /></span>
               </button>
+
               {hiddenIds.size > 0 && (
                 <button
                   onClick={() => persistHidden(new Set())}
-                  className="flex items-center justify-between gap-2 h-9 rounded-xl border border-neutral-800 px-3 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-neutral-300 hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
+                  className="flex items-center gap-2 px-1 text-[11px] font-bold text-neutral-500 hover:text-neutral-300 transition-colors"
                 >
-                  <span className="flex items-center gap-2">
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    Restaurar ocultos
-                  </span>
-                  <span className="text-neutral-600 normal-case tracking-normal">{hiddenIds.size}</span>
+                  <RotateCcw className="w-3 h-3 shrink-0" />
+                  Restaurar {hiddenIds.size} ocultos
                 </button>
               )}
             </div>
 
-
             {wizardStep === 0 && (
               <>
-                <button
-                  onClick={openFolderWizard}
-                  className="w-full flex items-center justify-center gap-2.5 h-11 rounded-xl border-2 border-dashed border-neutral-800 px-4 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:border-neutral-600 hover:bg-neutral-900/50 hover:text-neutral-300 transition-colors mb-2 group shadow-sm"
-                >
-                  <FolderPlus className="w-4 h-4 group-hover:scale-110 transition-transform" />
-                  Adicionar pasta
-                </button>
+                {/* O gatilho mora no header (ação global, não filtro). Aqui fica só
+                    o retorno do último ingest. */}
                 {ingestResult && (
                   <p className={`text-[10px] font-bold py-2 px-3 rounded-xl mb-2 flex items-center gap-2 ${ingestResult.startsWith("Erro") ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}`}>
                     <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${ingestResult.startsWith("Erro") ? "bg-red-400" : "bg-emerald-400"}`} />
@@ -2109,7 +2211,7 @@ export default function Home() {
                       className="group/tag flex items-center gap-3 text-[11px] font-black text-neutral-400 hover:text-white mb-3 transition-colors w-full"
                     >
                       <ChevronRight
-                        className={`w-4 h-4 transition-transform duration-300 ${expanded ? "rotate-90 text-white" : "text-neutral-700"}`}
+                        className={`w-4 h-4 transition-transform [transition-duration:var(--dur-slow)] ${expanded ? "rotate-90 text-white" : "text-neutral-700"}`}
                       />
                       <span className="flex-1 text-left uppercase tracking-wider">{label}</span>
                       <span className="text-[9px] text-neutral-700 font-bold group-hover/tag:text-neutral-500">{tags.length}</span>
@@ -2166,11 +2268,14 @@ export default function Home() {
                   <div className="flex items-center gap-4">
                     <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-lg shadow-emerald-500/50" />
                     <p className="text-xs font-black uppercase tracking-[0.2em] text-neutral-500">
-                      Matches Inteligentes para <span className="text-white bg-white/5 px-2 py-1 rounded-md">{brands.find((b) => b.id === brandId)?.name}</span>
+                      Matches Inteligentes para <span className="text-white bg-white/5 px-2 py-1 rounded-lg">{brands.find((b) => b.id === brandId)?.name}</span>
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    {loadingSuggestions && <Loader2 className="w-5 h-5 text-neutral-600 animate-spin" />}
+                    {/* Havia DOIS giradores para a mesma operação: um `Loader2` solto
+                        ao lado e o ícone do próprio botão girando. Feedback duplicado
+                        do mesmo estado. O botão já é o lugar certo — quem disparou a
+                        ação olha para onde clicou. */}
                     <button
                       onClick={() => loadSuggestions({ force: true })}
                       disabled={loadingSuggestions}
@@ -2178,7 +2283,7 @@ export default function Home() {
                       className="flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-400 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 disabled:opacity-40"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${loadingSuggestions ? "animate-spin" : ""}`} />
-                      Regenerar
+                      {loadingSuggestions ? "Analisando" : "Regenerar"}
                     </button>
                     <button onClick={() => setBrandId("")} className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-600 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"><X className="w-4 h-4" /></button>
                   </div>
@@ -2186,7 +2291,7 @@ export default function Home() {
                 {suggestError ? (
                   <div className="p-5 bg-red-500/5 border border-red-500/10 rounded-2xl text-[11px] text-red-400 font-bold flex items-center gap-3"><AlertTriangle className="w-5 h-5" /> {suggestError}</div>
                 ) : !loadingSuggestions && suggestions.length === 0 ? (
-                  <div className="p-8 rounded-3xl border border-dashed border-neutral-900 flex flex-col items-center gap-3 opacity-40">
+                  <div className="p-8 rounded-2xl border border-dashed border-neutral-900 flex flex-col items-center gap-3 opacity-40">
                     <Zap className="w-8 h-8" />
                     <p className="text-xs font-bold uppercase tracking-widest text-center">Nenhuma recomendação disponível para os ativos atuais desta marca.</p>
                   </div>
@@ -2270,8 +2375,43 @@ export default function Home() {
               </div>
             )}
 
+            {/* Ordem da listagem — a regra dita em voz alta, onde se escolhe.
+                Até aqui a listagem era SEMPRE A→Z por nome e não havia como trocar:
+                um default acidental, e o pior possível para um acervo cujos nomes
+                são de arquivo (as cinco primeiras posições eram cinco variações do
+                mesmo bundle). Não renderiza durante a busca por texto: lá quem ordena
+                é a relevância, e um seletor que não faz nada é um controle morto. */}
+            {!search && !imageSearch && !initialLoad && refs.length > 0 && (
+              <div className="flex items-center gap-2 mb-6">
+                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-700">Ordem</span>
+                {([
+                  { k: "popular", label: "Mais usados", rule: "os que você mais abre e renderiza primeiro — empate resolve no alfabético" },
+                  { k: "name", label: "A–Z", rule: "ordem alfabética pelo nome do arquivo" },
+                ] as const).map(({ k, label, rule }) => (
+                  <button
+                    key={k}
+                    onClick={() => setSort(k)}
+                    aria-pressed={sort === k}
+                    title={rule}
+                    className={`h-7 px-3 rounded-full text-[10px] font-bold transition-colors ${
+                      sort === k ? "bg-white/10 text-white" : "text-neutral-600 hover:text-neutral-300"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                {sort === "popular" && (
+                  <span className="text-[10px] text-neutral-700 truncate">
+                    aprende com o que você abre
+                  </span>
+                )}
+              </div>
+            )}
+
             {initialLoad ? (
-              <div className="grid gap-8" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}>
+              // Mesmo gap e mesma contagem de colunas do masonry — senão o grid
+              // "pula" de largura no instante em que os dados chegam.
+              <div className="grid" style={{ gap: GRID_GAP, gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}>
                 {Array.from({ length: 18 }).map((_, i) => (
                   <div key={i} className="rounded-2xl overflow-hidden border border-neutral-800/50 bg-neutral-900/30 animate-pulse">
                     <div className="bg-neutral-800/40" style={{ aspectRatio: "4/3" }} />
@@ -2308,7 +2448,7 @@ export default function Home() {
               // não filtrou nada, o acervo é que está vazio. O estado vazio é o
               // argumento, e o argumento aqui é a ação que resolve.
               <div className="flex flex-col items-center justify-center h-full gap-5 animate-in fade-in zoom-in-95 duration-200">
-                <div className="w-20 h-20 rounded-3xl bg-acc/10 border border-acc/20 flex items-center justify-center">
+                <div className="w-20 h-20 rounded-2xl bg-acc/10 border border-acc/20 flex items-center justify-center">
                   <FolderPlus className="w-9 h-9 text-acc" />
                 </div>
                 <div className="text-center max-w-sm">
@@ -2379,20 +2519,30 @@ export default function Home() {
               </div>
             ) : (
               <>
+                {/* Masonry (`@visant/masonry-gallery`) no lugar do grid de linhas
+                    fixas. Não é estética: o grid antigo enquadrava tudo em 4/3 com
+                    `object-cover`, então billboard, pôster e mockup 1:1 chegavam
+                    recortados ao olho que está justamente ESCOLHENDO entre eles.
+                    O round-robin do componente é o que permite isso num feed
+                    infinito — anexar página nunca reordena o que já está na tela.
+                    Colunas vêm da largura do contêiner, não da janela: o grid vive
+                    entre dois painéis colapsáveis.
+
+                    Enquanto o refetch está em voo o grid mostra a lista ANTIGA
+                    como se fosse o resultado do filtro novo. Meio-tom + cursor
+                    de espera dizem "isto ainda é o anterior" sem tirar a lista
+                    da tela (piscar para skeleton a cada tecla seria pior). */}
                 <div
-                  // Enquanto o refetch está em voo o grid mostra a lista ANTIGA
-                  // como se fosse o resultado do filtro novo. Meio-tom + cursor
-                  // de espera dizem "isto ainda é o anterior" sem tirar a lista
-                  // da tela (piscar para skeleton a cada tecla seria pior).
-                  className={`grid gap-8 transition-opacity [transition-duration:var(--dur-base)] ${
+                  ref={gridRef}
+                  className={`transition-opacity [transition-duration:var(--dur-base)] ${
                     loading && !initialLoad ? "opacity-50 cursor-wait" : "opacity-100"
                   }`}
                   aria-busy={loading}
-                  style={{
-                    gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))`
-                  }}
                 >
-                  {displayRefs.map((ref, i) => (
+                  <MasonryGallery
+                    items={displayRefs}
+                    cols={gridCols}
+                    gap={GRID_GAP}
                     // key = ref.id sozinho (Mongo _id / scene id, já único por
                     // item) — `${id}-${i}` quebrava a reconciliação no infinite
                     // scroll porque o índice de posição muda a cada `load more`
@@ -2400,23 +2550,25 @@ export default function Home() {
                     // errado de lugar. dedupeRefs (hideDuplicates) já colapsa
                     // nome+tamanho repetido ANTES disso chegar aqui, então não
                     // há id repetido dentro da mesma lista renderizada.
-                    <MockupCard
-                      key={ref.id}
-                      mockup={ref}
-                      selected={selected?.id === ref.id}
-                      hasArt={anyArt}
-                      isRendering={renderingRefId === ref.id}
-                      thumbSize={thumbSize}
-                      renderedUrl={renderCache[ref.id]?.url}
-                      // Teto de 240ms no atraso acumulado: `i * step` sem teto
-                      // faria o 60º card entrar quase 2s depois do primeiro —
-                      // isso não lê como cascata, lê como app travando.
-                      enterDelay={Math.min((i % 24) * 20, 240)}
-                      onSelect={selectRef}
-                      onApply={handleCardApply}
-                      onHide={hideMockup}
-                    />
-                  ))}
+                    getKey={(ref) => ref.id}
+                    renderItem={(ref, i) => (
+                      <MockupCard
+                        mockup={ref}
+                        selected={selected?.id === ref.id}
+                        hasArt={anyArt}
+                        isRendering={renderingRefId === ref.id}
+                        thumbSize={thumbSize}
+                        renderedUrl={renderCache[ref.id]?.url}
+                        // Teto de 240ms no atraso acumulado: `i * step` sem teto
+                        // faria o 60º card entrar quase 2s depois do primeiro —
+                        // isso não lê como cascata, lê como app travando.
+                        enterDelay={Math.min((i % 24) * 20, 240)}
+                        onSelect={selectRef}
+                        onApply={handleCardApply}
+                        onHide={hideMockup}
+                      />
+                    )}
+                  />
                 </div>
 
                 <div ref={sentinelRef} className="flex flex-col items-center justify-center py-20 gap-6">
@@ -2520,7 +2672,7 @@ export default function Home() {
                 ) : selected.referenceImageUrl ? (
                   <>
                     <Image src={selected.referenceImageUrl} alt={selected.name} fill className="object-contain" priority />
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-0 group-hover/preview:opacity-100 transition-opacity duration-200 bg-black/50">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-0 group-hover/preview:opacity-100 transition-opacity [transition-duration:var(--dur-base)] bg-black/50">
                       <Upload className="w-6 h-6 text-white" />
                       <span className="text-[11px] font-bold text-white">Adicionar arte</span>
                     </div>
@@ -2549,7 +2701,7 @@ export default function Home() {
                   </div>
                 )}
                 
-                <div className="absolute top-3 left-3 flex gap-2 opacity-0 group-hover/preview:opacity-100 transition-colors translate-y-2 group-hover/preview:translate-y-0 duration-300">
+                <div className="absolute top-3 left-3 flex gap-2 opacity-0 group-hover/preview:opacity-100 transition-colors translate-y-2 group-hover/preview:translate-y-0 [transition-duration:var(--dur-slow)]">
                   {renderResult && (
                     <>
                       <button onClick={() => setFullscreen(true)} className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
@@ -2575,18 +2727,20 @@ export default function Home() {
                 </div>
 
                 {renderResult && isPreviewResult && (
-                  <div className="absolute top-3 right-3 bg-amber-500 text-black text-[10px] font-black px-2 py-0.5 rounded-md shadow-lg shadow-amber-500/20">PREVIEW</div>
+                  <div className="absolute top-3 right-3 bg-amber-500 text-black text-[10px] font-black px-2 py-0.5 rounded-lg shadow-lg shadow-amber-500/20">PREVIEW</div>
                 )}
                 {renderTime != null && renderTime > 0 && (
-                  <div className="absolute bottom-3 right-3 bg-black/80 backdrop-blur text-[10px] font-bold text-neutral-400 px-2 py-1 rounded-md">{(renderTime / 1000).toFixed(1)}s</div>
+                  <div className="absolute bottom-3 right-3 bg-black/80 backdrop-blur text-[10px] font-bold text-neutral-400 px-2 py-1 rounded-lg">{(renderTime / 1000).toFixed(1)}s</div>
                 )}
               </div>
 
               <div className="flex flex-col p-4 gap-5">
                 {/* Controls Accordion */}
                 <div className="space-y-3">
-                  {/* Section: Smart Objects — Photoshop-style layers */}
-                  {psdInfo && psdInfo.smartObjects.length > 0 && (
+                  {/* Section: Smart Objects — Photoshop-style layers.
+                      Com UM smart object não há escolha a fazer: a lista mostra a
+                      face que já está ativa. Acordeão de um item só é controle morto. */}
+                  {psdInfo && psdInfo.smartObjects.length > 1 && (
                     <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden">
                       <button
                         onClick={() => setShowSmartObjects(!showSmartObjects)}
@@ -2596,7 +2750,7 @@ export default function Home() {
                           <Layers className="w-3.5 h-3.5 text-neutral-500" />
                           Smart Objects ({psdInfo.smartObjects.length})
                         </div>
-                        <ChevronDown className={`w-4 h-4 transition-transform duration-300 ${showSmartObjects ? "" : "-rotate-90"}`} />
+                        <ChevronDown className={`w-4 h-4 transition-transform [transition-duration:var(--dur-slow)] ${showSmartObjects ? "" : "-rotate-90"}`} />
                       </button>
                       {showSmartObjects && (
                         <div className="border-t border-neutral-800 overflow-y-auto max-h-60 no-scrollbar">
@@ -2662,15 +2816,15 @@ export default function Home() {
 
                   {/* Section: Adjustments */}
                   {psdInfo && psdInfo.adjustments.filter(a => !a.hidden).length > 0 && (
-                    <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden transition-colors duration-300">
+                    <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden transition-colors [transition-duration:var(--dur-slow)]">
                       <button 
                         onClick={() => setShowAdjustments(!showAdjustments)}
                         className="w-full flex items-center justify-between p-4 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500 hover:bg-white/5 transition-colors"
                       >
                         <div className="flex items-center gap-2 text-neutral-300"><Settings2 className="w-3.5 h-3.5 text-neutral-500" /> Camadas de ajuste</div>
-                        <ChevronDown className={`w-4 h-4 transition-transform duration-300 ${showAdjustments ? "" : "-rotate-90"}`} />
+                        <ChevronDown className={`w-4 h-4 transition-transform [transition-duration:var(--dur-slow)] ${showAdjustments ? "" : "-rotate-90"}`} />
                       </button>
-                      <div className={`overflow-hidden transition-colors duration-300 ${showAdjustments ? "max-h-[500px] border-t border-neutral-800" : "max-h-0"}`}>
+                      <div className={`overflow-hidden transition-colors [transition-duration:var(--dur-slow)] ${showAdjustments ? "max-h-[500px] border-t border-neutral-800" : "max-h-0"}`}>
                         <div className="p-2 space-y-0.5">
                           {psdInfo.adjustments.filter(a => !a.hidden).map((a, i) => (
                             <label key={i} className={`flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer transition-colors ${hiddenLayers.has(a.path || a.name) ? "opacity-40" : "hover:bg-white/5"}`}>
@@ -2691,16 +2845,13 @@ export default function Home() {
                   </div>
                 )}
                 
-                <div className="flex flex-col gap-2 pt-2 pb-6 border-b border-neutral-900">
-                  <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-neutral-700 uppercase tracking-widest">
-                    <History className="w-3 h-3" /> Info do arquivo
-                  </div>
-                  <p className="text-[10px] text-neutral-600 text-center leading-relaxed">
-                    {selected.psdPath?.split(/[/\\]/).pop()}
-                    {selected.psdSizeBytes ? ` · ${(selected.psdSizeBytes / 1e6).toFixed(1)} MB` : ""}
-                    {psdInfo ? ` · ${psdInfo.width}×${psdInfo.height} px` : ""}
-                  </p>
-                </div>
+                {/* Rótulo fora, dado dentro: "Info do arquivo" não desambiguava
+                    nada — nome de arquivo, MB e px se anunciam sozinhos. */}
+                <p className="text-[10px] text-neutral-600 text-center leading-relaxed pt-2 pb-6 border-b border-neutral-900">
+                  {selected.psdPath?.split(/[/\\]/).pop()}
+                  {selected.psdSizeBytes ? ` · ${(selected.psdSizeBytes / 1e6).toFixed(1)} MB` : ""}
+                  {psdInfo ? ` · ${psdInfo.width}×${psdInfo.height} px` : ""}
+                </p>
               </div>
             </div>
 
@@ -2715,7 +2866,7 @@ export default function Home() {
                 <p className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-600 group-hover:text-neutral-400 transition-colors">
                   {faces.length > 1 && activeFace ? `Arte · ${activeFace.name}` : "Sua Arte"}
                 </p>
-                <ChevronDown className={`w-3.5 h-3.5 text-neutral-700 group-hover:text-neutral-500 transition-colors duration-200 ${artSectionCollapsed ? "" : "rotate-180"}`} />
+                <ChevronDown className={`w-3.5 h-3.5 text-neutral-700 group-hover:text-neutral-500 transition-colors [transition-duration:var(--dur-base)] ${artSectionCollapsed ? "" : "rotate-180"}`} />
               </button>
 
               {/* Conteúdo colapsável */}
@@ -2779,14 +2930,17 @@ export default function Home() {
                   desfazer ao lado. Automatismo silencioso numa etapa que produz
                   o entregável final vira surpresa no PNG. */}
               {framingHint && artPreview && (
-                <div className="flex items-start gap-2.5 p-3 rounded-xl bg-acc/8 border border-acc/20 animate-in fade-in slide-in-from-bottom-2 duration-200">
-                  <Zap className="w-3.5 h-3.5 text-acc shrink-0 mt-0.5" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-bold text-acc leading-relaxed">
-                      {framingHint.kind === "logo" ? "Marca detectada" : "Layout detectado"} ·{" "}
-                      <span className="text-neutral-300 font-medium">{framingHint.reason}</span>
-                    </p>
-                  </div>
+                // Três orações, um ícone de raio e uma moldura tingida para dizer
+                // uma coisa só. O que o usuário precisa saber é o ESTADO ("a arte
+                // está preenchendo") e a saída ("encaixar"). O porquê da decisão
+                // (`reason`) vira `title` — quem quiser auditar passa o mouse.
+                <div
+                  className="flex items-center gap-2 text-[10px] text-neutral-500"
+                  title={framingHint.reason}
+                >
+                  <span className="truncate">
+                    {framingHint.mode === "cover" ? "Preenchendo a superfície" : "Encaixada inteira"}
+                  </span>
                   <button
                     onClick={() => {
                       setFrame((f) => ({
@@ -2796,7 +2950,7 @@ export default function Home() {
                       }));
                       setFramingHint(null);
                     }}
-                    className="shrink-0 text-[9px] font-black uppercase tracking-widest text-neutral-500 hover:text-white transition-colors"
+                    className="ml-auto shrink-0 font-bold text-neutral-400 hover:text-white transition-colors"
                   >
                     {framingHint.mode === "cover" ? "Encaixar" : "Preencher"}
                   </button>
@@ -2812,6 +2966,10 @@ export default function Home() {
                   </p>
                 </div>
               )}
+              {/* Dois primários desabilitados a 30% não são "ações indisponíveis":
+                  são ruído no exato instante em que a única ação certa (soltar a
+                  arte) está logo acima. Sem face preenchida, a linha não existe. */}
+              {filledCount > 0 && (
               <div className="flex gap-3">
                 <button
                   onClick={() => handleRender(true)}
@@ -2837,6 +2995,7 @@ export default function Home() {
                   </button>
                 )}
               </div>
+              )}
 
               {renderResult && !rendering && !isPreviewResult && (
                 <a
@@ -2872,17 +3031,15 @@ export default function Home() {
       </PanelGroup>
 
       {/* Render Logs modal */}
-      {showLogs && (
-        <div className="fixed inset-0 z-[95] bg-black/85 backdrop-blur-sm flex items-end justify-end p-4 animate-in fade-in duration-150" onClick={() => setShowLogs(false)}>
-          <div
-            className="w-[500px] max-h-[70vh] flex flex-col rounded-2xl border border-neutral-800 bg-neutral-950 shadow-2xl animate-in slide-in-from-bottom-4 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
+      <Dialog open={showLogs} onOpenChange={setShowLogs}>
+        <DialogContent title="Logs do render" skin="neutral" showClose={false} bare
+          className="flex items-end justify-end p-4 pointer-events-none">
+          <div className="pointer-events-auto w-[min(500px,92vw)] max-h-[70vh] flex flex-col rounded-2xl border border-neutral-800 bg-neutral-950 shadow-2xl">
             <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-900">
               <div className="flex items-center gap-2">
                 <Terminal className="w-3.5 h-3.5 text-neutral-500" />
                 <span className="text-[11px] font-black text-neutral-300 tracking-wide uppercase">Render Logs</span>
-                <span className="text-[10px] font-bold text-neutral-600 bg-neutral-900 px-1.5 py-0.5 rounded-md border border-neutral-800">{renderLogs.length}</span>
+                <span className="text-[10px] font-bold text-neutral-600 bg-neutral-900 px-1.5 py-0.5 rounded-lg border border-neutral-800">{renderLogs.length}</span>
               </div>
               <button onClick={() => setShowLogs(false)} className="text-neutral-600 hover:text-white transition-colors">
                 <X className="w-4 h-4" />
@@ -2898,8 +3055,8 @@ export default function Home() {
               ))}
             </div>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* Session modal */}
       {showSession && (() => {
@@ -2921,8 +3078,9 @@ export default function Home() {
         };
 
         return (
-          <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-sm flex flex-col animate-in fade-in duration-200" onClick={() => setShowSession(false)}>
-            <div className="flex flex-col h-full max-w-5xl w-full mx-auto" onClick={(e) => e.stopPropagation()}>
+          <Dialog open={showSession} onOpenChange={setShowSession}>
+            <DialogContent title="Renders desta sessão" skin="neutral" showClose={false} bare className="flex flex-col">
+            <div className="flex flex-col h-full max-w-5xl w-full mx-auto">
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-neutral-950">
                 <div className="flex items-center gap-3">
@@ -2964,12 +3122,12 @@ export default function Home() {
                       <div
                         key={id}
                         onClick={() => setSessionSelected((s) => { const n = new Set(s); isChecked ? n.delete(id) : n.add(id); return n; })}
-                        className={`relative rounded-2xl overflow-hidden border cursor-pointer transition-colors duration-200 group ${isChecked ? "border-white ring-2 ring-white/20" : "border-neutral-800 hover:border-neutral-600"}`}
+                        className={`relative rounded-2xl overflow-hidden border cursor-pointer transition-colors [transition-duration:var(--dur-base)] group ${isChecked ? "border-white ring-2 ring-white/20" : "border-neutral-800 hover:border-neutral-600"}`}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={url} alt={name} className="w-full aspect-[4/3] object-cover" />
                         {/* Checkbox */}
-                        <div className={`absolute top-2 left-2 w-5 h-5 rounded-md border flex items-center justify-center transition-[color,background-color,border-color,opacity] ${isChecked ? "bg-white border-white" : "bg-black/50 border-neutral-600 opacity-0 group-hover:opacity-100"}`}>
+                        <div className={`absolute top-2 left-2 w-5 h-5 rounded-lg border flex items-center justify-center transition-[color,background-color,border-color,opacity] ${isChecked ? "bg-white border-white" : "bg-black/50 border-neutral-600 opacity-0 group-hover:opacity-100"}`}>
                           {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-black" />}
                         </div>
                         {/* Download button */}
@@ -2989,16 +3147,18 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          </div>
+            </DialogContent>
+          </Dialog>
         );
       })()}
 
-      {/* Fullscreen overlay */}
-      {fullscreen && renderResult && (
-        <div
-          className="fixed inset-0 z-[100] bg-black/98 flex flex-col animate-in fade-in duration-300"
-          onClick={() => setFullscreen(false)}
-        >
+      {/* Fullscreen overlay. O `renderResult &&` externo continua sendo o que
+          estreita o tipo para o `<img src>` e o `download` — `open` sozinho é só
+          um booleano e o JSX é avaliado de qualquer jeito. */}
+      {renderResult && (
+      <Dialog open={fullscreen} onOpenChange={setFullscreen}>
+        <DialogContent title="Render em tela cheia" skin="neutral" showClose={false} bare
+          className="bg-black/98 flex flex-col">
           <div className="p-4 flex justify-between items-center shrink-0">
             <div className="flex items-center gap-3">
               <ImageIcon className="w-5 h-5 text-neutral-500" />
@@ -3041,48 +3201,48 @@ export default function Home() {
             {renderTime != null && renderTime > 0 && `Processado em ${(renderTime / 1000).toFixed(1)}s`}
             {renderResult && ` · ${isPreviewResult ? "JPEG Preview" : "PNG Lossless"}`}
           </div>
-        </div>
+        </DialogContent>
+      </Dialog>
       )}
 
-      {/* Advanced Settings Modal */}
-      {showSettings && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 animate-in fade-in duration-300">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" onClick={() => setShowSettings(false)} />
-          <div className="relative w-full max-w-sm bg-neutral-950 border border-neutral-800 rounded-3xl flex flex-col overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
-            <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/30 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-neutral-800 flex items-center justify-center">
-                  <Settings2 className="w-4 h-4 text-neutral-300" />
-                </div>
-                <p className="text-sm font-black text-white">Configurações avançadas</p>
+      {/* Advanced Settings Modal — Radix: foco preso, ESC, rolagem do fundo travada
+          e `aria-modal`. A versão à mão não tinha nada disso: Tab saía para o grid
+          atrás e o leitor de tela nunca soube que havia um diálogo. */}
+      <Dialog open={showSettings} onOpenChange={setShowSettings}>
+        <DialogContent title="Configurações avançadas" skin="neutral" showClose={false}
+          className="w-[min(24rem,92vw)] rounded-2xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/30 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-neutral-800 flex items-center justify-center">
+                <Settings2 className="w-4 h-4 text-neutral-300" />
               </div>
-              <button onClick={() => setShowSettings(false)} className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
-                <X className="w-4 h-4" />
-              </button>
+              <p className="text-sm font-black text-white">Configurações avançadas</p>
             </div>
-            <div className="p-5 flex flex-col gap-3">
-              <button
-                onClick={() => { setShowSettings(false); setShowDupes(true); if (!dupesGroups.length && !dupesScanning) scanDuplicates(); }}
-                className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 hover:bg-amber-500/15 hover:border-amber-500/30 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98] group text-left"
-              >
-                <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0 group-hover:bg-amber-500/25 transition-colors">
-                  <Copy className="w-4.5 h-4.5 text-amber-400" />
-                </div>
-                <div>
-                  <p className="text-sm font-black text-amber-300">Duplicatas</p>
-                  <p className="text-[10px] text-neutral-500 font-medium">Encontrar e remover PSDs duplicados</p>
-                </div>
-              </button>
-            </div>
+            <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
+              <X className="w-4 h-4" />
+            </DialogClose>
           </div>
-        </div>
-      )}
+          <div className="p-5 flex flex-col gap-3">
+            <button
+              onClick={() => { setShowSettings(false); setShowDupes(true); if (!dupesGroups.length && !dupesScanning) scanDuplicates(); }}
+              className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 hover:bg-amber-500/15 hover:border-amber-500/30 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98] group text-left"
+            >
+              <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0 group-hover:bg-amber-500/25 transition-colors">
+                <Copy className="w-4.5 h-4.5 text-amber-400" />
+              </div>
+              <div>
+                <p className="text-sm font-black text-amber-300">Duplicatas</p>
+                <p className="text-[10px] text-neutral-500 font-medium">Encontrar e remover PSDs duplicados</p>
+              </div>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Duplicates Modal */}
-      {showDupes && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 animate-in fade-in duration-300">
-          <div className="absolute inset-0 bg-black/90 backdrop-blur-xl" onClick={() => setShowDupes(false)} />
-          <div className="relative w-full max-w-5xl bg-neutral-950 border border-neutral-800 rounded-3xl flex flex-col max-h-[92vh] overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
+      <Dialog open={showDupes} onOpenChange={setShowDupes}>
+        <DialogContent title="Duplicatas" skin="neutral" showClose={false}
+          className="w-[min(64rem,92vw)] max-h-[92vh] rounded-2xl overflow-hidden">
 
             {/* ── Header ── */}
             <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/30 shrink-0">
@@ -3139,7 +3299,7 @@ export default function Home() {
                 </div>
                 <div className="w-full h-[3px] bg-neutral-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-amber-500 rounded-full transition-colors duration-300"
+                    className="h-full bg-amber-500 rounded-full transition-colors [transition-duration:var(--dur-slow)]"
                     style={{ width: `${dupesProgress.pct}%` }}
                   />
                 </div>
@@ -3232,7 +3392,7 @@ export default function Home() {
                     </div>
                     <div className="w-full h-1 bg-neutral-900 rounded-full overflow-hidden">
                       {dupesProgress ? (
-                        <div className="h-full bg-amber-500 rounded-full transition-colors duration-300" style={{ width: `${dupesProgress.pct}%` }} />
+                        <div className="h-full bg-amber-500 rounded-full transition-colors [transition-duration:var(--dur-slow)]" style={{ width: `${dupesProgress.pct}%` }} />
                       ) : (
                         <div className="h-full bg-amber-500/60 animate-progress-indefinite rounded-full" style={{ width: "40%" }} />
                       )}
@@ -3285,7 +3445,7 @@ export default function Home() {
                     >
                       <span className="text-[10px] font-black text-neutral-700">{gi + 1}</span>
                       <div className="flex items-center gap-2 min-w-0 pr-4">
-                        <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-neutral-700 group-hover:text-neutral-400 transition-colors duration-200 ${isExpanded ? "rotate-90 text-neutral-400" : ""}`} />
+                        <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-neutral-700 group-hover:text-neutral-400 transition-colors [transition-duration:var(--dur-base)] ${isExpanded ? "rotate-90 text-neutral-400" : ""}`} />
                         <span className="text-[11px] font-bold text-neutral-200 truncate">{fileName}</span>
                         <span className="shrink-0 text-[8px] font-black text-neutral-700 bg-neutral-800/80 px-1.5 py-0.5 rounded">{ext}</span>
                       </div>
@@ -3324,9 +3484,9 @@ export default function Home() {
                               <div className="flex items-center gap-2 min-w-0">
                                 {thumbUrl ? (
                                   // eslint-disable-next-line @next/next/no-img-element
-                                  <img src={thumbUrl} alt={name} className="w-7 h-7 shrink-0 rounded-md object-cover border border-neutral-800" />
+                                  <img src={thumbUrl} alt={name} className="w-7 h-7 shrink-0 rounded-lg object-cover border border-neutral-800" />
                                 ) : (
-                                  <div className="w-7 h-7 shrink-0 rounded-md bg-neutral-800 border border-neutral-700 flex items-center justify-center">
+                                  <div className="w-7 h-7 shrink-0 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center">
                                     <Layers className="w-3.5 h-3.5 text-neutral-600" />
                                   </div>
                                 )}
@@ -3379,15 +3539,13 @@ export default function Home() {
               </div>
             )}
 
-          </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* Brand Asset Library Modal */}
-      {showLibrary && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 animate-in fade-in duration-300">
-          <div className="absolute inset-0 bg-black/90 backdrop-blur-xl" onClick={() => setShowLibrary(false)} />
-          <div className="relative w-full max-w-4xl bg-neutral-900 border border-neutral-800 rounded-3xl flex flex-col max-h-[85vh] overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
+      <Dialog open={showLibrary} onOpenChange={setShowLibrary}>
+        <DialogContent title="Biblioteca de Assets" skin="neutral" showClose={false}
+          className="w-[min(56rem,92vw)] max-h-[85vh] rounded-2xl overflow-hidden bg-neutral-900">
             <div className="p-6 border-b border-neutral-800 flex justify-between items-center bg-neutral-950/30">
               <div>
                 <h3 className="text-lg font-black tracking-tight">Biblioteca de Assets</h3>
@@ -3433,7 +3591,7 @@ export default function Home() {
                       onClick={() => loadAssetAsArt(asset)}
                       className="group flex flex-col gap-3 text-left animate-in fade-in slide-in-from-bottom-2"
                     >
-                      <div className="aspect-square relative bg-white/5 border border-white/5 rounded-2xl overflow-hidden group-hover:border-white/20 group-hover:bg-white/10 transition-[color,background-color,border-color,box-shadow,opacity,transform] p-6 shadow-sm group-hover:shadow-2xl group-hover:-translate-y-1 duration-300">
+                      <div className="aspect-square relative bg-white/5 border border-white/5 rounded-2xl overflow-hidden group-hover:border-white/20 group-hover:bg-white/10 transition-[color,background-color,border-color,box-shadow,opacity,transform] p-6 shadow-sm group-hover:shadow-2xl group-hover:-translate-y-1 [transition-duration:var(--dur-slow)]">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img 
                           src={asset.thumbnail} 
@@ -3455,9 +3613,8 @@ export default function Home() {
               <ExternalLink className="w-3.5 h-3.5 text-neutral-700" />
               <p className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest">Selecione um asset para aplicar ao mockup</p>
             </div>
-          </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* Revisão do ingest — pré-voo, triagem e commit seletivo. */}
       {reviewPath && (

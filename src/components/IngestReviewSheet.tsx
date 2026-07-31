@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, FolderPlus, Layers, Search, Sparkles, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { Dialog, DialogContent } from "@/components/ui/Dialog";
 import { FlyingPaperLoader } from "@/components/ui/FlyingPaperLoader";
 import { GlitchChars } from "@/components/ui/GlitchChars";
 import { transitions } from "@/lib/motion";
@@ -309,19 +310,17 @@ export default function IngestReviewSheet({
   }, [onClose, phase, setManyVisible, allVisibleSelected]);
 
   return (
-    <div className="fixed inset-0 z-[125] flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-black/85 backdrop-blur-xl animate-in fade-in duration-150"
-        onClick={phase === "ingesting" ? undefined : onClose}
-      />
+    <Dialog open onOpenChange={(o) => { if (!o && phase !== "ingesting") onClose(); }}>
+      <DialogContent title="Revisar ingest" skin="neutral" showClose={false} bare
+        className="flex items-center justify-center p-4"
+        onEscapeKeyDown={(e) => { if (phase === "ingesting") e.preventDefault(); }}
+        onPointerDownOutside={(e) => { if (phase === "ingesting") e.preventDefault(); }}
+      >
       <motion.div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Revisar ingest"
         initial={{ opacity: 0, scale: 0.97, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={transitions.base}
-        className="relative w-full max-w-5xl h-[88vh] bg-neutral-950 border border-neutral-800 rounded-3xl flex flex-col overflow-hidden shadow-2xl"
+        className="relative w-full max-w-5xl h-[88vh] bg-neutral-950 border border-neutral-800 rounded-2xl flex flex-col overflow-hidden shadow-2xl"
       >
         {/* ── Header ── */}
         <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/30 shrink-0 gap-4">
@@ -563,7 +562,7 @@ export default function IngestReviewSheet({
                             }`}
                           >
                             <span
-                              className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                              className={`w-4 h-4 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
                                 on ? "bg-white border-white" : "border-neutral-700"
                               }`}
                             >
@@ -655,6 +654,7 @@ export default function IngestReviewSheet({
           </div>
         )}
       </motion.div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

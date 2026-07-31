@@ -12,6 +12,7 @@ import { ArtDropZone } from "@/components/photo-tools/ArtDropZone";
 import { ExportBar } from "@/components/photo-tools/ExportBar";
 import { Slider } from "@/components/ui/Slider";
 import { IconButton } from "@/components/ui/IconButton";
+import { Switch } from "@/components/ui/Switch";
 import { LOOK_PRESETS, AI_BLEND_DEFAULTS, lookCssFilter } from "@/components/photo-tools/looks";
 import type { FrameConfig } from "@/lib/art-frame";
 
@@ -78,11 +79,20 @@ export interface RenderPanelProps {
 }
 
 export function RenderPanel(p: RenderPanelProps) {
+  // Sem arte não existe render, e sem render nada abaixo tem sobre o que agir:
+  // iluminação, visual, exportação, publicação, custo e "Melhorar" viravam uma
+  // coluna de controles mortos exatamente no momento em que a atividade é UMA —
+  // soltar a arte. O passo se isola sozinho.
+  if (!p.artPreview) {
+    return <ArtDropZone onFile={p.handleArtFile} dragOver={false} size="panel" />;
+  }
+
   return (
     <>
-      {/* Art upload + fit-mode controls (hidden #art-input-fs lives in the page, always mounted) */}
-      {p.artPreview ? (
-        <div className="bg-zinc-800/40 rounded-xl border border-zinc-700/40 p-2">
+      {/* Art thumbnail + fit-mode (hidden #art-input-fs lives in the page, always mounted).
+          Sem moldura própria — o painel flutuante já é a caixa. */}
+      {(
+        <div>
           <ArtFramePanel
             artPreview={p.artPreview}
             artDims={p.artDims}
@@ -100,8 +110,6 @@ export function RenderPanel(p: RenderPanelProps) {
             Trocar arte
           </button>
         </div>
-      ) : (
-        <ArtDropZone onFile={p.handleArtFile} dragOver={false} size="panel" />
       )}
 
       {/* Lighting — shadow (multiply) · ambient (screen) · color cast */}
@@ -152,6 +160,7 @@ export function RenderPanel(p: RenderPanelProps) {
         <div className="flex gap-1 flex-wrap">
           {LOOK_PRESETS.map((preset) => (
             <button key={preset.name}
+              aria-label={`Visual ${preset.name}`}
               onMouseEnter={() => p.onPreviewLook?.(lookCssFilter(preset))}
               onMouseLeave={() => p.onPreviewLook?.(null)}
               onClick={() => { p.onPreviewLook?.(null); p.setActiveLook(preset.name); p.setFxGrain(preset.grain); p.setFxWarmth(preset.warmth); p.setFxSaturation(preset.saturation); p.setFxBrightness(preset.brightness); p.setFxContrast(100); }}
@@ -191,20 +200,30 @@ export function RenderPanel(p: RenderPanelProps) {
         </div>
       )}
 
-      {/* Export — formato + qualidade + salvar */}
-      <ExportBar src={p.activeImageUrl} />
+      {/* Export — só existe quando há imagem para exportar (formato + qualidade +
+          botão com src nulo eram três controles mortos). */}
+      {p.activeImageUrl && <ExportBar src={p.activeImageUrl} />}
 
-      {/* Actions */}
+      {/* Actions — "Biblioteca" é primário e primário desabilitado é mentira:
+          antes do primeiro render ele não renderiza, e o disparo manual ocupa a
+          linha inteira nomeado, porque é a única ação possível ali. */}
       <div className="flex items-center gap-1.5">
-        <button onClick={p.handlePublish} disabled={!p.renderUrl || p.publishState === "loading"}
-          className={["flex-1 justify-center px-3 py-2 rounded-xl text-xs transition-colors flex items-center gap-1.5",
-            p.publishState === "done" ? "bg-acc2 text-zinc-950" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-400 disabled:text-zinc-600"].join(" ")}>
-          {p.publishState === "done" ? <><CheckCircle2 size={11} /> Salvo!</> :
-           p.publishState === "loading" ? <><Loader2 size={11} className="animate-spin" /> Salvando…</> :
-           "Biblioteca"}
-        </button>
-        <IconButton icon={RefreshCw} label="Renderizar de novo" onClick={p.handleRender}
-          disabled={!p.artFile || p.renderState === "loading"} className="w-9 h-9 rounded-xl" />
+        {p.renderUrl ? (
+          <>
+            <button onClick={p.handlePublish} disabled={p.publishState === "loading"}
+              className={["flex-1 justify-center px-3 py-2 rounded-xl text-xs transition-colors flex items-center gap-1.5",
+                p.publishState === "done" ? "bg-acc2 text-zinc-950" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-400 disabled:text-zinc-600"].join(" ")}>
+              {p.publishState === "done" ? <><CheckCircle2 size={11} /> Salvo!</> :
+               p.publishState === "loading" ? <><Loader2 size={11} className="animate-spin" /> Salvando…</> :
+               "Biblioteca"}
+            </button>
+            <IconButton icon={RefreshCw} label="Renderizar de novo" onClick={p.handleRender}
+              disabled={p.renderState === "loading"} className="w-9 h-9 rounded-xl" />
+          </>
+        ) : (
+          <IconButton icon={RefreshCw} label="Renderizar" text="Renderizar" onClick={p.handleRender}
+            disabled={p.renderState === "loading"} className="flex-1 rounded-xl" />
+        )}
       </div>
       {p.publishErr && <p className="text-red-400 text-[9px]">{p.publishErr}</p>}
       {p.renderErr && <p className="text-red-400 text-[9px] flex items-center gap-1"><AlertTriangle size={8} /> {p.renderErr}</p>}
@@ -283,11 +302,10 @@ export function RenderPanel(p: RenderPanelProps) {
                 <span className="text-[10px] text-zinc-400">Textura</span>
                 <div className="flex items-center gap-2">
                   {p.aiTexture && <span className="text-[9px] text-zinc-500 font-mono">{Math.round(p.aiTextureOpacity * 100)}%</span>}
-                  <button onClick={() => p.setAiTexture((v) => !v)}
-                    className={["relative w-7 h-3.5 rounded-full transition-colors flex-none", p.aiTexture ? "bg-acc" : "bg-zinc-700"].join(" ")}>
-                    <span className={["absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow transition-transform",
-                      p.aiTexture ? "translate-x-3.5" : "translate-x-0.5"].join(" ")} />
-                  </button>
+                  {/* Era a MESMA peça da loja com outra medida (`h-3.5`/knob `w-2.5`
+                      contra `h-4`/`w-3`), e nenhuma das duas anunciava `role="switch"`. */}
+                  <Switch checked={p.aiTexture} onCheckedChange={p.setAiTexture} label="Textura"
+                    className="data-[state=checked]:bg-acc data-[state=unchecked]:bg-zinc-700" />
                 </div>
               </div>
               {p.aiTexture && (

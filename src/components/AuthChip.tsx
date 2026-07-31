@@ -56,7 +56,7 @@ export function AuthChip({ compact }: { compact?: boolean } = {}) {
         {!compact && <span className="text-[11px] text-zinc-300 max-w-[140px] truncate">{label}</span>}
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-56 z-50 bg-zinc-900 border border-zinc-700 rounded-md shadow-xl text-[12px]">
+        <div className="absolute right-0 top-full mt-1 w-56 z-50 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl text-[12px]">
           <div className="px-3 py-2 border-b border-zinc-800">
             <div className="flex items-center gap-2 text-zinc-300"><User size={12} />{label}</div>
             {user.email && user.email !== label && <div className="text-[10px] text-zinc-500 mt-0.5 truncate">{user.email}</div>}

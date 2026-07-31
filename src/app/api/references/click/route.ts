@@ -14,8 +14,13 @@ import { logClick } from "@/lib/search-telemetry";
 export async function POST(req: NextRequest) {
   try {
     const { query, id } = await req.json();
-    if (typeof id === "string" && id && typeof query === "string" && query.trim()) {
-      await logClick(query.trim(), id);
+    // A query é OPCIONAL. Exigi-la aqui (como a versão anterior fazia, espelhando
+    // a mesma trava no cliente) descartava todo sinal vindo da navegação do grid —
+    // e a listagem sem busca é onde 100% das sessões começam. Sem termo, `logClick`
+    // incrementa só a popularidade global, que é exatamente o sinal que a ordenação
+    // "Mais usados" consome.
+    if (typeof id === "string" && id) {
+      await logClick(typeof query === "string" ? query.trim() : "", id);
     }
   } catch { /* sinal perdido não vira erro pro usuário */ }
   return new NextResponse(null, { status: 204 });

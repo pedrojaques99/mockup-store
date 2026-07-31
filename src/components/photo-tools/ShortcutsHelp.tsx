@@ -4,7 +4,7 @@
  * ShortcutsHelp — cheatsheet de atalhos (abre com `?` ou pelo botão no header).
  * Ferramentas vêm do registry (SSoT) → nunca desatualiza. Skin Boxy (zinc/acc2).
  */
-import { useEffect } from "react";
+import { Dialog, DialogContent } from "@/components/ui/Dialog";
 import { X, Keyboard } from "lucide-react";
 import { PHOTO_TOOLS } from "@/components/photo-tools/registry";
 
@@ -22,23 +22,16 @@ function Row({ keys, desc }: { keys: string[]; desc: string }) {
 }
 
 export function ShortcutsHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
+  // O listener de ESC saiu daqui: o Dialog do Radix já trata (e trata melhor —
+  // fecha só a camada de cima quando há dois diálogos abertos).
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-6" role="dialog" aria-modal>
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-[min(460px,92vw)] rounded-2xl border border-zinc-700/60 bg-zinc-900 shadow-2xl overflow-hidden">
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent title="Atalhos" skin="zinc" showClose={false}
+        className="w-[min(460px,92vw)] overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-800">
           <Keyboard size={14} className="text-acc2" />
           <h2 className="text-sm font-medium text-zinc-100">Atalhos</h2>
-          <button onClick={onClose} className="ml-auto p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"><X size={15} /></button>
+          <button onClick={onClose} aria-label="Fechar" title="Fechar" className="ml-auto p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"><X size={15} /></button>
         </div>
 
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-3">
@@ -65,7 +58,7 @@ export function ShortcutsHelp({ open, onClose }: { open: boolean; onClose: () =>
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

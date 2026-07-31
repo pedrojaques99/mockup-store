@@ -42,6 +42,12 @@ export function aspectBucket(a: number | undefined): AspectBucket | undefined {
   return "square";
 }
 
+/**
+ * Ordenação da LISTAGEM (sem query de texto). Com query quem manda é a relevância —
+ * reordenar o resultado de uma busca por nome joga fora o rank que a cascata montou.
+ */
+export type SortMode = "popular" | "name";
+
 export interface SearchQuery {
   search?: string;
   studio?: string;
@@ -49,6 +55,8 @@ export interface SearchQuery {
   tagMode?: "AND" | "OR";
   aspect?: AspectBucket;
   requirePsd?: boolean;
+  /** Default `popular`. Ignorado quando há `search` (aí a ordem é a relevância). */
+  sort?: SortMode;
   page?: number;
   limit?: number;
 }
@@ -63,6 +71,57 @@ export function matchesFacets(d: SearchDoc, q: SearchQuery) {
     return q.tagMode === "OR" ? q.tags.some(has) : q.tags.every(has);
   }
   return true;
+}
+
+// ---------------------------------------------------------------- thumbnails órfãs
+
+/**
+ * Nome-base de um mockup: sem extensão e sem o sufixo de variação de tamanho.
+ *
+ * Os bundles do acervo vêm como `X.psd` + `X Pequena.jpeg` (ou `Média`, `preview`).
+ * O ingest gravou os dois como registros separados, e a imagem de referência ficou
+ * no JPEG — o PSD, que é o que o produto realmente usa, ficou sem thumbnail.
+ */
+export function mockupBaseName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\.(psd|jpe?g|png|webp|tiff?)$/i, "")
+    .replace(/\b(pequena|pequeno|media|média|grande|preview|small|medium|large)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Empresta a thumbnail do irmão de mesmo nome-base **e mesmo estúdio**.
+ *
+ * Medido no acervo real: 55 de 200 itens da primeira página não tinham
+ * `referenceImageUrl` — 27,5% do grid renderizando um ícone de camadas cinza — e
+ * 39 deles (71%) tinham um irmão com imagem. `01 Displacement` ficava cego enquanto
+ * `01 Displacement Pequena`, o MESMO mockup, exibia a foto.
+ *
+ * Só empresta: nunca inventa. Item sem irmão continua sem imagem, porque o estado
+ * "não temos preview deste PSD" é informação verdadeira e o grid tem de poder
+ * mostrá-la. Exigir o mesmo estúdio evita casar dois mockups homônimos de acervos
+ * diferentes.
+ */
+export function borrowSiblingThumbnails<T extends { name: string; studio: string; referenceImageUrl?: string }>(
+  docs: T[],
+): { docs: T[]; borrowed: number } {
+  const byBase = new Map<string, string>();
+  for (const d of docs) {
+    if (!d.referenceImageUrl) continue;
+    const key = `${d.studio}\u0000${mockupBaseName(d.name)}`;
+    if (!byBase.has(key)) byBase.set(key, d.referenceImageUrl);
+  }
+  let borrowed = 0;
+  const out = docs.map((d) => {
+    if (d.referenceImageUrl) return d;
+    const url = byBase.get(`${d.studio}\u0000${mockupBaseName(d.name)}`);
+    if (!url) return d;
+    borrowed++;
+    return { ...d, referenceImageUrl: url };
+  });
+  return { docs: out, borrowed };
 }
 
 // ---------------------------------------------------------------- índice
@@ -183,7 +242,26 @@ export function runSearch(
     }
     hits = ordered.map((id) => byId.get(id)!).filter(Boolean);
   } else {
-    hits = docs.filter((d) => matchesFacets(d, q)).sort((a, b) => a.name.localeCompare(b.name));
+    // A LISTAGEM (sem query) é a primeira tela de toda sessão, e até aqui ela era
+    // `localeCompare` do nome — sempre A→Z, sem jeito de trocar. Consequência real
+    // no acervo do usuário: as cinco primeiras posições eram `01`, `01 Displacement`,
+    // `01 Displacement Pequena`, `01 Form Displacer`, `01 Form Displacer Pequena` —
+    // variações do MESMO bundle, porque nome de arquivo não é critério de escolha
+    // de mockup. Pior: a telemetria já media popularidade global
+    // (`signals.docs[id]`, log-escalada e anti-feedback-loop) e esse sinal só entrava
+    // no ranking QUANDO havia query. O produto jogava fora tudo o que tinha aprendido
+    // exatamente na tela onde 100% das sessões começam.
+    //
+    // Agora o default é popularidade, com o nome como desempate — determinístico,
+    // então um acervo novo (zero cliques) cai no A→Z de antes, sem surpresa.
+    const filtered = docs.filter((d) => matchesFacets(d, q));
+    const byName = (a: SearchDoc, b: SearchDoc) => a.name.localeCompare(b.name);
+    if ((q.sort ?? "popular") === "popular" && boost) {
+      const pop = new Map(filtered.map((d) => [d.id, boost(d.id)]));
+      hits = filtered.sort((a, b) => (pop.get(b.id)! - pop.get(a.id)!) || byName(a, b));
+    } else {
+      hits = filtered.sort(byName);
+    }
   }
 
   const start = (page - 1) * limit;

@@ -13,12 +13,17 @@
     "doctor": "tsx --env-file=.env.local scripts/scene-doctor.ts",
     "search:report": "tsx scripts/search-report.ts",
     "render": "bun scripts/render-server.ts",
-    "render:ps": "bun scripts/ps-render-server.ts"
+    "render:ps": "bun scripts/ps-render-server.ts",
+    "perf:catalog": "npx tsx --env-file=.env.local scripts/measure-catalog.ts",
+    "ui:audit": "npx tsx scripts/ui-audit.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
     "@printmadehq/mockup-generator": "^1.0.5",
+    "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-popover": "^1.1.17",
+    "@radix-ui/react-select": "^2.3.7",
+    "@radix-ui/react-switch": "^1.3.7",
     "@radix-ui/react-tooltip": "^1.2.10",
     "@visant/psd-engine": "^0.1.0",
     "ag-psd": "^30.1.1",

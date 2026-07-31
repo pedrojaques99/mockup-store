@@ -28,7 +28,7 @@ export function Tooltip({
           side={side}
           sideOffset={sideOffset}
           className={cn(
-            "z-50 rounded-md border border-zinc-700/60 bg-zinc-800 px-2 py-1 text-[11px] font-medium text-zinc-200 shadow-lg select-none"
+            "z-50 rounded-lg border border-zinc-700/60 bg-zinc-800 px-2 py-1 text-[11px] font-medium text-zinc-200 shadow-lg select-none"
           )}
         >
           {label}

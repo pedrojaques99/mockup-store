@@ -36,9 +36,11 @@ export async function GET(req: NextRequest) {
   const aspectRaw = (searchParams.get("aspect") || "") as AspectBucket;
   const aspect = ASPECTS.has(aspectRaw) ? aspectRaw : undefined;
   const hasPsd = searchParams.get("has_psd") === "true";
+  // Só a listagem ordena; com texto quem manda é a relevância (o motor ignora).
+  const sort = searchParams.get("sort") === "name" ? "name" : "popular";
 
   const result = await searchRefs({
-    search, studio, tags, tagMode, aspect,
+    search, studio, tags, tagMode, aspect, sort,
     requirePsd: hasPsd,
     page: isNaN(page) ? 1 : page,
     limit: isNaN(limit) ? 60 : limit,

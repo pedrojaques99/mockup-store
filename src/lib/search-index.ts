@@ -17,7 +17,7 @@ import { getDb } from "./db";
 import { findPsdForRef } from "./psd-index";
 import { listPhotoScenes, type SceneInfo } from "./agent-mockup";
 import {
-  buildIndex, runSearch, computeFacets,
+  buildIndex, runSearch, computeFacets, borrowSiblingThumbnails,
   type SearchDoc, type SearchQuery, type Facets, type AspectBucket,
 } from "./search-engine";
 import { logQuery, getBoostFn } from "./search-telemetry";
@@ -175,7 +175,14 @@ async function buildCatalog(): Promise<SearchDoc[]> {
   const seen = new Set(merged.flatMap((d) => [d.id, d.photoSceneId].filter(Boolean) as string[]));
   for (const s of scenes) if (!seen.has(s.id)) merged.push(sceneToDoc(s));
 
-  return merged;
+  // Empresta a thumbnail do irmão (`X.psd` ⟷ `X Pequena.jpeg`) — medido: 27,5% da
+  // primeira página do acervo renderizava um placeholder cinza tendo a foto do
+  // MESMO mockup a um registro de distância. Correção de leitura, não de escrita:
+  // o Mongo não é tocado, e um reingest limpo continua sendo o conserto de verdade.
+  const { docs: withThumbs, borrowed } = borrowSiblingThumbnails(merged);
+  if (borrowed) console.log(`[search-index] ${borrowed} thumbnails herdadas de irmão de mesmo nome-base`);
+
+  return withThumbs;
 }
 
 function refresh(): Promise<SearchDoc[]> {
@@ -215,9 +222,13 @@ export async function searchRefs(q: SearchQuery) {
   const t0 = Date.now();
   const { mini, docs } = await getIndex();
   const term = q.search?.trim() ?? "";
-  // Popularidade só entra quando há texto — numa listagem sem busca a ordem é alfabética
-  // e previsível de propósito.
-  const boost = term ? await getBoostFn(term) : undefined;
+  // A popularidade entra NOS DOIS caminhos. Com texto ela desempata a relevância;
+  // sem texto ela É a ordenação (`sort: "popular"`, o default). Antes o boost só
+  // era carregado quando havia query — e a primeira tela de toda sessão, que é
+  // justamente a sem query, ignorava tudo o que a telemetria tinha aprendido.
+  // `getBoostFn("")` devolve só a popularidade global (afinidade query↔doc vazia),
+  // que é exatamente o sinal certo para uma listagem.
+  const boost = q.sort === "name" ? undefined : await getBoostFn(term);
   const { pass, ...result } = runSearch(docs, mini, q, boost);
 
   if (term) {

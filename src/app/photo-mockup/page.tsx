@@ -19,6 +19,7 @@ import { EditSelectionPanel } from "@/components/photo-tools/panels/EditSelectio
 import { ReflexoPanel } from "@/components/photo-tools/panels/ReflexoPanel";
 import { SceneInfo } from "@/components/photo-tools/panels/SceneInfo";
 import { RenderPanel } from "@/components/photo-tools/panels/RenderPanel";
+import { Dialog, DialogContent } from "@/components/ui/Dialog";
 import { CalibrationPanel } from "@/components/photo-tools/panels/CalibrationPanel";
 import { AuthChip } from "@/components/AuthChip";
 import { LuzPanel } from "@/components/photo-tools/panels/LuzPanel";
@@ -1245,11 +1246,11 @@ function PhotoMockupPageInner() {
     <div className="scene-maker min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
 
       {/* ── Shell Header ─────────────────────────────────────────────── */}
-      <header className="h-14 border-b border-neutral-900 bg-neutral-950/80 backdrop-blur-md flex items-center justify-between px-4 shrink-0 z-50 relative">
+      <header className="h-14 border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-md flex items-center justify-between px-4 shrink-0 z-50 relative">
 
         {/* Left: brand + nav */}
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 pr-4 border-r border-neutral-800">
+          <div className="flex items-center gap-2 pr-4 border-r border-zinc-800">
             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center shrink-0">
               <div className="w-3.5 h-3.5 bg-black rounded-sm" />
             </div>
@@ -1259,7 +1260,7 @@ function PhotoMockupPageInner() {
           <nav className="flex items-center gap-1">
             <Link
               href="/"
-              className="px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-colors"
+              className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
             >
               Store
             </Link>
@@ -1279,50 +1280,54 @@ function PhotoMockupPageInner() {
             id="vsn-input" type="file" accept=".vsn" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) openProject(f); e.target.value = ""; }}
           />
-          <div className="flex items-center gap-1.5">
+          {/* Ações de arquivo: só-ícone, mesma gramática do desfazer/refazer/atalhos
+              logo ao lado. Antes o mesmo header falava duas línguas para ações de
+              peso igual — e três rótulos de texto pagavam espaço permanente por
+              operações que acontecem uma vez por sessão. `title` é o rótulo. */}
+          <div className="flex items-center gap-0.5">
             <button
               onClick={() => document.getElementById("vsn-input")?.click()}
               title="Abrir projeto (.vsn)"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-colors"
+              aria-label="Abrir projeto"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
             >
-              <FolderOpen size={11} />
-              Abrir
+              <FolderOpen size={14} />
             </button>
             {photoUrl && (
-              <button
-                onClick={saveProject}
-                title="Salvar projeto em arquivo (.vsn) — foto + luz + máscaras + ajustes"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-colors"
-              >
-                <Save size={11} />
-                Salvar
-              </button>
+              <>
+                <button
+                  onClick={saveProject}
+                  title="Salvar projeto em arquivo (.vsn) — foto + luz + máscaras + ajustes"
+                  aria-label="Salvar projeto"
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
+                >
+                  <Save size={14} />
+                </button>
+                <button
+                  onClick={resetPhoto}
+                  title="Novo projeto — descarta esta cena e sobe uma nova foto"
+                  aria-label="Novo projeto"
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
+                >
+                  <RefreshCw size={14} />
+                </button>
+              </>
             )}
           </div>
-          {photoUrl && (
-            <button
-              onClick={resetPhoto}
-              title="Recomeçar — descarta esta cena e sobe uma nova foto"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-white hover:bg-white/5 border border-neutral-800 hover:border-neutral-700 transition-colors"
-            >
-              <RefreshCw size={11} />
-              Novo projeto
-            </button>
-          )}
           <AuthChip />
 
-          <div className="flex items-center gap-0.5 pr-3 border-r border-neutral-800">
+          <div className="flex items-center gap-0.5 pr-3 border-r border-zinc-800">
             <button
               onClick={() => editorHistory.undo()} disabled={!canUndo}
               title="Desfazer (Ctrl+Z)"
-              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/5 disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
             >
               <Undo2 size={14} />
             </button>
             <button
               onClick={() => editorHistory.redo()} disabled={!canRedo}
               title="Refazer (Ctrl+Shift+Z)"
-              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/5 disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
             >
               <Redo2 size={14} />
             </button>
@@ -1330,7 +1335,7 @@ function PhotoMockupPageInner() {
               onClick={() => setShortcutsOpen(true)}
               title="Atalhos (?)"
               aria-label="Atalhos"
-              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/5 transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
             >
               <Keyboard size={14} />
             </button>
@@ -1711,15 +1716,13 @@ function PhotoMockupPageInner() {
                     <div className="space-y-3">
 
                       {/* Painel "Superfície" — ponte SSoT com /calibrate (mesh + disp + material + mask). */}
-                      {photoUrl && tool === "calibrate" && (
-                        <div className="bg-zinc-800/40 rounded-xl border border-zinc-700/40 p-2">
-                          <CalibrationPanel />
-                        </div>
-                      )}
+                      {photoUrl && tool === "calibrate" && <CalibrationPanel />}
 
-                      {/* Surface tools — one canvas; the rail switches what overlays it. */}
+                      {/* Surface tools — one canvas; the rail switches what overlays it.
+                          Sem moldura própria: o painel flutuante JÁ é a caixa; embrulhar
+                          de novo é uma borda que o olho lê sem ganhar informação. */}
                       {photoUrl && (tool === "corners" || tool === "mask" || tool === "reflect") && (
-                        <div className="space-y-2 bg-zinc-800/40 rounded-xl border border-zinc-700/40 p-2">
+                        <div className="space-y-2">
                           {tool === "corners" && <CornersPanel onConfirm={() => setTool("render")} size={surfaceSize} />}
                           {/* Seleção da edição (aiedit) — painel dedicado, separado da máscara de arte/design. */}
                           {tool === "mask" && maskTarget === "aiedit" && (
@@ -1818,8 +1821,12 @@ function PhotoMockupPageInner() {
                         </div>
                       )}
 
-                      {/* Scene thumbnail + surface (shared across tools) */}
-                      {photoUrl && (
+                      {/* Identidade da cena + re-detectar. Vive SÓ nas duas ferramentas
+                          cuja atividade é definir a superfície. Nas outras sete era uma
+                          miniatura de 48px da mesma imagem que ocupa a tela inteira
+                          atrás do painel — e deixava um "Re-detectar" (que reseta o quad)
+                          a um clique de distância de quem está mexendo em Luz ou Cortar. */}
+                      {photoUrl && (tool === "corners" || tool === "calibrate") && (
                         <SceneInfo photoUrl={photoUrl} surfaceType={analysis?.surfaceType} material={analysis?.material}
                           imgDims={imgDims} onReanalyze={() => handleAnalyze(true)} analyzing={analyzeState === "loading"} />
                       )}
@@ -1983,11 +1990,9 @@ function PhotoMockupPageInner() {
                 />
 
                 {/* Modal de nome do publish (design system — substitui o window.prompt). */}
-                {publishModalOpen && (
-                  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-                    onClick={() => setPublishModalOpen(false)}>
-                    <div className="w-[min(360px,90vw)] rounded-2xl border border-zinc-700/70 bg-zinc-900 shadow-2xl p-4 space-y-3"
-                      onClick={(e) => e.stopPropagation()}>
+                <Dialog open={publishModalOpen} onOpenChange={setPublishModalOpen}>
+                  <DialogContent title="Publicar na Biblioteca" skin="zinc" showClose={false}
+                    className="w-[min(360px,90vw)] p-4 space-y-3">
                       <p className="text-[11px] uppercase tracking-widest text-zinc-500">Publicar na Biblioteca</p>
                       <input
                         autoFocus
@@ -2003,9 +2008,8 @@ function PhotoMockupPageInner() {
                         <button onClick={() => doPublish(publishName)} disabled={!publishName.trim()}
                           className="px-3 py-1.5 rounded-lg text-xs font-medium bg-acc2 text-zinc-950 hover:bg-acc2/90 disabled:opacity-40 transition-colors">Salvar</button>
                       </div>
-                    </div>
-                  </div>
-                )}
+                  </DialogContent>
+                </Dialog>
 
           </div>
         </div>

@@ -1,6 +1,6 @@
 name: CI
 
-# Gate de qualidade — todo push/PR passa por tsc + lint + test + build.
+# Gate de qualidade — todo push/PR passa por tsc + lint + ui:audit + test + build.
 # Falhou aqui, não entra na main.
 
 on:
@@ -34,6 +34,12 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      # Placar da UI com teto. Pega o que tsc/lint não veem: modal escrito à mão,
+      # `<select>` nativo, duração fora do token, botão sem nome acessível.
+      # Provado nos dois sentidos (violação injetada ⇒ exit 1).
+      - name: UI audit
+        run: npm run ui:audit
 
       - name: Test
         run: npm test

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildIndex, runSearch, computeFacets, aspectBucket, matchesFacets,
+  borrowSiblingThumbnails, mockupBaseName,
   type SearchDoc,
 } from "../search-engine";
 
@@ -163,5 +164,89 @@ describe("ranking aprendido (boostDocument)", () => {
   it("boost não traz doc que não casa com o texto", () => {
     const ids = runSearch(DOCS, MINI, { search: "billboard" }, (id) => (id === "mug1" ? 1 : 0)).references.map((d) => d.id);
     expect(ids).not.toContain("mug1");
+  });
+});
+
+describe("ordenação da listagem (sem query)", () => {
+  // O acervo real abria com `01`, `01 Displacement`, `01 Displacement Pequena`,
+  // `01 Form Displacer`… — cinco variações do mesmo bundle nas cinco primeiras
+  // posições, porque a listagem era `localeCompare` do nome e nome de arquivo não
+  // é critério de escolha de mockup.
+  const pop = (id: string) => (id === "mug1" ? 1 : id === "tea1" ? 0.5 : 0);
+
+  it("default é popularidade — o mais aberto vem primeiro", () => {
+    const ids = runSearch(DOCS, MINI, {}, pop).references.map((d) => d.id);
+    expect(ids[0]).toBe("mug1");
+    expect(ids[1]).toBe("tea1");
+  });
+
+  it("empate cai no alfabético — acervo novo (zero clique) não muda de comportamento", () => {
+    const zerado = runSearch(DOCS, MINI, {}, () => 0).references.map((d) => d.name);
+    const alfabetico = runSearch(DOCS, MINI, { sort: "name" }).references.map((d) => d.name);
+    expect(zerado).toEqual(alfabetico);
+    expect(alfabetico).toEqual([...alfabetico].sort((a, b) => a.localeCompare(b)));
+  });
+
+  it("sort=name ignora a popularidade (a escolha do usuário manda)", () => {
+    const ids = runSearch(DOCS, MINI, { sort: "name" }, pop).references.map((d) => d.id);
+    expect(ids[0]).not.toBe("mug1");
+  });
+
+  it("com texto, quem ordena é a relevância — sort não sequestra a busca", () => {
+    const a = runSearch(DOCS, MINI, { search: "billboard" }, pop).references.map((d) => d.id);
+    const b = runSearch(DOCS, MINI, { search: "billboard", sort: "name" }, pop).references.map((d) => d.id);
+    expect(a).toEqual(b);
+    expect(a).not.toContain("mug1");
+  });
+
+  it("ordenar não muda o conjunto nem a contagem", () => {
+    const p = runSearch(DOCS, MINI, {}, pop);
+    const n = runSearch(DOCS, MINI, { sort: "name" });
+    expect(p.total).toBe(n.total);
+    expect(p.references.map((d) => d.id).sort()).toEqual(n.references.map((d) => d.id).sort());
+  });
+});
+
+describe("thumbnails órfãs (empréstimo entre irmãos)", () => {
+  // Medido no acervo real: 55 de 200 itens da primeira página sem imagem, 39 deles
+  // com um irmão que TINHA — `01 Displacement` cego e `01 Displacement Pequena`,
+  // o mesmo mockup, exibindo a foto.
+  const D = (name: string, studio: string, url?: string) => ({ name, studio, referenceImageUrl: url });
+
+  it("o PSD herda a imagem do preview de mesmo nome-base", () => {
+    const { docs, borrowed } = borrowSiblingThumbnails([
+      D("01 Displacement", "MOCKUPS 1.0"),
+      D("01 Displacement Pequena", "MOCKUPS 1.0", "/img/a.jpg"),
+    ]);
+    expect(borrowed).toBe(1);
+    expect(docs[0].referenceImageUrl).toBe("/img/a.jpg");
+  });
+
+  it("não cruza estúdios — homônimos de acervos diferentes não são o mesmo mockup", () => {
+    const { docs, borrowed } = borrowSiblingThumbnails([
+      D("Poster A", "Estúdio X"),
+      D("Poster A Média", "Estúdio Y", "/img/b.jpg"),
+    ]);
+    expect(borrowed).toBe(0);
+    expect(docs[0].referenceImageUrl).toBeUndefined();
+  });
+
+  it("sem irmão continua sem imagem — o vazio é informação, não buraco a tapar", () => {
+    const { docs, borrowed } = borrowSiblingThumbnails([D("Sozinho", "X")]);
+    expect(borrowed).toBe(0);
+    expect(docs[0].referenceImageUrl).toBeUndefined();
+  });
+
+  it("nunca sobrescreve uma imagem que já existe", () => {
+    const { docs } = borrowSiblingThumbnails([
+      D("Y", "X", "/img/proprio.jpg"),
+      D("Y Pequena", "X", "/img/irmao.jpg"),
+    ]);
+    expect(docs[0].referenceImageUrl).toBe("/img/proprio.jpg");
+  });
+
+  it("nome-base ignora extensão e sufixo de tamanho", () => {
+    expect(mockupBaseName("01 Form Displacer Pequena.jpeg")).toBe(mockupBaseName("01_Form-Displacer.psd"));
+    expect(mockupBaseName("HM_POSTER_022preview")).toBe("hm poster 022preview");
   });
 });

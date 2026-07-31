@@ -57,7 +57,7 @@ export default function ArtFramer({
           <button
             key={m.value}
             onClick={() => onChange({ ...value, mode: m.value, cropPixels: undefined })}
-            className={`text-[11px] py-1.5 rounded-md transition-colors ${
+            className={`text-[11px] py-1.5 rounded-lg transition-colors ${
               value.mode === m.value
                 ? "bg-white text-black font-medium"
                 : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200"
@@ -71,7 +71,7 @@ export default function ArtFramer({
       {/* Preview / crop area */}
       {value.mode === "cover" ? (
         <>
-          <div className="relative w-full h-56 rounded-md overflow-hidden bg-neutral-950">
+          <div className="relative w-full h-56 rounded-lg overflow-hidden bg-neutral-950">
             <Cropper
               image={artUrl}
               crop={crop}
@@ -100,7 +100,7 @@ export default function ArtFramer({
         </>
       ) : (
         <div
-          className="relative w-full rounded-md overflow-hidden max-h-56"
+          className="relative w-full rounded-lg overflow-hidden max-h-56"
           style={{ aspectRatio: `${soWidth} / ${soHeight}`, ...(!value.bg && value.mode === "contain" ? CHECKER : {}), backgroundColor: value.mode === "contain" ? value.bg ?? undefined : undefined }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -121,7 +121,7 @@ export default function ArtFramer({
           <button
             onClick={() => onChange({ ...value, bg: null })}
             title="Transparente"
-            className={`w-6 h-6 rounded-md border ${
+            className={`w-6 h-6 rounded-lg border ${
               value.bg === null ? "border-white" : "border-neutral-700"
             }`}
             style={CHECKER}
@@ -131,7 +131,7 @@ export default function ArtFramer({
               key={c}
               onClick={() => onChange({ ...value, bg: c })}
               title={c}
-              className={`w-6 h-6 rounded-md border ${
+              className={`w-6 h-6 rounded-lg border ${
                 value.bg === c ? "border-white" : "border-neutral-700"
               }`}
               style={{ backgroundColor: c }}
@@ -142,7 +142,7 @@ export default function ArtFramer({
             value={value.bg?.startsWith("#") && value.bg.length === 7 ? value.bg : "#888888"}
             onChange={(e) => onChange({ ...value, bg: e.target.value })}
             title="Cor personalizada"
-            className="w-6 h-6 rounded-md border border-neutral-700 bg-transparent cursor-pointer p-0"
+            className="w-6 h-6 rounded-lg border border-neutral-700 bg-transparent cursor-pointer p-0"
           />
         </div>
       )}

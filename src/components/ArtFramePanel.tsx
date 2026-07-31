@@ -140,21 +140,21 @@ export default function ArtFramePanel({
         <div className="flex gap-0.5 shrink-0 bg-neutral-950 border border-neutral-800 rounded-lg p-0.5">
           <button
             onClick={() => setMode("cover")}
-            className={`p-1.5 rounded-md transition-colors ${frame.mode === "cover" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
+            className={`p-1.5 rounded-lg transition-colors ${frame.mode === "cover" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
             title="Cover — preenche cortando"
           >
             <Crop className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setMode("contain")}
-            className={`p-1.5 rounded-md transition-colors ${frame.mode === "contain" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
+            className={`p-1.5 rounded-lg transition-colors ${frame.mode === "contain" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
             title="Fit — arte inteira visível"
           >
             <Minimize2 className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setMode("stretch")}
-            className={`p-1.5 rounded-md transition-colors ${frame.mode === "stretch" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
+            className={`p-1.5 rounded-lg transition-colors ${frame.mode === "stretch" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
             title="Esticar — distorce para preencher"
           >
             <Maximize2 className="w-3.5 h-3.5" />

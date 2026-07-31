@@ -8,6 +8,7 @@
  *
  * Reusa Slider do design system. Estado vive no page.tsx (SSoT); aqui só lê e dispara.
  */
+import { Select } from "@/components/ui/Select";
 import { useRef, useState } from "react";
 import { ImagePlus, Eye, RotateCcw, X, Crop, Frame, ChevronRight, Sliders } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -174,15 +175,10 @@ export function LuzPanel({
                 {/* Mistura — select compacto */}
                 <div className="space-y-0.5">
                   <label className="text-[10px] text-zinc-400">Mistura</label>
-                  <select
+                  <Select skin="zinc" boxed ariaLabel="Mistura" className="w-full"
                     value={layer.blendMode}
-                    onChange={(e) => update({ blendMode: e.target.value as LuzLayer["blendMode"] })}
-                    className="w-full py-1.5 px-2 rounded-lg text-[10px] font-medium bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 hover:bg-zinc-700/60 focus:border-acc2 outline-none transition-colors"
-                  >
-                    {LUZ_BLEND_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value} className="bg-zinc-900 text-zinc-200">{o.label}</option>
-                    ))}
-                  </select>
+                    onChange={(v) => update({ blendMode: v as LuzLayer["blendMode"] })}
+                    options={LUZ_BLEND_OPTIONS.map((o) => ({ value: o.value, label: o.label }))} />
                 </div>
 
                 {/* Status: recorte / perspectiva — só visual (recorte: duplo-clique na

@@ -6,6 +6,7 @@
  * + upload manual. Skin Boxy (zinc/acc2).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Dialog, DialogContent } from "@/components/ui/Dialog";
 import { X, Upload, Loader2, Search } from "lucide-react";
 
 interface OverlayItem {
@@ -59,12 +60,10 @@ export function LuzAssetModal({
     return s ? items.filter((i) => i.name.toLowerCase().includes(s)) : items;
   }, [items, q]);
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" role="dialog" aria-modal>
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-[min(900px,92vw)] h-[min(640px,86vh)] flex flex-col rounded-2xl border border-zinc-700/60 bg-zinc-900 shadow-2xl">
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent title="Escolher asset de luz" skin="zinc" showClose={false}
+        className="w-[min(900px,92vw)] h-[min(640px,86vh)] max-h-[86vh]">
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800">
           <h2 className="text-sm font-medium text-zinc-100">
@@ -81,6 +80,8 @@ export function LuzAssetModal({
             <button
               type="button"
               onClick={onClose}
+              aria-label="Fechar"
+              title="Fechar"
               className="p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
             >
               <X size={16} />
@@ -164,7 +165,7 @@ export function LuzAssetModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

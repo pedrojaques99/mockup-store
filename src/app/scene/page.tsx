@@ -1,8 +1,9 @@
 "use client";
 
+import { Select } from "@/components/ui/Select";
 import { useState, useCallback, useRef } from "react";
 import type { SceneDoc } from "@visant/psd-engine";
-import { Upload, ImageIcon, Loader2, AlertTriangle, CheckCircle2, RefreshCw, ChevronDown } from "lucide-react";
+import { Upload, ImageIcon, Loader2, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -363,19 +364,13 @@ export default function ScenePage() {
           {sceneDoc && sceneDoc.faces.length > 1 && (
             <div className="space-y-1">
               <label className="text-xs text-zinc-400">Target face</label>
-              <div className="relative">
-                <select
-                  value={faceKey}
-                  onChange={(e) => setFaceKey(e.target.value)}
-                  className="w-full bg-zinc-800 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-500 appearance-none pr-8"
-                >
-                  <option value="">All faces</option>
-                  {sceneDoc.faces.map((f) => (
-                    <option key={f.key} value={f.key}>{f.name} ({f.innerW}×{f.innerH})</option>
-                  ))}
-                </select>
-                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
-              </div>
+              <Select skin="zinc" boxed ariaLabel="Target face" className="w-full"
+                value={faceKey || "__all"}
+                onChange={(v) => setFaceKey(v === "__all" ? "" : v)}
+                options={[
+                  { value: "__all", label: "All faces" },
+                  ...sceneDoc.faces.map((f) => ({ value: f.key, label: `${f.name} (${f.innerW}×${f.innerH})` })),
+                ]} />
             </div>
           )}
         </section>

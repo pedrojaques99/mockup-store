@@ -57,3 +57,6 @@ bun.lock
 # dev logs
 *.log
 .next-dev-*.log
+
+# Modelos do tesseract.js — baixados em runtime pelo layout-ocr, 7,4MB de artefato.
+*.traineddata
