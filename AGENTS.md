@@ -4,6 +4,10 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+> **Setup e pré-requisitos moram no [`README.md`](README.md)** (`npm ci && npm run setup
+> && npm run dev`, e o quadro do que cada peça ausente desliga). Este arquivo é o manual
+> de operação: assume a máquina já de pé.
+
 # Operação headless (agente via CLI)
 
 Pedidos tipo "renderiza N mockups com a marca X" são atendidos pelo `scripts/agent-cli.ts` — fala direto com Mongo + Visant + render-server, sem precisar do Next:

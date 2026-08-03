@@ -1,0 +1,29 @@
+{
+  "id": "deadbeefcafe0001",
+  "quad": {
+    "tl": {
+      "x": 271,
+      "y": 118
+    },
+    "tr": {
+      "x": 515,
+      "y": 111
+    },
+    "br": {
+      "x": 515,
+      "y": 547
+    },
+    "bl": {
+      "x": 271,
+      "y": 538
+    }
+  },
+  "surfaceType": "manual",
+  "material": "unknown",
+  "hasOcclusion": false,
+  "occlusionDesc": "",
+  "lightingDir": "ambient",
+  "confidence": 0,
+  "imageWidth": 1024,
+  "imageHeight": 683
+}

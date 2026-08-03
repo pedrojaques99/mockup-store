@@ -48,3 +48,52 @@ jobs:
         run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+
+  # O job que impede o repo de voltar a ser "só roda na máquina do autor".
+  # Clona limpo, NÃO cria .env.local, não tem Mongo, não tem chave, não tem Z:/ —
+  # sobe o app e bate HTTP nele. Se o grid não listar a cena de demonstração, falha.
+  # É o que transforma o README de promessa em fato verificado a cada push.
+  clone-and-run:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Sem nenhuma variável de ambiente — é exatamente o caso do dev novo.
+      - name: Setup
+        run: npm run setup
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      # Sobe, espera a porta responder e passa o smoke. Tudo num passo só, em
+      # bash (disponível também no runner Windows) — um `&` solto morreria com
+      # o fim do passo, e `&` nem é sintaxe válida no PowerShell do runner.
+      - name: Start + smoke
+        shell: bash
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: |
+          npx next start -p 3123 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3123 >/dev/null; then break; fi
+            if [ "$i" = "60" ]; then echo "app não subiu em 60s"; exit 1; fi
+            sleep 1
+          done
+          npm run smoke -- --url http://localhost:3123

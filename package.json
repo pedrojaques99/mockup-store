@@ -10,12 +10,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "tsx scripts/smoke.ts",
-    "doctor": "tsx --env-file=.env.local scripts/scene-doctor.ts",
+    "doctor": "tsx --env-file-if-exists=.env.local scripts/scene-doctor.ts",
     "search:report": "tsx scripts/search-report.ts",
     "render": "bun scripts/render-server.ts",
     "render:ps": "bun scripts/ps-render-server.ts",
-    "perf:catalog": "npx tsx --env-file=.env.local scripts/measure-catalog.ts",
-    "ui:audit": "npx tsx scripts/ui-audit.ts"
+    "perf:catalog": "tsx --env-file-if-exists=.env.local scripts/measure-catalog.ts",
+    "ui:audit": "tsx scripts/ui-audit.ts",
+    "setup": "tsx --env-file-if-exists=.env.local scripts/setup.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
@@ -67,7 +68,12 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.0-preview.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.5",
     "typescript": "^5",
     "vitest": "^4.1.8"
-  }
+  },
+  "engines": {
+    "node": ">=22.11"
+  },
+  "packageManager": "npm@11.3.0"
 }

@@ -1,0 +1,20 @@
+{
+  "shadowOpacity": 1,
+  "highlightOpacity": 0.15,
+  "castOpacity": 0.24,
+  "fxGrain": 0,
+  "fxWarmth": -55,
+  "fxSaturation": 145,
+  "fxBrightness": 100,
+  "fxContrast": 145,
+  "maskFeather": 3,
+  "shadowFloor": 0,
+  "preBlur": 0,
+  "studio": "Demo",
+  "tags": [
+    "demo",
+    "ponto de ônibus",
+    "abrigo"
+  ],
+  "name": "Abrigo de ponto de ônibus (demo)"
+}

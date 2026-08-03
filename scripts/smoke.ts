@@ -35,7 +35,10 @@ async function main() {
     const res = await fetch(BASE);
     const html = await res.text();
     assert("home responde 200", res.ok, `${html.length} bytes`);
-    assert("home traz os filtros do grid", html.includes("Todos Estúdios"));
+    // O filtro é um Select do Radix: os itens ("Todos os estúdios") só existem
+    // depois de abrir, num portal — nunca no HTML do servidor. O que dá para
+    // afirmar daqui é que o CONTROLE renderizou e tem nome acessível.
+    assert("home traz os filtros do grid", html.includes('aria-label="Estúdio"'));
   } catch (e) {
     assert("home responde", false, String(e));
   }
@@ -67,18 +70,73 @@ async function main() {
   }
 
   // 4. Busca: acha, tolera typo e cruza PT→EN.
-  for (const [q, minimo] of [["billboard", 1], ["bilbord", 1], ["outdoor", 1]] as const) {
+  //
+  // O termo sai do PRÓPRIO catálogo, não de uma lista fixa. Antes isto procurava
+  // "billboard"/"outdoor" na unha e falhava em qualquer máquina cuja biblioteca
+  // não tivesse essa palavra — inclusive num clone limpo com a cena de demo. O
+  // que interessa não é o vocabulário, é a propriedade do motor: achar o termo,
+  // tolerar o typo, e o mapa de sinônimos ser simétrico.
+  let termo = "";
+  try {
+    const d = await getJson("/api/references?has_psd=true&limit=1");
+    const r = d.references?.[0];
+    termo =
+      (r?.tags as string[] | undefined)?.find((t) => /^[a-zà-ú]{5,}$/i.test(t)) ??
+      String(r?.name ?? "").split(/[^a-zà-ú]+/i).find((w: string) => w.length >= 5) ??
+      "";
+  } catch { /* o passo 2 já reportou */ }
+
+  if (!termo) {
+    assert("catálogo tem termo pesquisável", false, "nenhum item com palavra >=5 letras");
+  } else {
     try {
-      const d = await getJson(`/api/references?has_psd=true&limit=3&search=${encodeURIComponent(q)}`);
-      assert(`busca "${q}" acha algo`, d.total >= minimo, `${d.total} hits`);
+      const d = await getJson(`/api/references?has_psd=true&limit=3&search=${encodeURIComponent(termo)}`);
+      assert(`busca "${termo}" acha algo`, d.total >= 1, `${d.total} hits`);
     } catch (e) {
-      assert(`busca "${q}"`, false, String(e));
+      assert(`busca "${termo}"`, false, String(e));
     }
+
+    // Typo: troca a 3ª letra. Exercita a cascata fuzzy sem depender de palavra fixa.
+    const comTypo = termo.slice(0, 2) + (termo[2] === "x" ? "z" : "x") + termo.slice(3);
+    try {
+      const d = await getJson(`/api/references?has_psd=true&limit=3&search=${encodeURIComponent(comTypo)}`);
+      assert(`busca tolera typo ("${comTypo}")`, d.total >= 1, `${d.total} hits`);
+    } catch (e) {
+      assert(`busca tolera typo`, false, String(e));
+    }
+  }
+
+  // Sinônimo PT↔EN: a invariante é a SIMETRIA. Se um lado acha, o outro tem que
+  // achar o mesmo tanto — independente de qual par existe nesta biblioteca.
+  try {
+    const pares: Array<[string, string]> = [
+      ["abrigo", "shelter"],
+      ["onibus", "bus"],
+      ["cartaz", "poster"],
+      ["outdoor", "billboard"],
+      ["rua", "street"],
+    ];
+    let testado = false;
+    for (const [pt, en] of pares) {
+      const [a, b] = await Promise.all([
+        getJson(`/api/references?has_psd=true&limit=1&search=${pt}`),
+        getJson(`/api/references?has_psd=true&limit=1&search=${en}`),
+      ]);
+      if (a.total === 0 && b.total === 0) continue;
+      assert(`sinônimo "${pt}" ↔ "${en}" é simétrico`, a.total === b.total, `${a.total} × ${b.total}`);
+      testado = true;
+      break;
+    }
+    if (!testado) assert("mapa de sinônimos exercitado", false, "nenhum par do teste existe no catálogo");
+  } catch (e) {
+    assert("sinônimo PT↔EN", false, String(e));
   }
 
   // 5. Faceta + busca combinadas não se contradizem.
   try {
-    const d = await getJson("/api/references?has_psd=true&limit=50&search=billboard&aspect=landscape");
+    const d = await getJson(
+      `/api/references?has_psd=true&limit=50&search=${encodeURIComponent(termo || "a")}&aspect=landscape`,
+    );
     assert("busca + aspecto combinam", d.references.every((r: { id: string }) => !!r.id), `${d.total} hits`);
   } catch (e) {
     assert("busca + aspecto", false, String(e));

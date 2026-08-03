@@ -4,13 +4,18 @@ import { walkDir, type FileEntry } from "@/lib/fs-walk";
 
 /**
  * Lista os assets de overlay (Luz/Sombra) das pastas locais/rede. Reusa walkDir.
- * Cache em memória (TTL) porque varrer Z:/H: (rede/Drive) é lento — não re-escanear
- * a cada abertura do modal. Adicione pastas aqui para expandir a galeria.
+ * Cache em memória (TTL) porque varrer pasta de rede/Drive é lento — não
+ * re-escanear a cada abertura do modal.
+ *
+ * As pastas vêm de OVERLAY_DIRS (mesmo formato de PSD_DIRS: caminhos absolutos
+ * separados por vírgula). Estavam cravadas aqui como `Z:/…` e `H:/…`, o que
+ * fazia esta rota devolver vazio em qualquer máquina que não fosse a do autor.
+ * Sem a variável, a galeria fica vazia e o resto do editor segue inteiro.
  */
-const OVERLAY_DIRS = [
-  "Z:/Recursos 2.0/Shadow Overlay",
-  "H:/Meu Drive/ASSETS VISANT/Texturefabrik/Shadow Overlay",
-];
+const OVERLAY_DIRS = (process.env.OVERLAY_DIRS ?? "")
+  .split(",")
+  .map((d) => d.trim())
+  .filter(Boolean);
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const TTL_MS = 60_000;
