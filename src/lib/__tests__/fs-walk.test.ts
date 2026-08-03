@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { walkDir, walkPsds } from "../fs-walk";
+import { walkDir, walkPsds, psdRoots } from "../fs-walk";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -52,6 +52,29 @@ describe("walkDir", () => {
 
   it("returns empty for non-existent dir", () => {
     expect(walkDir("Z:/nonexistent/path/123")).toEqual([]);
+  });
+});
+
+describe("psdRoots", () => {
+  it("descarta a raiz que já está dentro de outra raiz", () => {
+    // O caso real do .env.local: MOCKUPS MAISON é filha de ASSETS VISANT, e o
+    // walk recursivo visitava cada arquivo duas vezes — cópia de si mesmo.
+    const roots = psdRoots(
+      "Z:/BOXY/Produtos,H:/Meu Drive/ASSETS VISANT/MOCKUPS MAISON,H:/Meu Drive/ASSETS VISANT",
+    );
+    expect(roots).toEqual(["Z:/BOXY/Produtos", "H:/Meu Drive/ASSETS VISANT"]);
+  });
+
+  it("normaliza barra invertida, barra final e casing repetido", () => {
+    expect(psdRoots("Z:\\BOXY\\Produtos\\,z:/boxy/produtos")).toEqual(["Z:/BOXY/Produtos"]);
+  });
+
+  it("não confunde prefixo de nome com pasta aninhada", () => {
+    expect(psdRoots("H:/Drive/Mockups,H:/Drive/Mockups Antigos")).toHaveLength(2);
+  });
+
+  it("aceita lista vazia", () => {
+    expect(psdRoots("")).toEqual([]);
   });
 });
 

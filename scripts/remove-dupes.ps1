@@ -103,6 +103,14 @@ if (-not $psdDirsRaw) {
 }
 $scanDirs = $psdDirsRaw -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ }
 
+# Raiz que já está dentro de outra raiz é descartada: o walk é recursivo, e
+# escanear pai + filha faz cada arquivo aparecer duas vezes.
+$normDirs = $scanDirs | ForEach-Object { $_.Replace('\','/').TrimEnd('/') } | Select-Object -Unique
+$scanDirs = @($normDirs | Where-Object {
+    $me = $_
+    -not ($normDirs | Where-Object { $_ -ne $me -and $me.ToLower().StartsWith($_.ToLower() + '/') })
+})
+
 # ── LogDir ─────────────────────────────────────────────────────────────────────
 if (-not $LogDir) { $LogDir = Join-Path $PSScriptRoot "logs" }
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force $LogDir | Out-Null }

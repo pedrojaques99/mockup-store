@@ -21,6 +21,7 @@ import {
   type SearchDoc, type SearchQuery, type Facets, type AspectBucket,
 } from "./search-engine";
 import { logQuery, getBoostFn } from "./search-telemetry";
+import { getHidden } from "./hidden-store";
 
 export { aspectBucket, type SearchDoc, type SearchQuery, type Facets, type AspectBucket } from "./search-engine";
 
@@ -62,12 +63,20 @@ function dimsToTags(dimensions: Record<string, unknown> | undefined): string[] {
 // ---------------------------------------------------------------- catálogo
 
 let catalogCache: { docs: SearchDoc[]; at: number } | null = null;
-let indexCache: MiniSearch<SearchDoc> | null = null;
+let visibleCache: VisibleView | null = null;
 let building: Promise<SearchDoc[]> | null = null;
+
+interface VisibleView {
+  docs: SearchDoc[];
+  mini: MiniSearch<SearchDoc> | null;
+  /** Carimbo do catálogo cru e da lista de escondidos que geraram esta view. */
+  catAt: number;
+  hiddenVersion: number;
+}
 
 export function invalidateCatalog() {
   catalogCache = null;
-  indexCache = null;
+  visibleCache = null;
 }
 
 async function fetchMongoDocs(): Promise<SearchDoc[]> {
@@ -190,7 +199,7 @@ function refresh(): Promise<SearchDoc[]> {
   building ??= buildCatalog()
     .then((docs) => {
       catalogCache = { docs, at: Date.now() };
-      indexCache = null;
+      visibleCache = null;
       return docs;
     })
     .finally(() => { building = null; });
@@ -202,7 +211,7 @@ function refresh(): Promise<SearchDoc[]> {
  * + leitura das cenas); com TTL puro, um usuário por minuto pagava esses 6s na cara. Aqui
  * o cache vencido é servido na hora e o rebuild acontece atrás — ninguém espera.
  */
-async function getCatalog(): Promise<SearchDoc[]> {
+async function getRawCatalog(): Promise<SearchDoc[]> {
   if (catalogCache) {
     if (Date.now() - catalogCache.at >= CATALOG_TTL_MS) refresh().catch(() => {});
     return catalogCache.docs;
@@ -210,10 +219,60 @@ async function getCatalog(): Promise<SearchDoc[]> {
   return refresh();
 }
 
+/**
+ * O catálogo menos os itens escondidos.
+ *
+ * Esconder um card não pode custar os ~6s de rebuild do catálogo cru, e o índice
+ * MiniSearch não pode continuar servindo o que foi escondido. Então a view
+ * visível é memoizada por (carimbo do catálogo, versão da lista de escondidos):
+ * esconder invalida só a view — o catálogo cru e sua janela de 60s ficam de pé.
+ */
+async function getCatalog(): Promise<SearchDoc[]> {
+  return (await getVisible()).docs;
+}
+
+async function getVisible(): Promise<VisibleView> {
+  const all = await getRawCatalog();
+  const { ids, version } = await getHidden();
+  const catAt = catalogCache?.at ?? 0;
+  if (!visibleCache || visibleCache.catAt !== catAt || visibleCache.hiddenVersion !== version) {
+    visibleCache = {
+      docs: ids.size ? all.filter((d) => !ids.has(d.id)) : all,
+      mini: null,
+      catAt,
+      hiddenVersion: version,
+    };
+  }
+  return visibleCache;
+}
+
 async function getIndex(): Promise<{ mini: MiniSearch<SearchDoc>; docs: SearchDoc[] }> {
-  const docs = await getCatalog();
-  indexCache ??= buildIndex(docs);
-  return { mini: indexCache, docs };
+  const view = await getVisible();
+  view.mini ??= buildIndex(view.docs);
+  return { mini: view.mini, docs: view.docs };
+}
+
+/**
+ * Ids do catálogo que apontam para estes arquivos.
+ *
+ * O painel de duplicatas só conhece caminho no disco; o catálogo é indexado por
+ * id. E a relação não é 1:1 — duas refs do Mongo podem resolver para o mesmo
+ * `.psd`, então esconder "esse arquivo" tem de esconder todos os cards dele.
+ */
+export async function refIdsByPsdPath(paths: string[]): Promise<string[]> {
+  const wanted = new Set(paths.map((p) => p.replace(/\\/g, "/").toLowerCase()));
+  if (!wanted.size) return [];
+  const all = await getRawCatalog();
+  return all
+    .filter((d) => d.psdPath && wanted.has(d.psdPath.replace(/\\/g, "/").toLowerCase()))
+    .map((d) => d.id);
+}
+
+/** Os docs escondidos, para o painel de gerenciamento ("mostrar ocultos"). */
+export async function hiddenRefs(): Promise<SearchDoc[]> {
+  const { ids } = await getHidden();
+  if (!ids.size) return [];
+  return (await getRawCatalog()).filter((d) => ids.has(d.id));
 }
 
 // ---------------------------------------------------------------- API pública

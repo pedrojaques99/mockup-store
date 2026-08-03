@@ -44,6 +44,31 @@ export function walkDir(
   return results;
 }
 
+/**
+ * Raízes de scan vindas de PSD_DIRS, sem sobreposição.
+ *
+ * PSD_DIRS listava `.../ASSETS VISANT/MOCKUPS MAISON` E o pai `.../ASSETS VISANT`.
+ * Como o walk é recursivo, todo arquivo dentro de MOCKUPS MAISON era visitado duas
+ * vezes — mesmo caminho, mesmo tamanho, mesmo hash — e o scan de duplicatas
+ * anunciava o arquivo como cópia de si mesmo. Aqui a raiz filha é descartada.
+ */
+export function psdRoots(raw = process.env.PSD_DIRS || ""): string[] {
+  const dirs = raw
+    .split(",")
+    .map((d) => d.trim().replace(/\\/g, "/").replace(/\/+$/, ""))
+    .filter(Boolean);
+  const uniq = [...new Set(dirs.map((d) => d.toLowerCase()))].map(
+    (lower) => dirs.find((d) => d.toLowerCase() === lower)!,
+  );
+  return uniq.filter((d) => {
+    const lower = d.toLowerCase();
+    return !uniq.some((other) => {
+      const o = other.toLowerCase();
+      return o !== lower && lower.startsWith(o + "/");
+    });
+  });
+}
+
 const PSD_EXTS = new Set([".psd"]);
 
 export function walkPsds(dir: string): FileEntry[] {

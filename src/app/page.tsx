@@ -15,6 +15,7 @@ import {
   FolderPlus,
   ChevronRight,
   ChevronDown,
+  Eye,
   EyeOff,
   RotateCcw,
   X,
@@ -60,6 +61,7 @@ import { Dialog, DialogContent, DialogClose } from "@/components/ui/Dialog";
 import { Switch } from "@/components/ui/Switch";
 import { useContainerColumns } from "@/hooks/use-container-columns";
 import { Toaster, toast } from "sonner";
+import { pathOrigin } from "@/lib/path-origin";
 
 // Reveal-on-hover clássico (opacity-0 + group-hover) esconde a ação primária
 // pra sempre em tablet/touch (sem :hover) e não reage a foco de teclado — a
@@ -583,8 +585,13 @@ export default function Home() {
   // Advanced settings modal
   const [showSettings, setShowSettings] = useState(false);
 
+  // Painel "Ocultos" — o que foi escondido do catálogo (nada disso saiu do disco).
+  const [showHidden, setShowHidden] = useState(false);
+  const [hiddenList, setHiddenList] = useState<Reference[] | null>(null);
+  const [hiddenLoading, setHiddenLoading] = useState(false);
+
   // Duplicates modal
-  type DupeGroup = { hash: string; sizeBytes: number; keepPath: string; removePaths: string[]; wastedBytes: number };
+  type DupeGroup ={ hash: string; sizeBytes: number; keepPath: string; removePaths: string[]; wastedBytes: number };
   const [showDupes, setShowDupes] = useState(false);
   const [dupesScanning, setDupesScanning] = useState(false);
   const [dupesGroups, setDupesGroups] = useState<DupeGroup[]>([]);
@@ -1597,34 +1604,145 @@ export default function Home() {
     });
   };
 
-  // Carrega/persiste a lista de mockups ocultados manualmente.
+  // Lista de mockups ocultados manualmente. Mora no servidor
+  // (`data/hidden-refs.json`, via /api/references/hide) — em localStorage ela era
+  // por navegador, e esconder no desktop não valia no notebook. O estado local
+  // segue existindo só para o grid reagir na hora, antes do refetch.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("mockup-store:hiddenIds");
-      if (saved) setHiddenIds(new Set(JSON.parse(saved)));
-    } catch {}
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/references/hide");
+        if (!r.ok) return;
+        const { ids } = (await r.json()) as { ids: string[] };
+        const server = new Set(ids);
+
+        // Migração única do que ficou preso no navegador.
+        try {
+          const saved = localStorage.getItem("mockup-store:hiddenIds");
+          if (saved) {
+            const local: string[] = JSON.parse(saved);
+            const novos = local.filter((id) => typeof id === "string" && !server.has(id));
+            if (novos.length) {
+              await fetch("/api/references/hide", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: novos, hidden: true }),
+              });
+              novos.forEach((id) => server.add(id));
+            }
+            localStorage.removeItem("mockup-store:hiddenIds");
+          }
+        } catch {}
+
+        if (alive) setHiddenIds(server);
+      } catch {}
+    })();
+    return () => { alive = false; };
   }, []);
-  const persistHidden = useCallback((next: Set<string>) => {
-    setHiddenIds(next);
+
+  const persistHidden = useCallback(async (ids: string[], hidden: boolean) => {
+    setHiddenIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) { if (hidden) next.add(id); else next.delete(id); }
+      return next;
+    });
     try {
-      localStorage.setItem("mockup-store:hiddenIds", JSON.stringify([...next]));
-    } catch {}
+      const r = await fetch("/api/references/hide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, hidden }),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+    } catch {
+      // Falhou no servidor: desfaz o otimismo em vez de mentir que salvou.
+      setHiddenIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) { if (hidden) next.delete(id); else next.add(id); }
+        return next;
+      });
+      toast.error(hidden ? "Não consegui esconder" : "Não consegui reexibir", {
+        description: "O item continua como estava.",
+      });
+    }
   }, []);
+
+  /** "Restaurar ocultos" — devolve tudo ao grid de uma vez. */
+  const restoreAllHidden = useCallback(() => {
+    void persistHidden([...hiddenIds], false);
+    setHiddenList([]);
+  }, [hiddenIds, persistHidden]);
+
+  /**
+   * Abre o painel de ocultos. A lista vem do servidor porque o card escondido
+   * não está mais em `refs` — o catálogo já o filtrou, que é justamente o ponto.
+   */
+  const openHiddenPanel = useCallback(async () => {
+    setShowHidden(true);
+    setHiddenLoading(true);
+    try {
+      const r = await fetch("/api/references/hide");
+      if (!r.ok) throw new Error(String(r.status));
+      const { ids, references } = (await r.json()) as { ids: string[]; references: Reference[] };
+      setHiddenIds(new Set(ids));
+      setHiddenList(references);
+    } catch {
+      setHiddenList([]);
+      toast.error("Não consegui carregar os ocultos");
+    } finally {
+      setHiddenLoading(false);
+    }
+  }, []);
+
+  /** Reexibe um item e tira ele da lista do painel na hora. */
+  const restoreHidden = useCallback(
+    (ref: Reference) => {
+      void persistHidden([ref.id], false);
+      setHiddenList((cur) => cur?.filter((r) => r.id !== ref.id) ?? cur);
+    },
+    [persistHidden]
+  );
+
+  /**
+   * Esconder pelo CAMINHO — é o que o painel de duplicatas tem em mãos. O
+   * arquivo não é tocado; quem some é o card. Um mesmo `.psd` pode estar em mais
+   * de uma ref do catálogo, então o servidor resolve e devolve quantos casaram.
+   */
+  const hidePathFromCatalog = useCallback(async (filePath: string, name: string) => {
+    try {
+      const r = await fetch("/api/references/hide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths: [filePath], hidden: true }),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      const { ids, matched } = (await r.json()) as { ids: string[]; matched: number };
+      setHiddenIds(new Set(ids));
+      if (matched === 0) {
+        toast("Esse arquivo não está no catálogo", { description: "Nada a esconder — o grid nunca mostrou ele." });
+      } else {
+        toast.success(`Escondido do catálogo${matched > 1 ? ` (${matched} cards)` : ""}`, {
+          description: `${name} — o arquivo continua no disco.`,
+        });
+      }
+    } catch {
+      toast.error("Não consegui esconder", { description: name });
+    }
+  }, []);
+
   const hideMockup = useCallback(
     (ref: Reference) => {
-      persistHidden(new Set(hiddenIds).add(ref.id));
+      void persistHidden([ref.id], true);
       setLastHidden({ id: ref.id, name: ref.name });
     },
-    [hiddenIds, persistHidden]
+    [persistHidden]
   );
   const unhideMockup = useCallback(
     (id: string) => {
-      const next = new Set(hiddenIds);
-      next.delete(id);
-      persistHidden(next);
+      void persistHidden([id], false);
       setLastHidden((cur) => (cur?.id === id ? null : cur));
     },
-    [hiddenIds, persistHidden]
+    [persistHidden]
   );
 
   /** Há algum recorte aplicado? Separa "acervo vazio" de "filtro sem resultado". */
@@ -2096,11 +2214,11 @@ export default function Home() {
 
               {hiddenIds.size > 0 && (
                 <button
-                  onClick={() => persistHidden(new Set())}
+                  onClick={() => void openHiddenPanel()}
                   className="flex items-center gap-2 px-1 text-[11px] font-bold text-neutral-500 hover:text-neutral-300 transition-colors"
                 >
-                  <RotateCcw className="w-3 h-3 shrink-0" />
-                  Restaurar {hiddenIds.size} ocultos
+                  <EyeOff className="w-3 h-3 shrink-0" />
+                  {hiddenIds.size} {hiddenIds.size === 1 ? "oculto" : "ocultos"}
                 </button>
               )}
             </div>
@@ -2509,7 +2627,7 @@ export default function Home() {
                   )}
                   {hiddenIds.size > 0 && (
                     <button
-                      onClick={() => persistHidden(new Set())}
+                      onClick={restoreAllHidden}
                       className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
                     >
                       Restaurar ocultos
@@ -3239,6 +3357,101 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
+      {/* Ocultos — o que foi tirado do grid. Nada aqui saiu do disco. */}
+      <Dialog open={showHidden} onOpenChange={setShowHidden}>
+        <DialogContent title="Ocultos" skin="neutral" showClose={false}
+          className="w-[min(48rem,92vw)] max-h-[85vh] rounded-2xl overflow-hidden">
+
+          <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/30 shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-neutral-800 flex items-center justify-center shrink-0">
+                <EyeOff className="w-4 h-4 text-neutral-400" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-black tracking-tight">Ocultos</h3>
+                <p className="text-[10px] text-neutral-600 font-bold uppercase tracking-widest mt-0.5">
+                  {hiddenIds.size} fora do grid · os arquivos continuam no disco
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {hiddenIds.size > 0 && (
+                <button
+                  onClick={restoreAllHidden}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Restaurar todos
+                </button>
+              )}
+              {/* Botão à mão, como nos outros modais desta página: o IconButton
+                  exige um TooltipProvider, que só existe no rail do editor. */}
+              <button
+                onClick={() => setShowHidden(false)}
+                title="Fechar"
+                className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3 scroll-smooth">
+            {hiddenLoading && (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="w-8 h-8 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+              </div>
+            )}
+
+            {!hiddenLoading && hiddenList?.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <Eye className="w-10 h-10 text-neutral-800" />
+                <p className="text-[10px] font-black text-neutral-600 uppercase tracking-widest">
+                  Nada oculto — o grid está inteiro
+                </p>
+              </div>
+            )}
+
+            {!hiddenLoading && hiddenList?.map((ref) => (
+              <div
+                key={ref.id}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl mb-0.5 hover:bg-white/[0.02] transition-colors"
+              >
+                {ref.referenceImageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={ref.referenceImageUrl} alt={ref.name} className="w-10 h-10 shrink-0 rounded-lg object-cover border border-neutral-800 opacity-60" />
+                ) : (
+                  <div className="w-10 h-10 shrink-0 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center">
+                    <Layers className="w-4 h-4 text-neutral-600" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-bold text-neutral-300 truncate">{ref.name}</p>
+                  <p className="text-[8px] text-neutral-700 font-mono truncate mt-0.5">
+                    {ref.studio ? <span className="mr-1.5 px-1 py-px rounded bg-neutral-800 text-neutral-500">{ref.studio}</span> : null}
+                    {ref.psdPath || "—"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => restoreHidden(ref)}
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+                >
+                  <Eye className="w-3 h-3" />
+                  Reexibir
+                </button>
+              </div>
+            ))}
+
+            {/* Id sem card: a ref sumiu do Mongo/disco depois de escondida. */}
+            {!hiddenLoading && hiddenList && hiddenIds.size > hiddenList.length && (
+              <p className="px-3 py-3 text-[9px] font-bold text-neutral-700 uppercase tracking-widest">
+                + {hiddenIds.size - hiddenList.length} id(s) sem card no catálogo — some com &ldquo;Restaurar todos&rdquo;
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Duplicates Modal */}
       <Dialog open={showDupes} onOpenChange={setShowDupes}>
         <DialogContent title="Duplicatas" skin="neutral" showClose={false}
@@ -3459,7 +3672,7 @@ export default function Home() {
                     {isExpanded && (
                       <div className="px-4 pb-3 animate-in slide-in-from-top-1 duration-200">
                         {/* Sub-header */}
-                        <div className="grid grid-cols-[1rem_1fr_7rem_8rem_6.5rem] gap-x-3 px-3 py-1.5 mb-1">
+                        <div className="grid grid-cols-[1rem_1fr_7rem_8rem_9rem] gap-x-3 px-3 py-1.5 mb-1">
                           <span />
                           <span className="text-[8px] font-black text-neutral-700 uppercase tracking-[0.15em]">Caminho completo</span>
                           <span className="text-[8px] font-black text-neutral-700 uppercase tracking-[0.15em] text-right">Tamanho</span>
@@ -3474,11 +3687,12 @@ export default function Home() {
                           const fExt = name.split(".").pop()?.toLowerCase() || "";
                           const isImg = ["jpg","jpeg","png","gif"].includes(fExt);
                           const thumbUrl = isImg ? `/api/local-image?path=${encodeURIComponent(filePath)}&w=48` : null;
+                          const origin = pathOrigin(filePath);
 
                           return (
                             <div
                               key={fi}
-                              className={`grid grid-cols-[1rem_1fr_7rem_8rem_6.5rem] gap-x-3 items-center px-3 py-2 rounded-xl mb-0.5 ${isKeep ? "bg-emerald-500/[0.06]" : "bg-red-500/[0.06]"}`}
+                              className={`grid grid-cols-[1rem_1fr_7rem_8rem_9rem] gap-x-3 items-center px-3 py-2 rounded-xl mb-0.5 ${isKeep ? "bg-emerald-500/[0.06]" : "bg-red-500/[0.06]"}`}
                             >
                               <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isKeep ? "bg-emerald-500" : "bg-red-500/70"}`} />
                               <div className="flex items-center gap-2 min-w-0">
@@ -3492,7 +3706,19 @@ export default function Home() {
                                 )}
                                 <div className="min-w-0">
                                   <p className={`text-[10px] font-bold truncate ${isKeep ? "text-emerald-300" : "text-neutral-400"}`}>{name}</p>
-                                  <p className="text-[8px] text-neutral-700 font-mono truncate mt-0.5">{dir}</p>
+                                  <p className="text-[8px] text-neutral-700 font-mono truncate mt-0.5">
+                                    <span
+                                      title={origin.safeToDelete ? undefined : "Fora da sua conta — apagar aqui apaga na origem, para todo mundo"}
+                                      className={`mr-1.5 px-1 py-px rounded not-italic ${
+                                        origin.safeToDelete
+                                          ? "bg-neutral-800 text-neutral-500"
+                                          : "bg-amber-500/15 text-amber-400"
+                                      }`}
+                                    >
+                                      {origin.label}
+                                    </span>
+                                    {dir}
+                                  </p>
                                 </div>
                               </div>
                               <span className="text-[10px] font-bold text-neutral-600 text-right">{(group.sizeBytes / 1e6).toFixed(2)} MB</span>
@@ -3506,7 +3732,22 @@ export default function Home() {
                                   {isKeep ? "Manter" : "Remover"}
                                 </span>
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: filePath }) }); }}
+                                  onClick={(e) => { e.stopPropagation(); void hidePathFromCatalog(filePath, name); }}
+                                  className="p-1 rounded-lg hover:bg-neutral-800 text-neutral-700 hover:text-white transition-colors"
+                                  title="Esconder do catálogo (não apaga o arquivo)"
+                                >
+                                  <EyeOff className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // A resposta era ignorada: arquivo já apagado ⇒ 404 ⇒ o
+                                    // botão não fazia nada e não dizia nada.
+                                    const falhou = () => toast.error("Não consegui abrir a pasta", { description: name });
+                                    fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: filePath }) })
+                                      .then((r) => { if (!r.ok) falhou(); })
+                                      .catch(falhou);
+                                  }}
                                   className="p-1 rounded-lg hover:bg-neutral-800 text-neutral-700 hover:text-white transition-colors"
                                   title="Abrir localização"
                                 >

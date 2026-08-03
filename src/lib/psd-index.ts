@@ -1,4 +1,4 @@
-import { walkPsds, type FileEntry } from "./fs-walk";
+import { walkPsds, psdRoots, type FileEntry } from "./fs-walk";
 
 export interface PsdFile {
   name: string;
@@ -60,14 +60,16 @@ export function addRuntimeDir(dir: string) {
 export function getAllPsds(forceRefresh = false): PsdFile[] {
   if (psdCache && !forceRefresh) return psdCache;
 
-  const envDirs = (process.env.PSD_DIRS || "")
-    .split(",")
-    .map((d) => d.trim())
-    .filter(Boolean);
-  const allDirs = [...new Set([...envDirs, ...runtimeDirs])];
+  const allDirs = psdRoots([...psdRoots(), ...runtimeDirs].join(","));
   const results: PsdFile[] = [];
+  const seenPaths = new Set<string>();
   for (const dir of allDirs) {
-    results.push(...walkPsds(dir).map(toPsdFile));
+    for (const f of walkPsds(dir)) {
+      const key = f.path.toLowerCase();
+      if (seenPaths.has(key)) continue;
+      seenPaths.add(key);
+      results.push(toPsdFile(f));
+    }
   }
   psdCache = results;
   normalizedIndex = buildIndex(results);

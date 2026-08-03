@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { open, stat } from "fs/promises";
-import { walkDir } from "@/lib/fs-walk";
+import { realpathSync } from "fs";
+import { walkDir, psdRoots } from "@/lib/fs-walk";
+import { pathOrigin } from "@/lib/path-origin";
 
 const SCAN_EXTS = new Set([".psd", ".jpg", ".jpeg", ".png", ".gif", ".tif", ".tiff", ".psb"]);
 const HASH_SLICE = 2 * 1024 * 1024;
@@ -29,6 +31,9 @@ function keepScore(path: string): number {
   const parts = path.replace(/\\/g, "/").split("/");
   const filename = parts[parts.length - 1].toLowerCase();
   let score = 0;
+  // Arquivo que mora fora da sua conta (atalho do Drive, drive compartilhado)
+  // vira SEMPRE o "manter": apagar por ali apaga na origem, para todo mundo.
+  if (!pathOrigin(path).safeToDelete) score -= 100;
   if (/copy|\bcopia\b|\(\d+\)|\bcópia\b/.test(filename)) score += 20;
   if (/ - \d+\./.test(filename)) score += 10;
   score += parts.length;
@@ -55,9 +60,20 @@ const CACHE_TTL = 5 * 60 * 1000;
 
 function buildFileList(envDirs: string[]) {
   const allFiles: Array<{ path: string; sizeBytes: number }> = [];
+  // Segunda rede contra o mesmo arquivo entrando duas vezes: atalho do Google
+  // Drive resolvido para o mesmo alvo, junction, raiz repetida com outro casing.
+  const seen = new Set<string>();
   for (const dir of envDirs) {
     for (const e of walkDir(dir, SCAN_EXTS)) {
-      if (e.sizeBytes >= MIN_SIZE) allFiles.push({ path: e.path, sizeBytes: e.sizeBytes });
+      if (e.sizeBytes < MIN_SIZE) continue;
+      let real = e.path;
+      try {
+        real = realpathSync.native(e.path).replace(/\\/g, "/");
+      } catch {}
+      const key = real.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      allFiles.push({ path: e.path, sizeBytes: e.sizeBytes });
     }
   }
   const bySize = new Map<number, Array<{ path: string; sizeBytes: number }>>();
@@ -79,10 +95,7 @@ export async function GET(req: Request) {
   const isStream = searchParams.get("stream") === "1";
   if (searchParams.get("refresh") === "1") cachedResult = null;
 
-  const envDirs = (process.env.PSD_DIRS || "")
-    .split(",")
-    .map((d) => d.trim())
-    .filter(Boolean);
+  const envDirs = psdRoots();
 
   if (!envDirs.length) {
     if (isStream) {
