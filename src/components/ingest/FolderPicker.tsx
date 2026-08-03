@@ -67,17 +67,19 @@ export function FolderPicker({ onEscolher }: { onEscolher: (path: string) => voi
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={transitions.base}
-      className="flex-1 flex flex-col items-center justify-center gap-8 px-8 py-12"
+      className="flex flex-col gap-8 px-6 sm:px-8 py-8"
     >
-      <div className="w-full max-w-xl">
+      <div className="w-full">
         <label
           htmlFor="ingest-folder"
           className="text-[10px] font-bold uppercase tracking-widest text-neutral-500"
         >
           Pasta com os mockups
         </label>
-        <div className="mt-2 flex items-center gap-2">
-          <div className="flex-1 flex items-center gap-2.5 rounded-xl border border-neutral-800 bg-neutral-900/60 px-3.5 py-3 focus-within:border-neutral-600">
+        {/* Empilha em telas estreitas: lado a lado, o botão saía para fora do
+            diálogo (que tem overflow-hidden, então o corte era silencioso). */}
+        <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2">
+          <div className="min-w-0 flex-1 flex items-center gap-2.5 rounded-xl border border-neutral-800 bg-neutral-900/60 px-3.5 py-3 focus-within:border-neutral-600">
             <FolderOpen className="w-4 h-4 text-neutral-600 shrink-0" aria-hidden />
             <input
               ref={inputRef}
@@ -95,7 +97,7 @@ export function FolderPicker({ onEscolher }: { onEscolher: (path: string) => voi
             type="button"
             onClick={() => seguir(valor)}
             disabled={!valor.trim()}
-            className="flex items-center gap-2 rounded-xl bg-white px-4 py-3 text-xs font-bold uppercase tracking-widest text-black transition-opacity hover:opacity-90 disabled:opacity-25"
+            className="shrink-0 flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-xs font-bold uppercase tracking-widest text-black transition-opacity hover:opacity-90 disabled:opacity-25"
           >
             Varrer
             <ArrowRight className="w-3.5 h-3.5" aria-hidden />
@@ -108,7 +110,7 @@ export function FolderPicker({ onEscolher }: { onEscolher: (path: string) => voi
       </div>
 
       {recentes.length > 0 && (
-        <div className="w-full max-w-xl">
+        <div className="w-full">
           <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-600">
             <Clock className="w-3 h-3" aria-hidden />
             Recentes

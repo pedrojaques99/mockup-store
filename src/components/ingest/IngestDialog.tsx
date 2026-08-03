@@ -385,7 +385,12 @@ export default function IngestDialog({
         initial={{ opacity: 0, scale: 0.97, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={transitions.base}
-        className="relative w-full max-w-5xl h-[88vh] bg-neutral-950 border border-neutral-800 rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+        // A altura acompanha a etapa. A origem é um campo e um parágrafo; forçar
+        // 88vh nela deixava o conteúdo boiando no meio de um vazio enorme. A
+        // revisão, essa sim, precisa de toda a altura para a lista.
+        className={`relative w-full bg-neutral-950 border border-neutral-800 rounded-2xl flex flex-col overflow-hidden shadow-2xl ${
+          phase === "origin" ? "max-w-2xl" : "max-w-5xl h-[88vh]"
+        }`}
       >
         {/* ── Header ── */}
         <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/30 shrink-0 gap-4">
@@ -394,14 +399,16 @@ export default function IngestDialog({
               <FolderPlus className="w-4 h-4 text-acc" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-sm font-black tracking-tight">Adicionar pasta ao acervo</h3>
+              {/* `text-nowrap`: com o stepper na mesma linha e o diálogo estreito
+                  da etapa da origem, o título quebrava em quatro linhas e o
+                  subtítulo virava "Esc…". Por isso o stepper saiu daqui. */}
+              <h3 className="text-sm font-black tracking-tight text-nowrap">
+                Adicionar pasta ao acervo
+              </h3>
               <p className="text-[10px] text-neutral-600 font-mono truncate mt-0.5">
                 {folderPath || "Escolha de onde vêm os arquivos"}
               </p>
             </div>
-          </div>
-          <div className="hidden md:block shrink-0">
-            <IngestStepper atual={PASSO_DA_FASE[phase]} />
           </div>
           <button
             onClick={onClose}
@@ -411,6 +418,12 @@ export default function IngestDialog({
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Faixa do stepper, em linha própria. Disputar a linha do título fazia
+            os dois perderem: o título quebrava e o stepper apertava. */}
+        <div className="px-6 py-2.5 border-b border-neutral-800 bg-neutral-900/10 shrink-0 overflow-x-auto no-scrollbar">
+          <IngestStepper atual={PASSO_DA_FASE[phase]} />
         </div>
 
         {/* ── Corpo ── */}

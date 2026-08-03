@@ -16,7 +16,8 @@
     "render:ps": "bun scripts/ps-render-server.ts",
     "perf:catalog": "tsx --env-file-if-exists=.env.local scripts/measure-catalog.ts",
     "ui:audit": "tsx scripts/ui-audit.ts",
-    "setup": "tsx --env-file-if-exists=.env.local scripts/setup.ts"
+    "setup": "tsx --env-file-if-exists=.env.local scripts/setup.ts",
+    "visual:ingest": "tsx scripts/ingest-visual-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
