@@ -97,3 +97,7 @@ jobs:
             sleep 1
           done
           npm run smoke -- --url http://localhost:3123
+          # Portão visual: dirige um Chrome de verdade e checa o que só se vê com
+          # o olho (diálogo abre, nada cortado pelas bordas, validação reprova
+          # caminho inexistente). O `npm ci` já baixa o Chromium do puppeteer.
+          npm run visual:ingest -- --url http://localhost:3123

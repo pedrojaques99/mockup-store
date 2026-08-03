@@ -8,7 +8,25 @@
 
 ---
 
-> **Estado: Fases 0, 1 e 2 executadas.** Fases 3 a 5 continuam como plano.
+> **Estado: Fases 0, 1, 2 e 3 executadas.** Fases 4 e 5 continuam como plano
+> (tabela virtualizada para pasta de milhares de itens, e polimento).
+>
+> **Fase 3, a origem de verdade:**
+>
+> | Item | Onde |
+> |---|---|
+> | Miolo puro e testável (browse, stat, Drive) | `src/lib/fs-browse.ts` + 15 testes |
+> | `GET /api/fs/stat` | validação ao vivo, debounce 300ms, e contagem do que está só na nuvem |
+> | `GET /api/fs/browse` | navegador de pastas do app, portátil, lista unidades |
+> | `POST /api/fs/pick-folder` | seletor nativo do Windows, com as 6 guardas da 6.1 |
+> | `GET /api/fs/drive` | link do Drive vira caminho local, sem OAuth |
+> | Aviso de arquivo não baixado do Drive | `FolderPicker.tsx` |
+>
+> Medido com as rotas no ar: `stat` aprova e reprova certo, `browse` lista as 5
+> unidades, `pick-folder` recusa sem a flag (503), e o link do Drive do próprio
+> `PSD_DIRS` resolveu para
+> `G:/.shortcut-targets-by-id/1Dx_uPec.../[ MOCKUPS 1.0 ]` — inclusive achando que a
+> montagem tinha mudado de `H:` para `G:`. O portão visual subiu para **18/18**.
 >
 > | Item | Onde |
 > |---|---|

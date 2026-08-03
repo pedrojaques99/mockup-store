@@ -24,8 +24,12 @@ const urlArg = process.argv.indexOf("--url");
 const BASE = (urlArg >= 0 ? process.argv[urlArg + 1] : "") || "http://localhost:3000";
 const SHOTS = join(process.cwd(), ".tmp", "ingest-visual");
 
+/** Longo de propósito: é um caminho real de Drive, do tamanho que estoura layout. */
 const CAMINHO_LONGO =
   "H:/.shortcut-targets-by-id/1Dx_uPec62b4ddACJYlRsdWqQlHyfMhPY/[ MOCKUPS 1.0 ]/Campanha 2026/Layouts";
+
+/** Existe de verdade neste repo, então a validação ao vivo aprova. */
+const CAMINHO_VALIDO = process.cwd().replace(/\\/g, "/") + "/fixtures";
 
 interface Check {
   nome: string;
@@ -117,6 +121,49 @@ async function rodar(largura: number, altura: number, rotulo: string) {
       cortados.length === 0,
       cortados.join("; ") || "todos dentro",
     );
+
+    // 6. A validação ao vivo reprova caminho que não existe, e o primário fica
+    // desabilitado. Antes o campo era mudo até o 404 depois de mandar varrer.
+    await page.waitForFunction(
+      () => (document.querySelector("#ingest-folder-estado")?.textContent ?? "").includes("não existe"),
+      { timeout: 5000 },
+    );
+    const bloqueado = await page.$eval("#ingest-folder ~ * , #ingest-folder", () => {
+      const btn = Array.from(document.querySelectorAll("button")).find((b) =>
+        (b.textContent ?? "").trim().toUpperCase().startsWith("VARRER"),
+      ) as HTMLButtonElement | undefined;
+      return btn?.disabled ?? false;
+    });
+    assert(`[${rotulo}] caminho inexistente reprova e trava o "Varrer"`, bloqueado);
+
+    // 7. Caminho real aprova e libera.
+    await page.click("#ingest-folder", { count: 3 });
+    await page.type("#ingest-folder", CAMINHO_VALIDO);
+    await page.waitForFunction(
+      () => (document.querySelector("#ingest-folder-estado")?.textContent ?? "").includes("encontrada"),
+      { timeout: 5000 },
+    );
+    const liberado = await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll("button")).find((b) =>
+        (b.textContent ?? "").trim().toUpperCase().startsWith("VARRER"),
+      ) as HTMLButtonElement | undefined;
+      return btn ? !btn.disabled : false;
+    });
+    assert(`[${rotulo}] caminho real aprova e libera o "Varrer"`, liberado);
+
+    // 8. O navegador de pastas do app abre e lista as unidades.
+    const btnProcurar = await page.evaluateHandle(() =>
+      Array.from(document.querySelectorAll("button")).find((b) =>
+        (b.textContent ?? "").includes("Procurar pasta"),
+      ),
+    );
+    await (btnProcurar.asElement() as unknown as { click: () => Promise<void> })?.click();
+    await page.waitForFunction(
+      () => !!document.querySelector('[role="dialog"] ul li button'),
+      { timeout: 5000 },
+    );
+    const unidades = await page.$$eval('[role="dialog"] ul li button', (bs) => bs.length);
+    assert(`[${rotulo}] navegador de pastas lista unidades`, unidades > 0, `${unidades} entradas`);
 
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: join(SHOTS, `ingest-${rotulo}.png`) as `${string}.png` });
