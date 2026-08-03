@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, FolderPlus, Layers, Search, Sparkles, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { Dialog, DialogContent } from "@/components/ui/Dialog";
+import { IngestStepper } from "./IngestStepper";
+import { FolderPicker } from "./FolderPicker";
 import { FlyingPaperLoader } from "@/components/ui/FlyingPaperLoader";
 import { GlitchChars } from "@/components/ui/GlitchChars";
 import { transitions } from "@/lib/motion";
@@ -24,7 +26,17 @@ import type { TriagedItem, TriageSummary, Verdict } from "@/lib/ingest-triage";
  * versão que sobrou).
  */
 
-type Phase = "scanning" | "review" | "ingesting" | "done" | "error";
+type Phase = "origin" | "scanning" | "review" | "ingesting" | "done" | "error";
+
+/** Fase → ponto aceso no stepper. Varredura e revisão são etapas distintas. */
+const PASSO_DA_FASE: Record<Phase, number> = {
+  origin: 0,
+  scanning: 1,
+  review: 2,
+  ingesting: 3,
+  done: 4,
+  error: 1,
+};
 
 const VERDICT_META: Record<
   Verdict,
@@ -73,17 +85,21 @@ interface IngestReport {
   errors: string[];
 }
 
-export default function IngestReviewSheet({
-  folderPath,
+export default function IngestDialog({
+  open,
   onClose,
   onIngested,
 }: {
-  folderPath: string;
+  open: boolean;
   onClose: () => void;
-  /** Chamado depois de um commit bem-sucedido — o grid precisa recarregar. */
+  /** Chamado depois de um commit bem-sucedido: o grid precisa recarregar. */
   onIngested: (report: IngestReport) => void;
 }) {
-  const [phase, setPhase] = useState<Phase>("scanning");
+  // A pasta agora é escolhida DENTRO do diálogo. Antes vinha de um campo na
+  // sidebar, e o fluxo trocava de container no meio do caminho: etapa da origem
+  // num painel de 15% de largura, o resto num diálogo por cima.
+  const [folderPath, setFolderPath] = useState("");
+  const [phase, setPhase] = useState<Phase>("origin");
   const [items, setItems] = useState<TriagedItem[]>([]);
   const [summary, setSummary] = useState<TriageSummary | null>(null);
   const [degraded, setDegraded] = useState(false);
@@ -92,6 +108,8 @@ export default function IngestReviewSheet({
   const [filter, setFilter] = useState<Verdict | "all">("all");
   const [query, setQuery] = useState("");
   const [progress, setProgress] = useState<{ pct: number; done: number; total: number; currentFile: string } | null>(null);
+  /** Fase da listagem: só existe contagem, ainda não existe total. */
+  const [listing, setListing] = useState<{ found: number; dir: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<IngestReport | null>(null);
 
@@ -130,7 +148,13 @@ export default function IngestReviewSheet({
           } catch {
             continue;
           }
-          if (ev.type === "progress") {
+          if (ev.type === "listing") {
+            // Fase da listagem: ainda não existe denominador (o total nasce
+            // quando ela termina). Contar o que já apareceu é progresso honesto;
+            // uma barra em porcentagem aqui seria invenção.
+            setListing({ found: Number(ev.found) || 0, dir: String(ev.dir ?? "") });
+          } else if (ev.type === "progress") {
+            setListing(null);
             setProgress({
               pct: Number(ev.pct) || 0,
               done: Number(ev.done) || 0,
@@ -138,6 +162,7 @@ export default function IngestReviewSheet({
               currentFile: String(ev.currentFile ?? ""),
             });
           } else if (ev.type === "complete") {
+            setListing(null);
             const list = (ev.items as TriagedItem[]) ?? [];
             setItems(list);
             setSummary(ev.summary as TriageSummary);
@@ -171,6 +196,8 @@ export default function IngestReviewSheet({
   }, [runScan]);
 
   useEffect(() => {
+    // Só varre depois que a pasta foi escolhida na etapa da origem.
+    if (!folderPath) return;
     // `runScan` não escreve estado nenhum de forma síncrona: tudo acontece
     // depois do primeiro `await`, nos eventos que chegam do stream SSE — que é
     // exatamente o caso que a documentação da regra chama de "subscrever a um
@@ -178,7 +205,17 @@ export default function IngestReviewSheet({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     runScan();
     return () => abortRef.current?.abort();
-  }, [runScan]);
+  }, [runScan, folderPath]);
+
+  /** Escolheu a pasta: sai da origem e entra na varredura. */
+  const escolherPasta = useCallback((path: string) => {
+    setFolderPath(path);
+    setPhase("scanning");
+    setItems([]);
+    setProgress(null);
+    setListing(null);
+    setError(null);
+  }, []);
 
   // ── Commit ────────────────────────────────────────────────────────────────
   const commit = useCallback(async () => {
@@ -196,11 +233,17 @@ export default function IngestReviewSheet({
     setPhase("ingesting");
     setProgress({ pct: 0, done: 0, total: files.length, currentFile: "" });
     setError(null);
+    // O commit não tinha AbortController nenhum: desmontar durante a gravação
+    // deixava o servidor escrevendo no Mongo para ninguém. O scan já abortava.
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
       const res = await fetch("/api/ingest-folder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folderPath, files, studio: studio.trim() || undefined, stream: true }),
+        signal: ac.signal,
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
@@ -242,6 +285,8 @@ export default function IngestReviewSheet({
         }
       }
     } catch (err) {
+      // Cancelar é escolha do usuário, não falha para mostrar em vermelho.
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setError(String((err as Error)?.message ?? err));
       setPhase("error");
     }
@@ -275,21 +320,41 @@ export default function IngestReviewSheet({
     });
   }, []);
 
+  /**
+   * O que "marcar à vista" realmente marca.
+   *
+   * Sem filtro, marca só o que a triagem chamou de NOVO. Marcar tudo aqui era a
+   * jogada ótima do usuário apressado e desfazia em um clique a única proteção
+   * do fluxo: duplicata, lixo e o que já está no acervo vêm desmarcados de
+   * propósito, e a escrita é irreversível pelo produto.
+   *
+   * Com filtro aplicado, marca tudo que está à vista, porque aí o usuário foi
+   * ATRÁS daquele veredito. Filtrar por "Lixo" e mandar marcar é escolha
+   * declarada, não descuido.
+   */
+  const marcaveis = useMemo(
+    () => (filter === "all" ? visible.filter((i) => i.verdict === "new") : visible),
+    [visible, filter],
+  );
+
   const setManyVisible = useCallback(
     (on: boolean) => {
       setSelected((prev) => {
         const next = new Set(prev);
-        for (const i of visible) {
+        // Desmarcar vale para tudo à vista; marcar respeita a triagem.
+        for (const i of on ? marcaveis : visible) {
           if (on) next.add(i.path);
           else next.delete(i.path);
         }
         return next;
       });
     },
-    [visible],
+    [visible, marcaveis],
   );
 
-  const allVisibleSelected = visible.length > 0 && visible.every((i) => selected.has(i.path));
+  const allVisibleSelected = marcaveis.length > 0 && marcaveis.every((i) => selected.has(i.path));
+  /** Quantos itens à vista ficariam de fora ao marcar, para o botão não mentir. */
+  const foraDaMarcacao = visible.length - marcaveis.length;
 
   // Esc fecha; ⌘A / Ctrl+A marca o que está à vista (e não a página inteira do
   // navegador). Só quando o foco não está num campo de texto.
@@ -310,8 +375,8 @@ export default function IngestReviewSheet({
   }, [onClose, phase, setManyVisible, allVisibleSelected]);
 
   return (
-    <Dialog open onOpenChange={(o) => { if (!o && phase !== "ingesting") onClose(); }}>
-      <DialogContent title="Revisar ingest" skin="neutral" showClose={false} bare
+    <Dialog open={open} onOpenChange={(o) => { if (!o && phase !== "ingesting") onClose(); }}>
+      <DialogContent title="Adicionar pasta ao acervo" skin="neutral" showClose={false} bare
         className="flex items-center justify-center p-4"
         onEscapeKeyDown={(e) => { if (phase === "ingesting") e.preventDefault(); }}
         onPointerDownOutside={(e) => { if (phase === "ingesting") e.preventDefault(); }}
@@ -329,9 +394,14 @@ export default function IngestReviewSheet({
               <FolderPlus className="w-4 h-4 text-acc" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-sm font-black tracking-tight">Revisar ingest</h3>
-              <p className="text-[10px] text-neutral-600 font-mono truncate mt-0.5">{folderPath}</p>
+              <h3 className="text-sm font-black tracking-tight">Adicionar pasta ao acervo</h3>
+              <p className="text-[10px] text-neutral-600 font-mono truncate mt-0.5">
+                {folderPath || "Escolha de onde vêm os arquivos"}
+              </p>
             </div>
+          </div>
+          <div className="hidden md:block shrink-0">
+            <IngestStepper atual={PASSO_DA_FASE[phase]} />
           </div>
           <button
             onClick={onClose}
@@ -346,6 +416,10 @@ export default function IngestReviewSheet({
         {/* ── Corpo ── */}
         <div className="flex-1 min-h-0 flex flex-col">
           <AnimatePresence mode="wait">
+            {phase === "origin" && (
+              <FolderPicker key="origin" onEscolher={escolherPasta} />
+            )}
+
             {(phase === "scanning" || phase === "ingesting") && (
               <motion.div
                 key="working"
@@ -355,24 +429,29 @@ export default function IngestReviewSheet({
                 transition={transitions.fast}
                 className="flex-1 flex flex-col items-center justify-center gap-6 px-8"
               >
+                {/* Enquanto está listando não existe denominador, então não vai
+                    porcentagem: o loader roda indeterminado e o número que
+                    aparece é o de arquivos achados até agora, que é verdade. */}
                 <FlyingPaperLoader
-                  progress={progress?.pct}
+                  progress={listing ? undefined : progress?.pct}
                   label={
-                    phase === "scanning"
-                      ? progress
-                        ? `Analisando ${progress.done}/${progress.total}`
-                        : "Lendo a pasta…"
-                      : progress
-                        ? `Ingerindo ${progress.done}/${progress.total}`
-                        : "Preparando…"
+                    listing
+                      ? `Lendo a pasta, ${listing.found} ${listing.found === 1 ? "arquivo" : "arquivos"}`
+                      : phase === "scanning"
+                        ? progress
+                          ? `Analisando ${progress.done}/${progress.total}`
+                          : "Lendo a pasta…"
+                        : progress
+                          ? `Ingerindo ${progress.done}/${progress.total}`
+                          : "Preparando…"
                   }
                 />
                 <p className="text-[10px] font-mono text-neutral-700 truncate max-w-md text-center h-4">
-                  {progress?.currentFile}
+                  {listing ? listing.dir : progress?.currentFile}
                 </p>
                 <p className="text-[11px] text-neutral-600 font-bold uppercase tracking-widest text-center max-w-sm">
                   {phase === "scanning"
-                    ? "Nada foi gravado ainda — este é o pré-voo"
+                    ? "Nada foi gravado ainda. Isto é o pré-voo"
                     : "Gravando no acervo"}
                 </p>
               </motion.div>
@@ -415,9 +494,9 @@ export default function IngestReviewSheet({
                 <div className="text-center">
                   <p className="text-sm font-black text-white uppercase tracking-widest">Ingest concluído</p>
                   <p className="text-[11px] font-bold text-neutral-500 mt-2">
-                    {report.referencesCreated + report.psdOnlyCreated} itens no acervo ·{" "}
+                    {report.referencesCreated + report.psdOnlyCreated} itens no acervo,{" "}
                     {report.psdMetadataScanned} PSDs analisados
-                    {report.referencesSkipped > 0 && ` · ${report.referencesSkipped} já existiam`}
+                    {report.referencesSkipped > 0 && `, ${report.referencesSkipped} já existiam`}
                   </p>
                 </div>
                 {report.errors?.length > 0 && (
@@ -454,8 +533,8 @@ export default function IngestReviewSheet({
                   <div className="mx-6 mt-4 flex items-center gap-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 px-3 py-2">
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                     <p className="text-[10px] font-bold text-amber-300">
-                      Não deu para consultar o acervo — o cruzamento com o que já existe está
-                      incompleto. Duplicata contra itens já ingeridos pode passar.
+                      Não deu para consultar o acervo, então o cruzamento com o que já existe
+                      está incompleto. Duplicata contra itens já ingeridos pode passar.
                     </p>
                   </div>
                 )}
@@ -521,9 +600,20 @@ export default function IngestReviewSheet({
                   </label>
                   <button
                     onClick={() => setManyVisible(!allVisibleSelected)}
+                    title={
+                      allVisibleSelected
+                        ? "Desmarca tudo que está à vista"
+                        : foraDaMarcacao > 0
+                          ? `Marca só os ${marcaveis.length} novos. ${foraDaMarcacao} ficam de fora; filtre por veredito para marcá-los.`
+                          : "Marca tudo que está à vista"
+                    }
                     className="shrink-0 h-9 px-3 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
                   >
-                    {allVisibleSelected ? "Desmarcar" : "Marcar"} à vista
+                    {allVisibleSelected
+                      ? "Desmarcar à vista"
+                      : foraDaMarcacao > 0
+                        ? `Marcar ${marcaveis.length} novos`
+                        : "Marcar à vista"}
                   </button>
                 </div>
 

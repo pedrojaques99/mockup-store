@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { existsSync } from "fs";
 import { createHash } from "crypto";
 import { open, stat } from "fs/promises";
-import { walkDir } from "@/lib/fs-walk";
+import { walkDirAsync } from "@/lib/fs-walk";
 import { IMAGE_EXTS } from "@/lib/psd-scan";
 import { hashImage } from "@/lib/perceptual-hash";
 import { mockupSignature } from "@/lib/dedup";
@@ -91,8 +91,17 @@ interface ScanOutcome {
 async function runScan(
   normalized: string,
   onProgress?: (done: number, total: number, currentFile: string) => Promise<void> | void,
+  onListing?: (found: number, dir: string) => Promise<void> | void,
+  signal?: AbortSignal,
 ): Promise<ScanOutcome> {
-  const files = walkDir(normalized, ALL_EXTS);
+  // A listagem é a fase mais lenta numa pasta de rede ou de Drive, e era a única
+  // sem nenhum sinal de vida: o `total` só nasce aqui, então a barra ficava sem
+  // valor justamente enquanto isto rodava.
+  const files = await walkDirAsync(normalized, {
+    filterExts: ALL_EXTS,
+    signal,
+    onProgress: ({ found, dir }) => void onListing?.(found, dir),
+  });
   const existing = await loadExisting();
 
   const candidates: ScanCandidate[] = files.map((f) => ({
@@ -114,6 +123,7 @@ async function runScan(
       const i = cursor++;
       if (i >= candidates.length) return;
       const c = candidates[i];
+      signal?.throwIfAborted();
       if (c.ext === ".psd") {
         c.contentHash = await partialHash(c.path);
       } else {
@@ -158,7 +168,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (!isStream) {
-    const out = await runScan(normalized);
+    const out = await runScan(normalized, undefined, undefined, req.signal);
     return NextResponse.json({
       ...out,
       // Compatibilidade com o formato antigo desta rota.
@@ -173,22 +183,39 @@ export async function GET(req: NextRequest) {
       const send = (obj: unknown) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       };
+      // Fechar a aba ou apertar Cancelar aborta o fetch do cliente; sem ler este
+      // sinal, o servidor seguia varrendo a pasta inteira para ninguém.
+      const abortar = () => controller.close();
+      req.signal.addEventListener("abort", abortar, { once: true });
       try {
         send({ type: "start", folder: normalized });
-        const out = await runScan(normalized, (done, total, currentFile) => {
-          send({
-            type: "progress",
-            done,
-            total,
-            pct: total ? Math.round((done / total) * 100) : 100,
-            currentFile,
-          });
-        });
+        const out = await runScan(
+          normalized,
+          (done, total, currentFile) => {
+            send({
+              type: "progress",
+              done,
+              total,
+              pct: total ? Math.round((done / total) * 100) : 100,
+              currentFile,
+            });
+          },
+          (found, dir) => send({ type: "listing", found, dir }),
+          req.signal,
+        );
         send({ type: "complete", ...out });
       } catch (err) {
-        send({ type: "error", message: String((err as Error)?.message ?? err) });
+        // Cancelamento é saída normal, não erro para mostrar na tela.
+        if (!req.signal.aborted) {
+          send({ type: "error", message: String((err as Error)?.message ?? err) });
+        }
       } finally {
-        controller.close();
+        req.signal.removeEventListener("abort", abortar);
+        try {
+          controller.close();
+        } catch {
+          /* já fechado pelo abort */
+        }
       }
     },
   });

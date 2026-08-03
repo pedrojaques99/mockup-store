@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { walkDir, walkPsds, psdRoots } from "../fs-walk";
+import { walkDir, walkDirAsync, walkPsds, psdRoots } from "../fs-walk";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -83,5 +83,38 @@ describe("walkPsds", () => {
     const psds = walkPsds(TEST_DIR);
     expect(psds).toHaveLength(2);
     expect(psds.every((f) => f.ext === ".psd")).toBe(true);
+  });
+});
+
+describe("walkDirAsync", () => {
+  it("acha o mesmo que a versão síncrona", async () => {
+    const sync = walkDir(TEST_DIR, new Set([".psd"]));
+    const async = await walkDirAsync(TEST_DIR, { filterExts: new Set([".psd"]) });
+    expect(async.map((f) => f.path).sort()).toEqual(sync.map((f) => f.path).sort());
+  });
+
+  it("normaliza separador e ignora AppleDouble como a síncrona", async () => {
+    const files = await walkDirAsync(TEST_DIR);
+    expect(files.every((f) => !f.path.includes("\\"))).toBe(true);
+    expect(files.every((f) => !f.name.startsWith("._"))).toBe(true);
+  });
+
+  it("reporta progresso durante a listagem, antes de existir total", async () => {
+    const avisos: number[] = [];
+    await walkDirAsync(TEST_DIR, { onProgress: (p) => avisos.push(p.found) });
+    // O aviso final sempre sai; é o que tira a barra do limbo.
+    expect(avisos.length).toBeGreaterThan(0);
+    expect(avisos.at(-1)).toBeGreaterThan(0);
+  });
+
+  it("cancela quando o sinal aborta", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    await expect(walkDirAsync(TEST_DIR, { signal: ac.signal })).rejects.toThrow();
+  });
+
+  it("pasta inexistente devolve vazio, sem estourar", async () => {
+    const files = await walkDirAsync(join(TEST_DIR, "nao-existe-mesmo"));
+    expect(files).toEqual([]);
   });
 });

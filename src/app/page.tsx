@@ -53,7 +53,7 @@ import { decideFraming, sampleArtStats, type FramingDecision } from "@/lib/art-c
 import { dedupeRefs } from "@/lib/dedup";
 import Lottie from "lottie-react";
 import boxLoaderData from "../../public/lottie/box-loader.json";
-import IngestReviewSheet from "@/components/IngestReviewSheet";
+import IngestDialog from "@/components/ingest/IngestDialog";
 import { DropOverlay } from "@/components/ui/DropOverlay";
 import { MasonryGallery } from "@/components/ui/masonry-gallery";
 import { Select } from "@/components/ui/Select";
@@ -532,14 +532,17 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
   const [expandedDims, setExpandedDims] = useState<Set<string>>(new Set());
-  const [ingestResult, setIngestResult] = useState<string | null>(null);
-  const [folderInput, setFolderInput] = useState("");
-  // Wizard: step 0=escondido, 1=caminho da pasta. O antigo passo 2 ("confirmar"
-  // com duas contagens) virou a tela de revisão — confirmar uma escrita
-  // irreversível vendo só dois números não é confirmar, é apostar.
-  const [wizardStep, setWizardStep] = useState(0);
-  /** Pasta em revisão — abre o IngestReviewSheet, que faz o pré-voo sozinho. */
-  const [reviewPath, setReviewPath] = useState<string | null>(null);
+  /**
+   * O ingest inteiro (origem, varredura, aprovação, gravação) vive no
+   * IngestDialog. Aqui sobra só "está aberto?".
+   *
+   * Antes eram três estados espalhados nesta página (`wizardStep`,
+   * `folderInput`, `reviewPath`) e o fluxo trocava de container no meio: a
+   * origem num bloco da sidebar, o resto num diálogo por cima. O retorno da
+   * escrita aparecia na sidebar, que podia estar colapsada — confirmação de
+   * escrita irreversível invisível.
+   */
+  const [ingestOpen, setIngestOpen] = useState(false);
 
   const [visantConnected, setVisantConnected] = useState<boolean | null>(null);
   const [visantLoginUrl, setVisantLoginUrl] = useState<string | null>(null);
@@ -1784,31 +1787,21 @@ export default function Home() {
     });
   };
 
-  const openFolderWizard = useCallback(() => {
-    setFolderInput("");
-    setWizardStep(1);
-    setIngestResult(null);
-    // O gatilho vive no header e o campo de caminho vive na sidebar: com a
-    // sidebar colapsada, clicar não faria NADA visível — uma ação primária em
-    // silêncio. Abrir o painel faz parte da ação.
-    const panel = leftPanelRef.current;
-    if (panel?.isCollapsed()) panel.expand();
-  }, [leftPanelRef]);
-
-  /** Abre a revisão. O pré-voo (hash + triagem) roda dentro da folha. */
-  const openReview = () => {
-    const path = folderInput.trim();
-    if (!path) return;
-    setReviewPath(path);
-  };
+  /**
+   * Abre o ingest. Não mexe mais no painel da esquerda: reconfigurar o layout
+   * do usuário era efeito colateral de uma ação que não tem nada a ver com o
+   * painel, e o layout nunca voltava ao que era.
+   */
+  const openIngest = useCallback(() => setIngestOpen(true), []);
 
   const handleIngested = useCallback(
     (report: { referencesCreated: number; psdOnlyCreated: number; psdMetadataScanned: number }) => {
-      setIngestResult(
-        `+${report.referencesCreated} refs · ${report.psdOnlyCreated} PSDs · ${report.psdMetadataScanned} analisados`,
+      // Toast em vez de linha na sidebar: a confirmação de uma escrita
+      // irreversível não pode depender de um painel que o usuário pode ter
+      // colapsado. O sonner já está montado nesta página.
+      toast.success(
+        `+${report.referencesCreated} refs, ${report.psdOnlyCreated} PSDs, ${report.psdMetadataScanned} analisados`,
       );
-      setFolderInput("");
-      setWizardStep(0);
       // Facetas saem do MESMO catálogo do grid — recarrega as duas ou o dropdown
       // passa a prometer estúdio que a listagem ainda não conhece.
       fetch("/api/references/facets?has_psd=true")
@@ -2040,13 +2033,13 @@ export default function Home() {
               laje tracejada de 44px no meio dos filtros da sidebar, disputando peso
               com controles do dia a dia por algo que se faz uma vez por sessão. */}
           <button
-            onClick={openFolderWizard}
+            onClick={openIngest}
             className={`p-2 rounded-lg hover:bg-white/5 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 ${
-              wizardStep === 1 ? "text-white bg-white/5" : "text-neutral-500 hover:text-white"
+              ingestOpen ? "text-white bg-white/5" : "text-neutral-500 hover:text-white"
             }`}
             title="Adicionar pasta ao acervo"
             aria-label="Adicionar pasta ao acervo"
-            aria-pressed={wizardStep === 1}
+            aria-expanded={ingestOpen}
           >
             <FolderPlus className="w-4.5 h-4.5" />
           </button>
@@ -2223,50 +2216,6 @@ export default function Home() {
               )}
             </div>
 
-            {wizardStep === 0 && (
-              <>
-                {/* O gatilho mora no header (ação global, não filtro). Aqui fica só
-                    o retorno do último ingest. */}
-                {ingestResult && (
-                  <p className={`text-[10px] font-bold py-2 px-3 rounded-xl mb-2 flex items-center gap-2 ${ingestResult.startsWith("Erro") ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}`}>
-                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${ingestResult.startsWith("Erro") ? "bg-red-400" : "bg-emerald-400"}`} />
-                    {ingestResult}
-                  </p>
-                )}
-              </>
-            )}
-            {wizardStep === 1 && (
-              <div className="flex flex-col gap-2 mb-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                <div className="flex items-center gap-2 px-1 mb-0.5">
-                  <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Caminho da pasta</p>
-                  <button onClick={() => setWizardStep(0)} title="Fechar" className="ml-auto text-neutral-600 hover:text-neutral-400 transition-colors"><X className="w-3.5 h-3.5" /></button>
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={folderInput}
-                    onChange={(e) => setFolderInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && openReview()}
-                    placeholder="ex: H:/Mockups/Layouts"
-                    autoFocus
-                    className="flex-1 min-w-0 h-10 rounded-xl bg-neutral-900 border border-neutral-700 px-4 text-xs focus:outline-none focus:border-neutral-500 shadow-xl"
-                  />
-                  {/* Sem caminho não há botão morto: o primário só existe quando
-                      tem o que revisar (um primário desabilitado é mentira). */}
-                  {folderInput.trim() ? (
-                    <button
-                      onClick={openReview}
-                      className="shrink-0 h-10 rounded-xl bg-white text-black text-[11px] font-black px-4 active:scale-95 transition-[color,background-color,transform] shadow-lg uppercase tracking-widest"
-                    >
-                      Revisar
-                    </button>
-                  ) : null}
-                </div>
-                <p className="text-[9px] text-neutral-700 font-bold uppercase tracking-widest px-1">
-                  Nada é gravado antes de você revisar
-                </p>
-              </div>
-            )}
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-4 min-h-0 space-y-8 no-scrollbar">
@@ -2573,11 +2522,11 @@ export default function Home() {
                   <p className="text-base font-black uppercase tracking-widest text-neutral-200">Seu acervo está vazio</p>
                   <p className="text-xs font-bold text-neutral-600 mt-2 leading-relaxed">
                     Aponte uma pasta com PSDs ou imagens de mockup. Nada é gravado antes de você
-                    revisar o que entra — duplicata e lixo já vêm desmarcados.
+                    revisar o que entra. Duplicata e lixo já vêm desmarcados.
                   </p>
                 </div>
                 <button
-                  onClick={() => { leftPanelRef.current?.expand(); openFolderWizard(); }}
+                  onClick={openIngest}
                   className="flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.97] shadow-xl shadow-white/5"
                 >
                   <FolderPlus className="w-4 h-4" />
@@ -3857,14 +3806,12 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      {/* Revisão do ingest — pré-voo, triagem e commit seletivo. */}
-      {reviewPath && (
-        <IngestReviewSheet
-          folderPath={reviewPath}
-          onClose={() => setReviewPath(null)}
-          onIngested={handleIngested}
-        />
-      )}
+      {/* Ingest inteiro: origem, varredura, aprovação e gravação. */}
+      <IngestDialog
+        open={ingestOpen}
+        onClose={() => setIngestOpen(false)}
+        onIngested={handleIngested}
+      />
 
       {/* Alvo de soltar da PÁGINA. Antes só o retângulo do painel direito
           aceitava a arte — e só quando o mockup tinha faces editáveis; soltar um

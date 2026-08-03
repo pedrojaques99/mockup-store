@@ -81,6 +81,8 @@ interface IngestReport {
   psdOnlyCreated: number;
   psdMetadataScanned: number;
   errors: string[];
+  /** Cancelado no meio: o que já entrou continua no acervo, e o relatório diz onde parou. */
+  cancelled?: boolean;
 }
 
 async function runIngest(
@@ -88,6 +90,7 @@ async function runIngest(
   requested: RequestedFile[] | null,
   defaultStudio: string | undefined,
   onProgress?: (step: string, detail: string, done: number, total: number) => Promise<void> | void,
+  signal?: AbortSignal,
 ): Promise<IngestReport> {
   const folderName = normalizedPath.split("/").filter(Boolean).pop() || "Unknown";
   const studioFallback = defaultStudio?.trim() || folderName;
@@ -140,6 +143,11 @@ async function runIngest(
     errors: [],
   };
 
+  // Cancelar durante a gravação não pode desfazer o que já entrou no Mongo (não
+  // há transação aqui). A regra é parar no PRÓXIMO item e devolver o relatório
+  // do que entrou, para o usuário saber exatamente onde parou.
+  const cancelado = () => signal?.aborted === true;
+
   const totalSteps = images.length + psds.length + psds.length;
   let step = 0;
   const tick = async (label: string, detail: string) => {
@@ -151,6 +159,7 @@ async function runIngest(
   };
 
   for (const img of images) {
+    if (cancelado()) break;
     const matchedPsd = psdByName.get(img.name.toLowerCase());
     const sig = mockupSignature(img.name, matchedPsd?.sizeBytes);
     if (known.has(sig)) {
@@ -181,6 +190,7 @@ async function runIngest(
   }
 
   for (const psd of psds) {
+    if (cancelado()) break;
     if (images.some((img) => img.name.toLowerCase() === psd.name.toLowerCase())) {
       await tick("skip", psd.name);
       continue;
@@ -214,6 +224,7 @@ async function runIngest(
   }
 
   for (const psd of psds) {
+    if (cancelado()) break;
     try {
       if (await psdMetaCol.findOne({ fileName: psd.name })) {
         await tick("meta", psd.name);
@@ -233,6 +244,7 @@ async function runIngest(
 
   // Acervo mudou → o catálogo cacheado da busca precisa ser refeito.
   invalidateCatalog();
+  if (cancelado()) report.cancelled = true;
   return report;
 }
 
@@ -260,7 +272,9 @@ export async function POST(req: NextRequest) {
 
   if (!body.stream) {
     try {
-      return NextResponse.json(await runIngest(normalizedPath, requested, body.studio));
+      return NextResponse.json(
+        await runIngest(normalizedPath, requested, body.studio, undefined, req.signal),
+      );
     } catch (err) {
       return NextResponse.json(
         { error: String((err as Error)?.message ?? err) },
@@ -274,6 +288,11 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       const send = (obj: unknown) =>
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      // Fechar a aba no meio da gravação deixava o servidor escrevendo no Mongo
+      // sem ninguém do outro lado. Agora o abort chega ao laço, que para no
+      // próximo item e devolve o que entrou.
+      const abortar = () => controller.close();
+      req.signal.addEventListener("abort", abortar, { once: true });
       try {
         send({ type: "start", folder: normalizedPath, total: requested?.length ?? 0 });
         const report = await runIngest(
@@ -290,12 +309,20 @@ export async function POST(req: NextRequest) {
               pct: total ? Math.round((done / total) * 100) : 100,
             });
           },
+          req.signal,
         );
         send({ type: "complete", ...report });
       } catch (err) {
-        send({ type: "error", message: String((err as Error)?.message ?? err) });
+        if (!req.signal.aborted) {
+          send({ type: "error", message: String((err as Error)?.message ?? err) });
+        }
       } finally {
-        controller.close();
+        req.signal.removeEventListener("abort", abortar);
+        try {
+          controller.close();
+        } catch {
+          /* já fechado pelo abort */
+        }
       }
     },
   });
