@@ -8,8 +8,33 @@
 
 ---
 
-> **Estado: Fases 0, 1, 2 e 3 executadas.** Fases 4 e 5 continuam como plano
-> (tabela virtualizada para pasta de milhares de itens, e polimento).
+> **Estado: Fases 0 a 5 executadas.**
+>
+> **Fases 4 e 5:**
+>
+> | Item | Onde |
+> |---|---|
+> | Lista virtualizada | `@tanstack/react-virtual`; **17 linhas no DOM para 150 arquivos** |
+> | Cabeçalho ordenável (arquivo, tamanho, veredito) | `IngestDialog.tsx`, `ordem` |
+> | Menu de linha (mostrar no Explorer) | reusa `/api/open-file` |
+> | Retomada por `sessionStorage` | fechar no meio não joga a triagem fora |
+> | "Adicionar outra pasta" na conclusão | ingerir pasta raramente é uma pasta só |
+> | Estado de cancelamento no relatório | diz que parou e que o que entrou ficou |
+> | Estados próprios: pasta sem nada aproveitável, pasta já toda no acervo | eram becos sem saída que caíam na revisão vazia oferecendo um "Ingerir" impossível |
+> | `npm run fixture:virt` | gera a pasta que torna a checagem de virtualização real |
+>
+> **Sobre o `data-table` do registry (decisão D2):** foi lido antes de decidir, e
+> **não serve**. Ele arrasta `next-auth`, `class-variance-authority` e mais 8 itens de
+> registry (`button`, `checkbox`, `context-menu`, `input`, `skeleton`, `table`…) para um
+> repo que já tem os próprios 13 primitivos. O que faltava de verdade era virtualização,
+> então entrou só `@tanstack/react-virtual`, que faz isso e nada mais. Ordenação e
+> agrupamento são JS puro sobre um array que já está inteiro no cliente.
+>
+> **Um bug que só a checagem visual pegou:** com `useRef`, o virtualizer media o
+> container antes de ele existir (a lista só monta na fase de revisão) e devolvia
+> **zero linhas** para 150 itens, com o rodapé anunciando "Ingerir 150" sobre uma tela
+> vazia. Portão verde em tsc, lint, 244 testes e `ui:audit`. O conserto é ref por
+> estado, que força um render quando o elemento aparece.
 >
 > **Fase 3, a origem de verdade:**
 >

@@ -99,5 +99,8 @@ jobs:
           npm run smoke -- --url http://localhost:3123
           # Portão visual: dirige um Chrome de verdade e checa o que só se vê com
           # o olho (diálogo abre, nada cortado pelas bordas, validação reprova
-          # caminho inexistente). O `npm ci` já baixa o Chromium do puppeteer.
+          # caminho inexistente, lista virtualizada). O `npm ci` já baixa o
+          # Chromium do puppeteer. A fixture é o que torna a checagem de
+          # virtualização real em vez de pulada.
+          npm run fixture:virt
           npm run visual:ingest -- --url http://localhost:3123

@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, FolderPlus, Layers, Search, Sparkles, X } from "lucide-react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  FolderPlus,
+  Layers,
+  Search,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { Dialog, DialogContent } from "@/components/ui/Dialog";
 import { IngestStepper } from "./IngestStepper";
@@ -74,6 +84,18 @@ const VERDICT_META: Record<
 
 const VERDICT_ORDER: Verdict[] = ["new", "duplicate", "junk", "exists"];
 
+type Campo = "nome" | "tamanho" | "veredito";
+
+/**
+ * Altura de uma linha da aprovação, em px. É constante de propósito: a lista é
+ * virtualizada e uma altura fixa evita medir cada linha, que numa pasta de
+ * milhares de itens custa mais que renderizar.
+ */
+const ALTURA_LINHA = 56;
+
+/** Onde a sessão de revisão fica guardada para sobreviver a um F5. */
+const SESSAO_KEY = "mockup-store:ingest-sessao";
+
 const fmtBytes = (b: number) =>
   b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`;
 
@@ -83,6 +105,8 @@ interface IngestReport {
   referencesSkipped: number;
   psdMetadataScanned: number;
   errors: string[];
+  /** Parou no meio: o que entrou continua no acervo. */
+  cancelled?: boolean;
 }
 
 export default function IngestDialog({
@@ -112,6 +136,18 @@ export default function IngestDialog({
   const [listing, setListing] = useState<{ found: number; dir: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<IngestReport | null>(null);
+  /** Ordenação da lista de aprovação. */
+  const [ordem, setOrdem] = useState<{ campo: Campo; asc: boolean }>({ campo: "nome", asc: true });
+  /** Escape do estado "já está tudo no acervo": ver a lista assim mesmo. */
+  const [verTudo, setVerTudo] = useState(false);
+  /**
+   * Ref por ESTADO, não useRef. O container da lista só monta na fase de
+   * revisão, e um `useRef` ainda estava nulo quando o virtualizer mediu: ele
+   * devolvia zero linhas para uma lista de 150 itens, com o rodapé anunciando
+   * "Ingerir 150" e a tela vazia. Guardar o elemento em estado força um render
+   * novo no momento em que ele existe.
+   */
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -207,6 +243,74 @@ export default function IngestDialog({
     return () => abortRef.current?.abort();
   }, [runScan, folderPath]);
 
+  /**
+   * Retomada. A triagem custa minutos numa pasta grande (hash de cada arquivo),
+   * e fechar o diálogo no meio da aprovação jogava tudo fora: reabrir mandava
+   * varrer de novo do zero. Agora a revisão sobrevive a fechar e a um F5.
+   *
+   * Fica em `sessionStorage` de propósito: é estado de trabalho de uma sessão,
+   * não preferência. Só a revisão é guardada — varredura e gravação em
+   * andamento não podem "retomar", porque o servidor já parou.
+   */
+  useEffect(() => {
+    if (phase !== "review" || !items.length) return;
+    try {
+      sessionStorage.setItem(
+        SESSAO_KEY,
+        JSON.stringify({ folderPath, items, summary, degraded, studio, selecionados: [...selected] }),
+      );
+    } catch {
+      /* cota estourada numa pasta enorme: retomar é conveniência, não pode quebrar */
+    }
+  }, [phase, items, summary, degraded, studio, selected, folderPath]);
+
+  /** Ao abrir, oferece continuar de onde parou em vez de varrer de novo. */
+  useEffect(() => {
+    if (!open || phase !== "origin" || items.length) return;
+    try {
+      const raw = sessionStorage.getItem(SESSAO_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (!s?.folderPath || !Array.isArray(s.items) || !s.items.length) return;
+      setFolderPath(s.folderPath);
+      setItems(s.items);
+      setSummary(s.summary ?? null);
+      setDegraded(Boolean(s.degraded));
+      setStudio(String(s.studio ?? ""));
+      setSelected(new Set<string>(Array.isArray(s.selecionados) ? s.selecionados : []));
+      setPhase("review");
+    } catch {
+      /* sessão corrompida: começa do zero, que é o comportamento antigo */
+    }
+    // Só na abertura; depois disso quem manda é o usuário.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  /** Volta para a origem sem fechar: ingerir pasta raramente é uma pasta só. */
+  const recomecar = useCallback(() => {
+    setFolderPath("");
+    setItems([]);
+    setSummary(null);
+    setSelected(new Set());
+    setReport(null);
+    setProgress(null);
+    setListing(null);
+    setError(null);
+    setQuery("");
+    setFilter("all");
+    setVerTudo(false);
+    setPhase("origin");
+  }, []);
+
+  /** Mostra o arquivo no Explorer, para decidir olhando e não adivinhando. */
+  const revelar = useCallback((path: string) => {
+    fetch("/api/open-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, mode: "reveal" }),
+    }).catch(() => {});
+  }, []);
+
   /** Escolheu a pasta: sai da origem e entra na varredura. */
   const escolherPasta = useCallback((path: string) => {
     setFolderPath(path);
@@ -278,6 +382,13 @@ export default function IngestDialog({
             const rep = ev as unknown as IngestReport;
             setReport(rep);
             setPhase("done");
+            // Gravou: a sessão cumpriu o papel. Deixá-la faria o próximo abrir
+            // oferecer "continuar" uma revisão que já entrou no acervo.
+            try {
+              sessionStorage.removeItem(SESSAO_KEY);
+            } catch {
+              /* sem sessionStorage: nada a limpar */
+            }
             onIngested(rep);
           } else if (ev.type === "error") {
             throw new Error(String(ev.message));
@@ -295,12 +406,40 @@ export default function IngestDialog({
   // ── Derivados ─────────────────────────────────────────────────────────────
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return items.filter((i) => {
+    const filtrados = items.filter((i) => {
       if (filter !== "all" && i.verdict !== filter) return false;
       if (q && !i.name.toLowerCase().includes(q) && !i.path.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [items, filter, query]);
+    // Ordenação em memória: a lista já está inteira no cliente, então ordenar
+    // aqui é mais barato e mais previsível que um round-trip.
+    const dir = ordem.asc ? 1 : -1;
+    return [...filtrados].sort((a, b) => {
+      switch (ordem.campo) {
+        case "tamanho":
+          return (a.sizeBytes - b.sizeBytes) * dir;
+        case "veredito": {
+          const d = VERDICT_ORDER.indexOf(a.verdict) - VERDICT_ORDER.indexOf(b.verdict);
+          return (d || a.name.localeCompare(b.name, "pt-BR")) * dir;
+        }
+        default:
+          return a.name.localeCompare(b.name, "pt-BR", { numeric: true }) * dir;
+      }
+    });
+  }, [items, filter, query, ordem]);
+
+  const virtualizer = useVirtualizer({
+    count: visible.length,
+    getScrollElement: () => scroller,
+    estimateSize: () => ALTURA_LINHA,
+    overscan: 8,
+  });
+
+  /** Novos no acervo INTEIRO, não só no recorte à vista. */
+  const marcaveisTotais = useMemo(
+    () => items.filter((i) => i.verdict === "new").length,
+    [items],
+  );
 
   const selectedItems = useMemo(
     () => items.filter((i) => selected.has(i.path)),
@@ -505,7 +644,14 @@ export default function IngestDialog({
                   <CheckCircle2 className="w-8 h-8 text-emerald-400" />
                 </div>
                 <div className="text-center">
-                  <p className="text-sm font-black text-white uppercase tracking-widest">Ingest concluído</p>
+                  <p className="text-sm font-black text-white uppercase tracking-widest">
+                    {report.cancelled ? "Interrompido" : "Ingest concluído"}
+                  </p>
+                  {report.cancelled && (
+                    <p className="text-[11px] font-bold text-amber-400 mt-2">
+                      Você parou no meio. O que já tinha entrado continua no acervo.
+                    </p>
+                  )}
                   <p className="text-[11px] font-bold text-neutral-500 mt-2">
                     {report.referencesCreated + report.psdOnlyCreated} itens no acervo,{" "}
                     {report.psdMetadataScanned} PSDs analisados
@@ -524,16 +670,95 @@ export default function IngestDialog({
                     ))}
                   </div>
                 )}
+                {/* Duas saídas, porque ingerir pasta raramente é uma pasta só:
+                    antes o único caminho era fechar e recomeçar do gatilho. */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={recomecar}
+                    className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                  >
+                    Adicionar outra pasta
+                  </button>
+                  <button
+                    onClick={onClose}
+                    className="h-10 px-6 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.98]"
+                  >
+                    Ver no acervo
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Dois becos sem saída que caíam na tela de revisão vazia, sem
+                explicar nada e ainda oferecendo um "Ingerir" impossível. Cada um
+                merece resposta própria e um caminho de volta. */}
+            {phase === "review" && summary && items.length === 0 && (
+              <motion.div
+                key="vazia"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={transitions.base}
+                className="flex-1 flex flex-col items-center justify-center gap-4 px-8 text-center"
+              >
+                <Search className="w-8 h-8 text-neutral-800" aria-hidden />
+                <div>
+                  <p className="text-sm font-black uppercase tracking-widest text-neutral-400">
+                    Nada aproveitável nesta pasta
+                  </p>
+                  <p className="mt-2 text-xs font-medium text-neutral-600">
+                    Não achei PSD nem imagem em{" "}
+                    <span className="font-mono text-neutral-500">{folderPath}</span>. Talvez os
+                    arquivos estejam numa subpasta mais funda que cinco níveis.
+                  </p>
+                </div>
                 <button
-                  onClick={onClose}
-                  className="h-10 px-6 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.98]"
+                  onClick={recomecar}
+                  className="h-10 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.98]"
                 >
-                  Ver no acervo
+                  Escolher outra pasta
                 </button>
               </motion.div>
             )}
 
-            {phase === "review" && summary && (
+            {phase === "review" && summary && items.length > 0 && marcaveisTotais === 0 && !verTudo && (
+              <motion.div
+                key="ja-no-acervo"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={transitions.base}
+                className="flex-1 flex flex-col items-center justify-center gap-4 px-8 text-center"
+              >
+                <CheckCircle2 className="w-8 h-8 text-emerald-500/60" aria-hidden />
+                <div>
+                  <p className="text-sm font-black uppercase tracking-widest text-neutral-400">
+                    Esta pasta já está toda no acervo
+                  </p>
+                  <p className="mt-2 text-xs font-medium text-neutral-600">
+                    Os {items.length} arquivos são duplicata, lixo ou já foram ingeridos. Nada novo
+                    para gravar.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setFilter("all");
+                      setVerTudo(true);
+                    }}
+                    className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                  >
+                    Ver mesmo assim
+                  </button>
+                  <button
+                    onClick={recomecar}
+                    className="h-10 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.98]"
+                  >
+                    Escolher outra pasta
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {phase === "review" && summary && items.length > 0 && (marcaveisTotais > 0 || verTudo) && (
               <motion.div
                 key="review"
                 initial={{ opacity: 0 }}
@@ -630,8 +855,44 @@ export default function IngestDialog({
                   </button>
                 </div>
 
+                {/* Cabeçalho ordenável. Numa pasta de milhares de itens, achar
+                    "o maior arquivo" ou "todas as duplicatas juntas" sem ordenar
+                    é rolagem no escuro. */}
+                <div className="flex items-center gap-3 px-9 pb-2 shrink-0">
+                  {(
+                    [
+                      ["nome", "Arquivo", "flex-1 text-left"],
+                      ["tamanho", "Tamanho", "w-20 text-right"],
+                      ["veredito", "Veredito", "w-24 text-right"],
+                    ] as const
+                  ).map(([campo, rotulo, cls]) => (
+                    <button
+                      key={campo}
+                      type="button"
+                      onClick={() =>
+                        setOrdem((o) =>
+                          o.campo === campo ? { campo, asc: !o.asc } : { campo, asc: true },
+                        )
+                      }
+                      aria-label={`Ordenar por ${rotulo.toLowerCase()}`}
+                      className={`${cls} text-[9px] font-black uppercase tracking-widest transition-colors ${
+                        ordem.campo === campo
+                          ? "text-neutral-300"
+                          : "text-neutral-700 hover:text-neutral-500"
+                      }`}
+                    >
+                      {rotulo}
+                      {ordem.campo === campo && (
+                        <span aria-hidden className="ml-1">
+                          {ordem.asc ? "↑" : "↓"}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
                 {/* Lista */}
-                <div className="flex-1 overflow-y-auto px-6 pb-4 no-scrollbar">
+                <div ref={setScroller} className="flex-1 overflow-y-auto px-6 pb-4 no-scrollbar">
                   {visible.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 gap-3 text-neutral-700">
                       <Search className="w-8 h-8 opacity-30" />
@@ -640,8 +901,12 @@ export default function IngestDialog({
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-1">
-                      {visible.map((it) => {
+                    // Virtualizada: uma pasta de milhares de PSDs renderizava
+                    // milhares de linhas com miniatura, e a rolagem travava.
+                    // Agora só o que cabe na tela existe no DOM.
+                    <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+                      {virtualizer.getVirtualItems().map((linha) => {
+                        const it = visible[linha.index];
                         const m = VERDICT_META[it.verdict];
                         const on = selected.has(it.path);
                         const isImg = it.ext !== ".psd";
@@ -651,6 +916,14 @@ export default function IngestDialog({
                             role="button"
                             tabIndex={0}
                             aria-pressed={on}
+                            style={{
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              width: "100%",
+                              height: ALTURA_LINHA,
+                              transform: `translateY(${linha.start}px)`,
+                            }}
                             onClick={() => toggle(it.path)}
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
@@ -711,6 +984,22 @@ export default function IngestDialog({
                             >
                               {it.reason || m.short}
                             </span>
+
+                            {/* Ver o arquivo antes de decidir. Reusa /api/open-file,
+                                que já existe. `stopPropagation` senão revelar no
+                                Explorer também marcaria a linha. */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                revelar(it.path);
+                              }}
+                              title="Mostrar no Explorer"
+                              aria-label={`Mostrar ${it.name} no Explorer`}
+                              className="shrink-0 rounded-lg p-1.5 text-neutral-700 transition-colors hover:bg-white/5 hover:text-white"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </button>
                           </div>
                         );
                       })}
@@ -728,7 +1017,7 @@ export default function IngestDialog({
             <div className="flex items-center gap-2 text-[10px] font-bold text-neutral-600 uppercase tracking-widest min-w-0">
               <GlitchChars className="text-acc/40" intervalMs={400} />
               <span className="truncate">
-                {selected.size} selecionados · {fmtBytes(selectedBytes)}
+                {selected.size} selecionados, {fmtBytes(selectedBytes)}
               </span>
             </div>
             <div className="flex items-center gap-2 shrink-0">

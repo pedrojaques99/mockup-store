@@ -17,7 +17,7 @@
  * Sai 1 em qualquer falha, então serve de portão.
  */
 import puppeteer, { type Page } from "puppeteer";
-import { mkdirSync } from "fs";
+import { mkdirSync, existsSync } from "fs";
 import { join } from "path";
 
 const urlArg = process.argv.indexOf("--url");
@@ -30,6 +30,14 @@ const CAMINHO_LONGO =
 
 /** Existe de verdade neste repo, então a validação ao vivo aprova. */
 const CAMINHO_VALIDO = process.cwd().replace(/\\/g, "/") + "/fixtures";
+
+/**
+ * Pasta com muitos arquivos, para provar que a lista é virtualizada. Sem ela a
+ * checagem é PULADA e dito em voz alta, em vez de passar em silêncio.
+ */
+const PASTA_GRANDE = existsSync(join(process.cwd(), ".tmp", "virt-test"))
+  ? process.cwd().replace(/\\/g, "/") + "/.tmp/virt-test"
+  : "";
 
 interface Check {
   nome: string;
@@ -164,6 +172,45 @@ async function rodar(largura: number, altura: number, rotulo: string) {
     );
     const unidades = await page.$$eval('[role="dialog"] ul li button', (bs) => bs.length);
     assert(`[${rotulo}] navegador de pastas lista unidades`, unidades > 0, `${unidades} entradas`);
+
+    // 9. A lista de aprovação é virtualizada de verdade.
+    //
+    // Só dá para afirmar isso varrendo uma pasta com muitos arquivos e contando
+    // quantas linhas existem no DOM. Antes eram N linhas com miniatura para N
+    // arquivos, e uma pasta de milhares travava a rolagem.
+    if (PASTA_GRANDE) {
+      await page.click("#ingest-folder", { count: 3 });
+      await page.type("#ingest-folder", PASTA_GRANDE);
+      await page.waitForFunction(
+        () => (document.querySelector("#ingest-folder-estado")?.textContent ?? "").includes("encontrada"),
+        { timeout: 10000 },
+      );
+      await page.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll("button")).find((b) =>
+          (b.textContent ?? "").trim().toUpperCase().startsWith("VARRER"),
+        ) as HTMLButtonElement | undefined;
+        btn?.click();
+      });
+      // A varredura hasheia cada arquivo; 400 arquivos pequenos levam segundos.
+      await page.waitForFunction(
+        () => !!document.querySelector('[aria-pressed][role="button"]'),
+        { timeout: 120000 },
+      );
+      // Só contagens: puxar `document.body.textContent` com a lista carregada
+      // estourava a heap do Chrome nesta máquina.
+      const linhasNoDom = await page.evaluate(
+        () => document.querySelectorAll('[aria-pressed][role="button"]').length,
+      );
+      assert(
+        `[${rotulo}] lista virtualizada: DOM só tem a janela`,
+        linhasNoDom > 0 && linhasNoDom < 80,
+        `${linhasNoDom} linhas no DOM para a pasta inteira`,
+      );
+    } else {
+      console.log(
+        `  · [${rotulo}] virtualização NÃO checada: crie .tmp/virt-test com muitos arquivos`,
+      );
+    }
 
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: join(SHOTS, `ingest-${rotulo}.png`) as `${string}.png` });
