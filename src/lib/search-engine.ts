@@ -45,8 +45,12 @@ export function aspectBucket(a: number | undefined): AspectBucket | undefined {
 /**
  * Ordenação da LISTAGEM (sem query de texto). Com query quem manda é a relevância —
  * reordenar o resultado de uma busca por nome joga fora o rank que a cascata montou.
+ *
+ * `shuffle` é a home que muda a cada abertura: embaralhamento SEMEADO, não aleatório de
+ * verdade. Aleatório de verdade re-sorteia a cada página e o usuário vê o mesmo card duas
+ * vezes enquanto rola — a semente é o que faz "surpresa" e "paginação" conviverem.
  */
-export type SortMode = "popular" | "name";
+export type SortMode = "popular" | "name" | "shuffle";
 
 export interface SearchQuery {
   search?: string;
@@ -57,6 +61,13 @@ export interface SearchQuery {
   requirePsd?: boolean;
   /** Default `popular`. Ignorado quando há `search` (aí a ordem é a relevância). */
   sort?: SortMode;
+  /** Semente do `sort: "shuffle"`. Mesma semente ⇒ mesma ordem, em qualquer página. */
+  seed?: number;
+  /**
+   * Ids que o embaralhamento deve puxar para a frente — hoje, as sugestões da marca ativa.
+   * Viés, não filtro: o acervo inteiro continua na lista, só que atrás.
+   */
+  biasIds?: string[];
   page?: number;
   limit?: number;
 }
@@ -182,6 +193,113 @@ const PASSES = [
 ];
 const ENOUGH_HITS = 5;
 
+// ---------------------------------------------------------------- fusão densa (vibe)
+
+/**
+ * Reciprocal Rank Fusion entre a lista léxica (BM25) e a densa (embeddings).
+ *
+ * Fusão por score normalizado é onde esse tipo de busca costuma apodrecer: BM25 anda de 0 a 15,
+ * cosseno de 0.6 a 0.95, e as distribuições não têm a mesma forma — um outlier de qualquer um
+ * dos lados sequestra o ranking depois de normalizar. RRF joga os scores fora e olha só POSIÇÃO,
+ * que é a única coisa comparável entre os dois motores.
+ *
+ * `K = 60` é a constante clássica: amortece o topo o bastante para que um 1º lugar de um motor
+ * não atropele um 2º-e-3º concordantes do outro.
+ *
+ * Assimetria deliberada: a lista léxica tem peso maior. Quem digitou o nome exato do mockup
+ * quer AQUELE mockup — a camada densa está aqui para resgatar o que não foi escrito
+ * ("engenharia" → canteiro), não para opinar sobre o que já foi.
+ */
+const RRF_K = 60;
+const LEXICAL_WEIGHT = 1.4;
+
+export function fuseRRF(lexical: string[], semantic: string[]): string[] {
+  if (!semantic.length) return lexical;
+  if (!lexical.length) return semantic;
+  const score = new Map<string, number>();
+  const add = (ids: string[], weight: number) => {
+    for (let i = 0; i < ids.length; i++) {
+      score.set(ids[i], (score.get(ids[i]) ?? 0) + weight / (RRF_K + i + 1));
+    }
+  };
+  add(lexical, LEXICAL_WEIGHT);
+  add(semantic, 1);
+  // Empate resolvido pela ordem léxica (estável): duas listas discordando não podem
+  // produzir ordens diferentes entre requests idênticos.
+  const rankLex = new Map(lexical.map((id, i) => [id, i]));
+  return [...score.keys()].sort((a, b) => {
+    const d = score.get(b)! - score.get(a)!;
+    if (d) return d;
+    return (rankLex.get(a) ?? Infinity) - (rankLex.get(b) ?? Infinity);
+  });
+}
+
+// ---------------------------------------------------------------- embaralhamento semeado
+
+/** PRNG determinístico e barato. Precisa ser reprodutível: a semente é o contrato. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Sorteio por doc, e não `array.sort(() => Math.random())`.
+ *
+ * O motivo é paginação: a página 2 é uma requisição nova, com o array em outra ordem de
+ * entrada. Só um valor que depende de `(semente, id)` — e de mais nada — devolve a mesma
+ * ordem global nas duas chamadas.
+ */
+function shuffleKey(id: string, seed: number): number {
+  return mulberry32(hashString(id) ^ (seed >>> 0))();
+}
+
+const BIAS_WEIGHT = 0.45;
+const POPULAR_WEIGHT = 0.15;
+/**
+ * Penalidade de card sem thumbnail. Medido na primeira captura da home embaralhada:
+ * 4 dos 15 cards da primeira dobra eram "Sem prévia" — ou seja, o sorteio estava
+ * gastando a área mais cara da tela com o item que não dá para escolher pelo olho.
+ * Penalidade, não filtro: o item continua na lista, só não abre a galeria.
+ */
+const NO_PREVIEW_PENALTY = 0.35;
+
+/**
+ * A home que muda: sorteio + dois vieses fracos.
+ *
+ * Aleatório puro fazia a primeira dobra virar loteria — item sem thumbnail e mockup que
+ * ninguém nunca abriu ocupando a área mais cara da tela. Então o sorteio manda (peso 1),
+ * mas leva um empurrão de quem é sugestão da marca ativa e outro, menor, de popularidade.
+ * O acervo inteiro continua na lista: é viés, não filtro.
+ */
+export function shuffleOrder(
+  docs: SearchDoc[],
+  seed: number,
+  biasIds?: string[],
+  boost?: BoostFn,
+): SearchDoc[] {
+  const bias = biasIds?.length ? new Set(biasIds) : null;
+  const key = (d: SearchDoc) =>
+    shuffleKey(d.id, seed) +
+    (bias?.has(d.id) ? BIAS_WEIGHT : 0) +
+    (boost ? boost(d.id) * POPULAR_WEIGHT : 0) -
+    (d.referenceImageUrl ? 0 : NO_PREVIEW_PENALTY);
+  return [...docs].sort((a, b) => key(b) - key(a) || a.id.localeCompare(b.id));
+}
+
 /** Sinal de popularidade por doc (0..1) — ver `search-signals.ts`. */
 export type BoostFn = (docId: string) => number;
 
@@ -191,8 +309,10 @@ export interface RankedResult {
   page: number;
   pages: number;
   /**
-   * Primeiro passe da cascata que devolveu algo (1 = exato, 3 = só resolveu no fuzzy+OR).
-   * Sinal de telemetria: query que só vive no passe 3 é buraco de vocabulário.
+   * Primeiro passe da cascata que devolveu algo (1 = exato, 3 = só resolveu no fuzzy+OR,
+   * 4 = nenhum passe léxico achou nada e quem salvou foi a camada densa).
+   * Sinal de telemetria: query que só vive no passe 3 é buraco de vocabulário — e no 4,
+   * buraco que a busca por vibe está tapando sozinha (candidata a virar sinônimo).
    */
   pass: number;
 }
@@ -206,6 +326,12 @@ export function runSearch(
   mini: MiniSearch<SearchDoc>,
   q: SearchQuery,
   boost?: BoostFn,
+  /**
+   * Ids ordenados pela camada densa (embeddings), já filtrados pelas facetas por quem chamou.
+   * `undefined`/vazio ⇒ a busca é exatamente a de antes. A vibe é aditiva por construção:
+   * sem chave de embeddings, sem rede, sem cache — nada aqui muda.
+   */
+  semanticIds?: string[],
 ): RankedResult {
   const page = Math.max(1, q.page ?? 1);
   const limit = Math.min(Math.max(1, q.limit ?? 60), 200);
@@ -240,7 +366,18 @@ export function runSearch(
       if (results.length && !pass) pass = i + 1;
       if (ordered.length >= ENOUGH_HITS) break;
     }
-    hits = ordered.map((id) => byId.get(id)!).filter(Boolean);
+    // A camada densa entra DEPOIS da cascata, não no lugar dela: o que a busca por vibe
+    // acrescenta é recall (o mockup de canteiro de obra que ninguém taggeou "engenharia"),
+    // e recall novo não pode custar a precisão de quem digitou o nome certo.
+    const dense = semanticIds?.filter((id) => {
+      const d = byId.get(id);
+      return !!d && matchesFacets(d, q);
+    });
+    const fused = dense?.length ? fuseRRF(ordered, dense) : ordered;
+    if (dense?.length && !pass) pass = 4; // 4 = só a camada densa achou. Buraco de vocabulário puro.
+    hits = fused.map((id) => byId.get(id)!).filter(Boolean);
+  } else if ((q.sort ?? "popular") === "shuffle") {
+    hits = shuffleOrder(docs.filter((d) => matchesFacets(d, q)), q.seed ?? 1, q.biasIds, boost);
   } else {
     // A LISTAGEM (sem query) é a primeira tela de toda sessão, e até aqui ela era
     // `localeCompare` do nome — sempre A→Z, sem jeito de trocar. Consequência real

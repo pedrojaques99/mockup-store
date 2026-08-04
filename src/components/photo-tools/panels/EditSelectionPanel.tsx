@@ -7,7 +7,7 @@
  * (IconButton/IconSegmented): Pincel (pintar/apagar) ou Objeto, desfazer/limpar,
  * concluir. Dirige o MESMO estado/handlers do useMaskEditor roteados pro aiedit.
  */
-import { Loader2, Paintbrush, Sparkles, Plus, Minus, Undo2, Trash2, Check } from "lucide-react";
+import { Loader2, Paintbrush, Lasso, MousePointerClick, Plus, Minus, Undo2, Trash2, Check } from "lucide-react";
 import { Slider } from "@/components/ui/Slider";
 import { IconButton } from "@/components/ui/IconButton";
 import { IconSegmented } from "@/components/ui/IconSegmented";
@@ -37,7 +37,7 @@ export function EditSelectionPanel(p: EditSelectionPanelProps) {
       {/* Intenção */}
       <div>
         <p className="text-[9px] uppercase tracking-wider text-violet-300/80 flex items-center gap-1">
-          <Sparkles size={10} /> Seleção da edição
+          <Lasso size={10} /> Seleção da edição
         </p>
         <p className="text-[10px] text-zinc-500 leading-snug mt-0.5">
           Pinte <span className="text-zinc-300">onde a edição vai agir</span>. Não afeta o render.
@@ -51,7 +51,7 @@ export function EditSelectionPanel(p: EditSelectionPanelProps) {
         variant="violet"
         options={[
           { value: "brush", label: "Pincel — pinta à mão livre, ao vivo", icon: Paintbrush },
-          { value: "sam", label: "Objeto — clica e seleciona", icon: Sparkles },
+          { value: "sam", label: "Objeto — clica e seleciona", icon: MousePointerClick },
         ]}
       />
 

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   Upload, Loader2, AlertTriangle, CheckCircle2, RefreshCw,
-  Eye, Wand2, Camera, X, Sparkles, Keyboard, Save, FolderOpen,
+  Eye, Wand2, Camera, X, Lightbulb, Keyboard, Save, FolderOpen,
 } from "lucide-react";
 import ZoomPanViewer from "@/components/ZoomPanViewer";
 import SegmentCanvas from "@/components/SegmentCanvas";
@@ -384,7 +384,7 @@ function PhotoMockupPageInner() {
       let thumbBytes: Uint8Array | undefined;
       try {
         const img = await new Promise<HTMLImageElement>((res, rej) => {
-          const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = renderUrl ?? photoUrl;
+          const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error(`Não carregou a prévia: ${renderUrl ?? photoUrl}`)); i.src = renderUrl ?? photoUrl;
         });
         const scale = Math.min(1, 480 / Math.max(img.width, img.height));
         const c = document.createElement("canvas");
@@ -439,7 +439,7 @@ function PhotoMockupPageInner() {
     const im = new Image();
     im.crossOrigin = "anonymous";
     im.onload = () => res(im);
-    im.onerror = rej;
+    im.onerror = () => rej(new Error(`Não carregou a imagem: ${src}`));
     im.src = src;
   });
 
@@ -950,7 +950,7 @@ function PhotoMockupPageInner() {
       const compositeBase64 = await new Promise<string>((res, rej) => {
         const fr = new FileReader();
         fr.onload = () => res(fr.result as string);
-        fr.onerror = rej;
+        fr.onerror = () => rej(new Error("Não deu para ler o composto para enviar"));
         fr.readAsDataURL(blob);
       });
       const aiBlob = await runAiOp("Melhorar", async (signal) => {
@@ -989,7 +989,7 @@ function PhotoMockupPageInner() {
     const tId = toast.loading("Publicando na Biblioteca…");
     try {
       const renderBase64 = await fetch(activeUrl).then(r => r.blob()).then(b => new Promise<string>((res, rej) => {
-        const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.onerror = rej; fr.readAsDataURL(b);
+        const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.onerror = () => rej(new Error(`Não deu para ler o render para publicar: ${activeUrl}`)); fr.readAsDataURL(b);
       }));
       const r = await fetch(`/api/photo-mockup/${uploadId}/publish`, {
         method: "POST",
@@ -1974,7 +1974,7 @@ function PhotoMockupPageInner() {
                   if (!hint) return null;
                   return (
                     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full bg-acc2/15 border border-acc2/30 backdrop-blur-md text-[11px] text-acc2 shadow-lg animate-in fade-in slide-in-from-bottom-2">
-                      <Sparkles size={12} />
+                      <Lightbulb size={12} />
                       <span>{hint.text}</span>
                       <button onClick={() => dismissHint(hint.key)} className="ml-1 text-acc2/70 hover:text-acc2 transition-colors" aria-label="Dispensar dica"><X size={12} /></button>
                     </div>

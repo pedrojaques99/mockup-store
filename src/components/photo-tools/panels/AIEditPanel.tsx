@@ -9,7 +9,7 @@
  * Visual: alinhado ao design system dos painéis (superfícies zinc, acento único acc2,
  * títulos discretos). Sem caixas saturadas — hierarquia por espaço e tipografia.
  */
-import { Wand2, Loader2, Lasso, X, Eraser, Replace, Sparkles } from "lucide-react";
+import { Wand2, Loader2, Lasso, X, Eraser, Replace, Paintbrush } from "lucide-react";
 import { Segmented } from "@/components/ui/Segmented";
 
 export type AiEditMode = "replace" | "remove" | "retouch";
@@ -114,7 +114,7 @@ export function AIEditPanel({
           options={[
             { value: "replace", label: <Opt icon={Replace}>Substituir</Opt> },
             { value: "remove", label: <Opt icon={Eraser}>Remover</Opt> },
-            { value: "retouch", label: <Opt icon={Sparkles}>Retocar</Opt> },
+            { value: "retouch", label: <Opt icon={Paintbrush}>Retocar</Opt> },
           ]}
         />
       </div>

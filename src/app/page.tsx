@@ -28,6 +28,7 @@ import {
   Loader2,
   AlertTriangle,
   Library,
+  Infinity as InfinityIcon,
   Zap,
   ExternalLink,
   LayoutGrid,
@@ -43,6 +44,10 @@ import {
   Terminal,
   Upload,
   Camera,
+  Bookmark,
+  BookmarkCheck,
+  ScanSearch,
+  ListPlus,
 } from "lucide-react";
 import {
   DEFAULT_FRAME,
@@ -71,6 +76,13 @@ import { pathOrigin } from "@/lib/path-origin";
 const REVEAL_OVERLAY =
   "opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 group-focus-within:opacity-100";
 
+// Mesma regra para os controles pequenos do canto do card (Photoshop, pasta,
+// similares, esconder). Eles nasceram com o reveal cru e repetiram o defeito que
+// a constante acima já tinha consertado logo ali: em tablet ficavam invisíveis e
+// inalcançáveis, porque largura de tela não é sinal de que existe mouse.
+const REVEAL_CONTROL =
+  "opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 group-focus-within:opacity-100";
+
 /** Sentinela de "sem filtro" nos selects: o Radix reserva a string vazia para o
  *  placeholder e recusa um `<Item value="">`. O estado da página continua usando
  *  `""` — a tradução vive só na borda do componente. */
@@ -94,6 +106,10 @@ function MockupCardImpl({
   onSelect,
   onApply,
   onHide,
+  onToggleCollection,
+  onSimilar,
+  inCollection,
+  collectionLabel,
   thumbSize,
   renderedUrl,
   enterDelay,
@@ -105,6 +121,11 @@ function MockupCardImpl({
   onSelect: (mockup: Reference) => void;
   onApply: (mockup: Reference) => void;
   onHide: (mockup: Reference) => void;
+  /** Ausente quando não há marca selecionada — sem marca não existe coleção para curar. */
+  onToggleCollection?: (mockup: Reference) => void;
+  onSimilar?: (mockup: Reference) => void;
+  inCollection?: boolean;
+  collectionLabel?: string;
   thumbSize: number;
   renderedUrl?: string;
   enterDelay: number;
@@ -167,8 +188,13 @@ function MockupCardImpl({
             }}
           />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Layers className="text-neutral-800 w-12 h-12" />
+          // Ausência é um argumento: um mockup sem prévia é justamente o registro
+          // que precisa de ação (regerar o thumbnail). Um ícone cinza sozinho era
+          // indistinguível de "ainda carregando" — um buraco no layout, não um
+          // estado. Agora ele se nomeia.
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-neutral-500">
+            <Layers className="w-8 h-8" />
+            <span className="text-[10px]">Sem prévia</span>
           </div>
         )}
         {renderedUrl && (
@@ -180,13 +206,15 @@ function MockupCardImpl({
           />
         )}
 
+        {/* O tipo continua sendo informação real (decide se a ação é "Aplicar"
+            ou "Abrir"), mas era uma pílula SATURADA repetida em todos os cards —
+            51 manchas de cor competindo com as próprias thumbnails que o olho
+            veio comparar. E o emerald/blue nem é do tema (o design system tem
+            acc/acc2/ink). Marca neutra: a informação fica, o ruído sai. */}
         {(mockup.psdPath || mockup.type === "photo") && !isRendering && (
-          <div className="absolute top-2 right-2 flex gap-1">
-            {mockup.type === "photo"
-              ? <span className="bg-blue-500/90 backdrop-blur-sm text-[9px] font-black px-2 py-0.5 rounded shadow-lg text-white uppercase tracking-tighter">Photo</span>
-              : <span className="bg-emerald-500/90 backdrop-blur-sm text-[9px] font-black px-2 py-0.5 rounded shadow-lg text-white uppercase tracking-tighter">PSD</span>
-            }
-          </div>
+          <span className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-[9px] font-bold px-1.5 py-0.5 rounded text-white/70">
+            {mockup.type === "photo" ? "Photo" : "PSD"}
+          </span>
         )}
 
         {isRendering && (
@@ -203,7 +231,7 @@ function MockupCardImpl({
             onClick={(e) => e.stopPropagation()}
             className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl uppercase tracking-widest">
+            <span className="bg-white text-black text-[11px] font-semibold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl">
               Abrir
             </span>
           </a>
@@ -216,14 +244,16 @@ function MockupCardImpl({
             title="Aplicar arte neste mockup"
             className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[11px] font-black px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl uppercase tracking-widest">
+            <span className="bg-white text-black text-[11px] font-semibold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl">
               Aplicar
             </span>
           </button>
         )}
 
         {!isRendering && (
-          <div className="absolute top-2 left-2 z-20 flex gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-[color,background-color,border-color,opacity]">
+          // A opacidade saiu do contêiner e foi para cada botão: o marcador da coleção
+          // precisa ficar aceso sem hover, e os outros três continuam surgindo só no hover.
+          <div className="absolute top-2 left-2 z-20 flex gap-1.5 transition-[color,background-color,border-color,opacity]">
             {mockup.psdPath && (
               <>
                 {/* Abrir no Photoshop. Sem rótulo, como as vizinhas — o `title` é o
@@ -242,9 +272,9 @@ function MockupCardImpl({
                   }}
                   title="Abrir no Photoshop"
                   aria-label="Abrir no Photoshop"
-                  className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm flex items-center justify-center hover:bg-[#001E36] transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl"
+                  className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm flex items-center justify-center hover:bg-[#001E36] transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl`}
                 >
-                  <span className="text-[10px] font-black leading-none tracking-tighter text-[#31A8FF]">Ps</span>
+                  <span className="text-[10px] font-semibold leading-none tracking-tighter text-[#31A8FF]">Ps</span>
                 </button>
                 <button
                   type="button"
@@ -254,26 +284,66 @@ function MockupCardImpl({
                   }}
                   title="Mostrar na pasta"
                   aria-label="Mostrar na pasta"
-                  className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl"
+                  className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl`}
                 >
                   <Folder className="w-3.5 h-3.5" />
                 </button>
               </>
             )}
+            {/* Marcador da coleção da marca. Ele é o ÚNICO controle do card que
+                permanece visível sem hover quando está ligado: o estado "este mockup
+                já é da marca" é informação que o olho precisa varrendo o grid, não
+                algo a descobrir passando o mouse card a card. */}
+            {onToggleCollection && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onToggleCollection(mockup); }}
+                title={inCollection ? `Tirar de ${collectionLabel}` : `Guardar em ${collectionLabel}`}
+                aria-pressed={!!inCollection}
+                className={`w-7 h-7 rounded-lg backdrop-blur-sm flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl ${
+                  inCollection
+                    ? "opacity-100 bg-white text-black"
+                    : `${REVEAL_CONTROL} bg-black/70 text-white/90 hover:bg-white hover:text-black`
+                }`}
+              >
+                {inCollection ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
+              </button>
+            )}
+            {/* "Ver similares" — a pergunta que se faz olhando um card específico, e que
+                nem a busca por imagem (precisa de arquivo) nem a sugestão de marca (fala
+                da marca, não do mockup) respondiam. */}
+            {onSimilar && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onSimilar(mockup); }}
+                title="Ver mockups parecidos com este"
+                aria-label="Ver mockups parecidos com este"
+                className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl`}
+              >
+                <ScanSearch className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onHide(mockup); }}
               title="Esconder este mockup"
-              className="w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl"
+              className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl`}
             >
               <EyeOff className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
       </div>
+      {/* O nome do mockup é O DADO QUE DECIDE O CLIQUE — esta tela inteira existe
+          para escolher um. Ele estava mais fraco que os chips de tag da sidebar.
+          O estúdio era `uppercase tracking-widest` em 100% dos cards (textura, não
+          informação) e, sem estúdio, ESCREVIA "General" — um valor que o banco não
+          tem. Ausência agora é ausência. */}
       <div className="p-3">
-        <p className="text-[11px] font-bold truncate text-neutral-300 group-hover:text-white transition-colors">{mockup.name}</p>
-        <p className="text-[9px] font-bold text-neutral-600 truncate uppercase tracking-widest mt-0.5">{mockup.studio || "General"}</p>
+        <p className="text-xs font-semibold truncate text-neutral-200 group-hover:text-white transition-colors">{mockup.name}</p>
+        {mockup.studio && (
+          <p className="text-[10px] text-neutral-500 truncate mt-0.5">{mockup.studio}</p>
+        )}
       </div>
     </div>
   );
@@ -360,13 +430,13 @@ function SuggestionCard({
             loading="lazy"
           />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-neutral-800">
+          <div className="absolute inset-0 flex items-center justify-center text-neutral-600">
             <Layers className="w-10 h-10" />
           </div>
         )}
         
         {ref.psdPath && !isRendering && (
-          <span className="absolute top-2 right-2 bg-emerald-500/90 backdrop-blur-sm text-[8px] font-black px-1.5 py-0.5 rounded text-white uppercase">PSD</span>
+          <span className="absolute top-2 right-2 bg-emerald-500/90 backdrop-blur-sm text-[8px] font-semibold px-1.5 py-0.5 rounded text-white">PSD</span>
         )}
 
         {isRendering && (
@@ -382,7 +452,7 @@ function SuggestionCard({
             title="Aplicar arte neste mockup"
             className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[10px] font-black px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl uppercase tracking-widest">
+            <span className="bg-white text-black text-[10px] font-semibold px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl">
               Aplicar
             </span>
           </button>
@@ -392,7 +462,7 @@ function SuggestionCard({
         <p className="text-[11px] font-bold truncate text-neutral-300 group-hover:text-white transition-colors">{ref.name}</p>
         <div className="flex flex-wrap gap-1 mt-1">
           {reasons.slice(0, 2).map((r, i) => (
-            <span key={i} className="text-[8px] font-bold text-neutral-600 uppercase tracking-tighter bg-neutral-800/50 px-1 rounded-sm">{r}</span>
+            <span key={i} className="text-[8px] font-bold text-neutral-500 uppercase tracking-tighter bg-neutral-800/50 px-1 rounded-sm">{r}</span>
           ))}
         </div>
       </div>
@@ -481,6 +551,23 @@ const DIM_LABELS: Record<string, string> = {
   color_palette: "Cor",
 };
 
+/**
+ * Rótulo de uma dimensão que o mapa acima não cobre — o acervo tem `aesthetic`,
+ * `angle`, `texture`, `lighting`… que chegam como a chave crua.
+ *
+ * Existe porque tirar o `uppercase` do cabeçalho EXPÔS um defeito que ele
+ * escondia: com CAIXA ALTA, "Material" (mapeado) e "aesthetic" (cru) pareciam
+ * iguais; sem ela, a mesma coluna mostrava "aesthetic", "angle", "Material",
+ * "texture". Não foi a regressão, foi a revelação — mas o resultado na tela é
+ * ruim do mesmo jeito, e o conserto é normalizar a fonte, não repor a maquiagem.
+ */
+function dimLabel(dim: string): string {
+  const mapped = DIM_LABELS[dim];
+  if (mapped) return mapped;
+  const limpo = dim.replace(/_/g, " ");
+  return limpo.charAt(0).toUpperCase() + limpo.slice(1);
+}
+
 interface Asset {
   id: string;
   url: string;
@@ -509,6 +596,30 @@ export default function Home() {
   const [gridRef, gridCols] = useContainerColumns(thumbSize, GRID_GAP);
   const leftPanelRef = usePanelRef();
   const rightPanelRef = usePanelRef();
+
+  /**
+   * Sidebar recolhida em viewport estreito.
+   *
+   * O painel é `defaultSize="20%"` com `minSize="15%"`: a 390px isso são ~60-78px
+   * de coluna, onde "Logo construction" vira "Logo construc" e os dois selects
+   * viram "S." e "T.". E NADA disso reprovava o portão — a raiz é
+   * `overflow-hidden`, então o conteúdo cortado dentro do painel não faz o
+   * documento rolar. É a mesma armadilha do portão do ingest: medir o documento
+   * passa sempre; quem acusa é medir o elemento contra a caixa dele, e olhar a
+   * captura. Abaixo de `lg` a sidebar não cabe, então não ocupa espaço — o botão
+   * do header continua abrindo.
+   */
+  useEffect(() => {
+    const aplicar = () => {
+      const p = leftPanelRef.current;
+      if (!p) return;
+      if (window.innerWidth < 1024) { if (!p.isCollapsed()) p.collapse(); }
+      else if (p.isCollapsed()) p.expand();
+    };
+    aplicar();
+    window.addEventListener("resize", aplicar);
+    return () => window.removeEventListener("resize", aplicar);
+  }, [leftPanelRef]);
   const [studios, setStudios] = useState<Studio[]>([]);
   const [aspects, setAspects] = useState<{ name: string; count: number }[]>([]);
   const [allTags, setAllTags] = useState<Record<string, TagEntry[]>>({});
@@ -518,6 +629,15 @@ export default function Home() {
   // Erro do fetchPage (Mongo offline, 500 etc.) — distinto do empty-state real:
   // "nenhum resultado pros filtros" não é a mesma coisa que "a API caiu".
   const [fetchError, setFetchError] = useState<string | null>(null);
+  // Cauda algorítmica: quando o RECORTE acaba, o acervo continua. Ver `/api/references/tail`.
+  const [tail, setTail] = useState<Reference[]>([]);
+  const [tailLoading, setTailLoading] = useState(false);
+  const [tailDone, setTailDone] = useState(false);
+  // Falha da cauda é ESTADO PRÓPRIO. Colapsá-la em `tailDone` fazia a tela dizer "você viu
+  // o acervo inteiro" quando o que aconteceu foi a rota cair: o zero silencioso, na versão
+  // mais cara — mentira sobre o tamanho do acervo, contada com cara de conclusão.
+  const [tailError, setTailError] = useState<string | null>(null);
+  const [tailMode, setTailMode] = useState<"semantic" | "lexical" | "catalog" | null>(null);
   const [search, setSearch] = useState("");
   const [studio, setStudio] = useState("");
   // Formato da superfície — o critério que o pipeline usa o tempo todo pra casar arte↔cena.
@@ -525,7 +645,17 @@ export default function Home() {
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [tagMode, setTagMode] = useState<"AND" | "OR">("AND");
   /** Ordem da LISTAGEM. Com busca ativa quem ordena é a relevância (o motor ignora). */
-  const [sort, setSort] = useState<"popular" | "name">("popular");
+  const [sort, setSort] = useState<"popular" | "name" | "shuffle">("shuffle");
+  /**
+   * Semente da home embaralhada: UMA por carga da página.
+   * Fica em `useState(() => …)` e não em módulo porque é isso que faz "abrir o app"
+   * significar "galeria nova" — e, ao mesmo tempo, rolar até a página 3 continuar
+   * pedindo a MESMA ordem ao servidor. Sortear por request devolveria card repetido.
+   * O valor sorteado no servidor difere do sorteado no cliente — o que seria mismatch de
+   * hidratação se ele fosse parar no HTML. Não vai: a semente só viaja como parâmetro de
+   * fetch, nunca é renderizada. Se um dia virar texto na tela, tem que sair daqui.
+   */
+  const [shuffleSeed] = useState(() => Math.floor(Math.random() * 2 ** 31));
   const [hideDuplicates, setHideDuplicates] = useState(true);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [lastHidden, setLastHidden] = useState<{ id: string; name: string } | null>(null);
@@ -552,6 +682,25 @@ export default function Home() {
   const [brandId, setBrandId] = useState<string>("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+
+  /**
+   * Coleção da marca ativa — a curadoria manual.
+   *
+   * O Set é o que o grid inteiro consulta para acender o marcador, então ele mora aqui e
+   * não dentro do card: 60 cards perguntando "eu estou na coleção?" a uma lista seria
+   * O(n²) a cada render, e o card é memoizado justamente para não repetir trabalho.
+   * `collectionRefs` é a lista ORDENADA (a ordem é curadoria) usada pela aba Coleção.
+   */
+  const [collectionIds, setCollectionIds] = useState<Set<string>>(new Set());
+  const [collectionRefs, setCollectionRefs] = useState<Reference[]>([]);
+  const [collectionName, setCollectionName] = useState("");
+  const [collectionLoading, setCollectionLoading] = useState(false);
+  /** Aba do grid: o acervo inteiro ou só o que foi curado para a marca. */
+  const [view, setView] = useState<"all" | "collection">("all");
+  const [completions, setCompletions] = useState<Reference[]>([]);
+  const [completionsLoading, setCompletionsLoading] = useState(false);
+  const [completionsError, setCompletionsError] = useState<string | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
   const [suggestError, setSuggestError] = useState<string | null>(null);
   const [suggestLimit, setSuggestLimit] = useState(18);
 
@@ -736,6 +885,8 @@ export default function Home() {
   /** Última decisão automática — mostrada ao usuário, nunca silenciosa. */
   const [framingHint, setFramingHint] = useState<(FramingDecision & { slot: number }) | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  /** Container que ROLA de verdade (o `<main>`) — é ele o root do sentinel. */
+  const gridScrollRef = useRef<HTMLElement>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
   const abortRef = useRef<AbortController | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -764,6 +915,12 @@ export default function Home() {
         params.set("tagMode", tagMode);
       }
       if (sort !== "popular") params.set("sort", sort);
+      if (sort === "shuffle") {
+        params.set("seed", String(shuffleSeed));
+        // Marca ativa enviesa o sorteio (não filtra): as sugestões dela ocupam a primeira
+        // dobra, o acervo inteiro continua atrás.
+        if (brandId) params.set("brandId", brandId);
+      }
       params.set("has_psd", "true");
 
       try {
@@ -777,6 +934,12 @@ export default function Home() {
           setRefs((prev) => [...prev, ...data.references]);
         } else {
           setRefs(data.references);
+          // Recorte novo ⇒ cauda velha morre. Sugestão herdada do filtro anterior é a
+          // pior forma de "mais como isto": parece resultado da busca que acabou de mudar.
+          setTail([]);
+          setTailDone(false);
+          setTailError(null);
+          setTailMode(null);
         }
         setTotal(data.total);
         setHasMore(pageNum < data.pages);
@@ -798,7 +961,7 @@ export default function Home() {
         setInitialLoad(false);
       }
     },
-    [search, studio, aspect, activeTags, tagMode, sort, loading]
+    [search, studio, aspect, activeTags, tagMode, sort, shuffleSeed, brandId, loading]
   );
 
   // Busca/facetas na URL: sem isto o F5 jogava tudo fora e um filtro montado com
@@ -816,7 +979,8 @@ export default function Home() {
     const t = p.get("tags");
     if (t) setActiveTags(t.split(",").filter(Boolean).slice(0, 5));
     if (p.get("tagMode") === "OR") setTagMode("OR");
-    if (p.get("sort") === "name") setSort("name");
+    const s = p.get("sort");
+    if (s === "name" || s === "popular" || s === "shuffle") setSort(s);
     setUrlReady(true);
   }, []);
 
@@ -848,8 +1012,10 @@ export default function Home() {
     // dizendo que está filtrando por algo que não está mais valendo.
     setImageSearch(null);
     fetchPage(1, false);
+    // Trocar de marca refaz o grid SÓ no modo Descobrir — é lá que a marca enviesa a
+    // ordem. Nos outros modos a resposta seria idêntica, e refazer seria fetch à toa.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlReady, search, studio, aspect, activeTags, tagMode, sort]);
+  }, [urlReady, search, studio, aspect, activeTags, tagMode, sort, sort === "shuffle" ? brandId : ""]);
 
   useEffect(() => {
     // Estúdios e aspectos saem do MESMO catálogo do grid — o dropdown não pode prometer
@@ -956,6 +1122,147 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandId]);
 
+  // ------------------------------------------------------------ coleção da marca
+
+  const loadCollection = useCallback(async () => {
+    if (!brandId) {
+      setCollectionIds(new Set());
+      setCollectionRefs([]);
+      setCollectionName("");
+      return;
+    }
+    setCollectionLoading(true);
+    try {
+      const r = await fetch(`/api/collections?brandId=${encodeURIComponent(brandId)}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setCollectionRefs(d.references || []);
+      setCollectionName(d.name || "");
+      setCollectionIds(new Set<string>((d.items || []).map((i: { id: string }) => i.id)));
+    } catch (err) {
+      // A coleção é trabalho manual do usuário: falhar em LER não pode fazer o grid
+      // parecer que ela esvaziou. Mantém o que já estava em memória e diz o que houve.
+      toast.error(`Não foi possível carregar a coleção: ${String((err as Error).message || err)}`);
+    } finally {
+      setCollectionLoading(false);
+    }
+  }, [brandId]);
+
+  useEffect(() => {
+    void loadCollection();
+    // Trocar de marca com a aba Coleção aberta não pode deixar o usuário olhando a
+    // coleção da marca anterior enquanto a nova carrega.
+    if (!brandId) setView("all");
+  }, [brandId, loadCollection]);
+
+  /**
+   * Guardar/tirar da coleção. Otimista: o marcador acende na hora e volta atrás se o
+   * servidor recusar — curar é uma sequência rápida de cliques, e esperar o round-trip
+   * a cada card transformaria a curadoria numa fila.
+   */
+  const toggleCollection = useCallback(
+    async (mockup: Reference) => {
+      if (!brandId) return;
+      const member = !collectionIds.has(mockup.id);
+      setCollectionIds((prev) => {
+        const next = new Set(prev);
+        if (member) next.add(mockup.id);
+        else next.delete(mockup.id);
+        return next;
+      });
+      setCollectionRefs((prev) =>
+        member ? [...prev.filter((r) => r.id !== mockup.id), mockup] : prev.filter((r) => r.id !== mockup.id),
+      );
+      try {
+        const r = await fetch("/api/collections", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ brandId, ids: [mockup.id], member }),
+        });
+        if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
+      } catch (err) {
+        toast.error(`Não salvou na coleção: ${String((err as Error).message || err)}`);
+        void loadCollection();
+      }
+    },
+    [brandId, collectionIds, loadCollection],
+  );
+
+  /** Curar em lote o que já está selecionado no grid. */
+  const addSelectionToCollection = useCallback(
+    async (ids: string[]) => {
+      if (!brandId || !ids.length) return;
+      try {
+        const r = await fetch("/api/collections", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ brandId, ids, member: true }),
+        });
+        if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
+        await loadCollection();
+        toast.success(`${ids.length} ${ids.length === 1 ? "mockup guardado" : "mockups guardados"} na coleção`);
+      } catch (err) {
+        toast.error(`Não salvou na coleção: ${String((err as Error).message || err)}`);
+      }
+    },
+    [brandId, loadCollection],
+  );
+
+  /**
+   * "Completar a coleção": o que a marca sugere ⊕ os vizinhos semânticos do que já
+   * foi curado. É a coleção ensinando o que procurar — quanto mais curada, melhor a
+   * sugestão. Sem embeddings configurados, sobra só a sugestão da marca, que já existia.
+   */
+  const loadCompletions = useCallback(async () => {
+    if (!brandId) return;
+    setCompletionsLoading(true);
+    try {
+      const r = await fetch(`/api/collections/similar?brandId=${encodeURIComponent(brandId)}&limit=18`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setCompletions(d.references || []);
+      setCompletionsError(null);
+    } catch (err) {
+      // Erro e vazio são estados DIFERENTES. Engolir a falha e pintar lista vazia
+      // faz "a Visant caiu" parecer "não temos sugestão para esta marca" — o
+      // usuário conclui que a feature não serve e nunca mais volta nela.
+      setCompletions([]);
+      setCompletionsError(String((err as Error).message || err));
+    } finally {
+      setCompletionsLoading(false);
+    }
+  }, [brandId]);
+
+  useEffect(() => {
+    if (view === "collection" && brandId) void loadCompletions();
+  }, [view, brandId, collectionIds.size, loadCompletions]);
+
+  /** Reordenar arrastando: a ordem da coleção é curadoria, então ela é persistida. */
+  const dropOn = useCallback(
+    async (targetId: string) => {
+      if (!dragId || dragId === targetId || !brandId) return;
+      const ids = collectionRefs.map((r) => r.id);
+      const from = ids.indexOf(dragId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0) return;
+      ids.splice(to, 0, ...ids.splice(from, 1));
+      setCollectionRefs(ids.map((id) => collectionRefs.find((r) => r.id === id)!).filter(Boolean));
+      setDragId(null);
+      try {
+        const r = await fetch("/api/collections", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ brandId, order: ids }),
+        });
+        if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
+      } catch (err) {
+        toast.error(`Não salvou a ordem: ${String((err as Error).message || err)}`);
+        void loadCollection();
+      }
+    },
+    [dragId, brandId, collectionRefs, loadCollection],
+  );
+
   const [assetError, setAssetError] = useState<string | null>(null);
 
   const openLibrary = useCallback(async () => {
@@ -1005,22 +1312,99 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandId, brands]);
 
+  // Scroll infinito que NUNCA deixa o usuário bater no fim.
+  //
+  // Duas armadilhas pagas aqui:
+  //  1. Quem rola é o `<main>`, não a janela. Com `root: null` o rootMargin infla o
+  //     retângulo da VIEWPORT, mas o sentinel continua recortado pelo overflow do
+  //     `<main>` — ou seja, a margem de 600px não antecipava nada e a página só
+  //     carregava quando o fim já estava na tela. Root = o container que rola.
+  //  2. Margem fixa mente em telas altas: 600px é meia dobra num monitor 4K e duas
+  //     dobras num laptop. A distância de pré-carga é medida em ALTURAS do container.
+  /**
+   * A cauda: quando o RECORTE acaba, o acervo não acabou. Em vez de "Fim da Biblioteca"
+   * (que era mentira em toda busca filtrada — 40 resultados de um catálogo de milhares),
+   * o rodapé vira sugestão algorítmica e o scroll continua. Só quando a cauda também
+   * seca — aí sim o usuário viu tudo — é que aparece o fim.
+   */
+  const loadTail = useCallback(async () => {
+    if (tailLoading || tailDone || tailError) return;
+    setTailLoading(true);
+    try {
+      const shown = [...refs, ...tail];
+      const res = await fetch("/api/references/tail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          seeds: shown.slice(-24).map((r) => r.id),
+          // Escondido entra no exclude: senão a rota gasta vaga da página com card que o
+          // filtro do cliente vai jogar fora, e a cauda chega curta sem motivo aparente.
+          exclude: [...shown.map((r) => r.id), ...hiddenIds],
+          limit: 30,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const more = (data.references ?? []) as Reference[];
+      if (!more.length) {
+        setTailDone(true);
+      } else {
+        setTail((prev) => [...prev, ...more]);
+        setTailMode(data.mode ?? null);
+      }
+    } catch (err) {
+      // Falhar não é acabar. Quem some daqui é a sugestão, e o usuário fica sabendo disso
+      // com um botão para tentar de novo, no lugar de um "acabou" que ele acreditaria.
+      setTailError(String((err as Error).message || err));
+    } finally {
+      setTailLoading(false);
+    }
+  }, [refs, tail, hiddenIds, tailLoading, tailDone, tailError]);
+
+  const maybeLoadMore = useCallback(() => {
+    if (view !== "all") return;
+    if (hasMore) {
+      if (!loading) fetchPage(page + 1, true);
+      return;
+    }
+    if (!loading && !fetchError) void loadTail();
+  }, [hasMore, loading, page, fetchPage, view, fetchError, loadTail]);
+
   useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!sentinel) return;
+    const root = gridScrollRef.current;
+    if (!sentinel || !root) return;
+
+    // 1.5 dobras de antecedência: no scroll normal a próxima página chega antes de o
+    // usuário ver o rodapé; num flick violento ele encosta no spinner, não no vazio.
+    const prefetch = Math.max(800, Math.round(root.clientHeight * 1.5));
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loading) {
-          fetchPage(page + 1, true);
-        }
+        // A Coleção não pagina: ela é uma lista curada, inteira, que já veio de uma vez.
+        // Sem esta guarda o sentinel continuaria puxando páginas do ACERVO por baixo dela.
+        if (entries[0].isIntersecting) maybeLoadMore();
       },
-      { rootMargin: "600px" }
+      { root, rootMargin: `0px 0px ${prefetch}px 0px` }
     );
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, loading, page, fetchPage]);
+  }, [maybeLoadMore]);
+
+  // Uma página curta (ou uma que cabe inteira dentro da janela de pré-carga) deixa o
+  // sentinel intersectando SEM mudar de estado — e o IntersectionObserver só avisa em
+  // mudança. Sem este empurrão a lista trava com meia tela de conteúdo.
+  useEffect(() => {
+    if (loading || tailLoading || view !== "all") return;
+    if (!hasMore && (tailDone || tailError)) return;
+    const sentinel = sentinelRef.current;
+    const root = gridScrollRef.current;
+    if (!sentinel || !root) return;
+
+    const gap = sentinel.getBoundingClientRect().top - root.getBoundingClientRect().bottom;
+    if (gap < Math.max(800, root.clientHeight * 1.5)) maybeLoadMore();
+  }, [refs.length, tail.length, loading, tailLoading, hasMore, tailDone, tailError, view, maybeLoadMore]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1149,6 +1533,13 @@ export default function Home() {
   // entregue. Aqui ela vira um botão ao lado da busca textual.
   const [imageSearch, setImageSearch] = useState<{ thumb: string; count: number } | null>(null);
   const [imageSearching, setImageSearching] = useState(false);
+  /**
+   * "Parecidos com este card". `mode` diz de onde veio a semelhança — semântica (vetor)
+   * ou léxica (tags do próprio mockup) — porque a qualidade das duas é bem diferente e o
+   * usuário merece saber qual está vendo antes de concluir que a busca é ruim.
+   */
+  const [similarTo, setSimilarTo] = useState<{ id: string; name: string; mode: string; count: number } | null>(null);
+  const [similarLoading, setSimilarLoading] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   /**
@@ -1230,6 +1621,46 @@ export default function Home() {
   /** Volta pro catálogo normal — o filtro por imagem é sempre reversível. */
   const clearImageSearch = useCallback(() => {
     setImageSearch(null);
+    setHasMore(true);
+    fetchPage(1, false);
+  }, [fetchPage]);
+
+  /**
+   * "Ver similares" a partir de um card — mesmo mecanismo da busca por imagem (a lista
+   * vira o resultado, com um chip que desfaz), porque para o usuário são a mesma coisa:
+   * o grid parou de ser o catálogo e virou uma resposta. Duas maneiras de sair da lista
+   * normal com duas UIs diferentes seria a tela se contradizendo.
+   */
+  const showSimilar = useCallback(async (mockup: Reference) => {
+    setSimilarLoading(true);
+    try {
+      const r = await fetch(`/api/references/similar?id=${encodeURIComponent(mockup.id)}&limit=60`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      const found: Reference[] = d.references ?? [];
+      if (!found.length) {
+        toast("Nada parecido encontrado", {
+          description: "Este mockup não tem tags suficientes, e o índice semântico não o alcança.",
+        });
+        return;
+      }
+      setRefs(found);
+      setTotal(found.length);
+      setHasMore(false);
+      setFetchError(null);
+      setInitialLoad(false);
+      setImageSearch(null);
+      setView("all");
+      setSimilarTo({ id: mockup.id, name: mockup.name, mode: d.mode, count: found.length });
+    } catch (err) {
+      toast.error("Não foi possível buscar parecidos", { description: String((err as Error).message || err) });
+    } finally {
+      setSimilarLoading(false);
+    }
+  }, []);
+
+  const clearSimilar = useCallback(() => {
+    setSimilarTo(null);
     setHasMore(true);
     fetchPage(1, false);
   }, [fetchPage]);
@@ -1749,7 +2180,7 @@ export default function Home() {
   );
 
   /** Há algum recorte aplicado? Separa "acervo vazio" de "filtro sem resultado". */
-  const hasActiveFilters = !!(search || studio || aspect || activeTags.length || imageSearch);
+  const hasActiveFilters = !!(search || studio || aspect || activeTags.length || imageSearch || similarTo);
 
   const clearAllFilters = useCallback(() => {
     setSearch("");
@@ -1761,12 +2192,24 @@ export default function Home() {
   }, []);
 
   // Grid: tira ocultados manualmente, depois colapsa duplicados.
+  //
+  // Na aba Coleção nada disso se aplica: a lista é curadoria explícita, e colapsar
+  // "duplicado" ali seria o app apagando uma escolha que a pessoa fez à mão.
   const { kept: displayRefs, hiddenDupes } = useMemo(() => {
+    if (view === "collection") return { kept: collectionRefs, hiddenDupes: 0 };
     const visible = hiddenIds.size ? refs.filter((r) => !hiddenIds.has(r.id)) : refs;
     if (!hideDuplicates) return { kept: visible, hiddenDupes: 0 };
     const { kept, hidden } = dedupeRefs(visible);
     return { kept, hiddenDupes: hidden };
-  }, [refs, hideDuplicates, hiddenIds]);
+  }, [refs, hideDuplicates, hiddenIds, view, collectionRefs]);
+
+  // A cauda passa pelo MESMO filtro do grid. Sem isto, "Esconder" e "Esconder Duplicados"
+  // valiam só acima da costura: o mockup que o usuário mandou sumir voltava trinta cards
+  // depois, na seção de sugestão — desfazer uma ação explícita dele é pior que repetir.
+  const displayTail = useMemo(() => {
+    const visible = hiddenIds.size ? tail.filter((r) => !hiddenIds.has(r.id)) : tail;
+    return hideDuplicates ? dedupeRefs(visible).kept : visible;
+  }, [tail, hiddenIds, hideDuplicates]);
 
   // Toast de desfazer some sozinho depois de alguns segundos.
   useEffect(() => {
@@ -1919,7 +2362,7 @@ export default function Home() {
               é a ação de todo dia fica. */}
           <div className="hidden xl:flex items-center gap-6 pl-2 shrink-0">
             <div className="flex items-center gap-3">
-              <LayoutGrid className="w-4 h-4 text-neutral-600" />
+              <LayoutGrid className="w-4 h-4 text-neutral-500" />
               <input 
                 type="range" 
                 min="150" 
@@ -1944,7 +2387,7 @@ export default function Home() {
             <div className="flex items-center gap-3 h-9 rounded-full bg-acc/10 border border-acc/25 pl-1.5 pr-1.5 animate-in fade-in zoom-in-95 duration-200">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={imageSearch.thumb} alt="" className="w-6 h-6 rounded-full object-cover border border-acc/30 shrink-0" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-acc truncate">
+              <span className="text-[10px] font-semibold text-acc truncate">
                 Parecidos com a imagem · {imageSearch.count}
               </span>
               <button
@@ -1965,12 +2408,12 @@ export default function Home() {
                   placeholder="Buscar mockups…    /"
                   defaultValue={search}
                   onChange={(e) => handleSearchInput(e.target.value)}
-                  className="w-full h-9 rounded-full bg-neutral-900/50 border border-neutral-800 pl-10 pr-9 text-xs placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600 focus:bg-neutral-900 transition-colors"
+                  className="w-full h-9 rounded-full bg-neutral-900/50 border border-neutral-800 pl-10 pr-9 text-xs placeholder:text-neutral-500 focus:outline-none focus:border-neutral-600 focus:bg-neutral-900 transition-colors"
                 />
                 {/* A busca é debounced: sem isto, digitar dá 300ms de tela parada
                     sem nenhum sinal de que algo está sendo procurado. */}
                 {loading && !initialLoad && (
-                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600 animate-spin" />
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-500 animate-spin" />
                 )}
               </div>
               <button
@@ -2004,7 +2447,10 @@ export default function Home() {
               divergem. */}
           {total > 0 && (
             <div
-              className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-[10px] font-bold text-neutral-400"
+              // `hidden lg:block`: a 390px este badge disputava a mesma linha do
+              // campo de busca e ficava POR CIMA dele. Contagem é contexto;
+              // buscar é a ação de todo dia — some primeiro o contexto.
+              className="hidden lg:block px-3 py-1 rounded-full bg-white/5 border border-white/5 text-[10px] font-bold text-neutral-400"
               title={
                 displayRefs.length !== refs.length
                   ? `${displayRefs.length} à vista de ${refs.length} carregados · ${total.toLocaleString()} no recorte`
@@ -2087,7 +2533,7 @@ export default function Home() {
                 <button
                   onClick={connectVisant}
                   disabled={visantConnecting}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white text-black text-[11px] font-black px-3 py-2.5 hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] disabled:opacity-50 active:scale-[0.98] uppercase tracking-wider"
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white text-black text-[11px] font-semibold px-3 py-2.5 hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] disabled:opacity-50 active:scale-[0.98]"
                 >
                   {visantConnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5 fill-current" />}
                   {visantConnecting ? "Aguardando..." : "Conectar Visant"}
@@ -2161,9 +2607,12 @@ export default function Home() {
             <div className="flex flex-col gap-2.5 mb-5">
               {/* Formato da superfície — filtro que o pipeline usa o tempo todo ("casar
                   arte↔cena por aspecto") e que só existia no CLI. Clicar de novo limpa.
-                  Sem caixa quando desligado: o chip aceso É a informação, e três
-                  molduras vazias só competem com ele. */}
-              <div className="flex items-center gap-1">
+                  UMA caixa em volta dos três, não três caixas: sem ela (a versão
+                  anterior) as opções desligadas ficavam sem borda nenhuma e liam
+                  como três palavras soltas na sidebar — só na captura dá pra ver
+                  que ninguém adivinharia que são clicáveis. O trilho comum diz
+                  "isto é um controle" sem dar peso a nenhuma opção. */}
+              <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-neutral-900/60">
                 {([
                   { key: "square", label: "1:1" },
                   { key: "portrait", label: "Retrato" },
@@ -2191,19 +2640,29 @@ export default function Home() {
 
               {/* Linha, não botão-caixa: o rótulo quebrava em duas linhas assim que a
                   contagem entrava ao lado, dentro de um bloco de 36px em caixa alta. */}
-              <button
-                onClick={() => setHideDuplicates((v) => !v)}
-                aria-pressed={hideDuplicates}
-                className="flex items-center gap-2 px-1 text-left group/dup"
+              {/* `<label htmlFor>`, não `<button>` em volta.
+                  Este bloco era um `<button>` envolvendo o `<Switch>` do Radix,
+                  que renderiza `<button role="switch">`: botão dentro de botão.
+                  HTML inválido, e o custo não era teórico — o console acusava
+                  "Hydration failed because the server rendered HTML didn't match
+                  the client", ou seja, o React DESCARTAVA o HTML do servidor e
+                  regenerava a árvore inteira no cliente a cada carregamento.
+                  Um `<label>` deixa a linha toda clicável de graça, pelo próprio
+                  navegador, e o controle continua sendo um só. */}
+              <label
+                htmlFor="hide-duplicates"
+                className="flex items-center gap-2 px-1 cursor-pointer group/dup"
               >
                 <span className={`text-[11px] font-bold truncate transition-colors ${hideDuplicates ? "text-neutral-300" : "text-neutral-500 group-hover/dup:text-neutral-300"}`}>
                   Esconder duplicados
                 </span>
                 {hideDuplicates && hiddenDupes > 0 && (
-                  <span className="text-[10px] text-neutral-600 shrink-0">{hiddenDupes}</span>
+                  <span className="text-[10px] text-neutral-500 shrink-0">{hiddenDupes}</span>
                 )}
-                <span className="ml-auto shrink-0"><Switch checked={hideDuplicates} onCheckedChange={setHideDuplicates} label="Esconder duplicados" /></span>
-              </button>
+                <span className="ml-auto shrink-0">
+                  <Switch id="hide-duplicates" checked={hideDuplicates} onCheckedChange={setHideDuplicates} label="Esconder duplicados" />
+                </span>
+              </label>
 
               {hiddenIds.size > 0 && (
                 <button
@@ -2222,8 +2681,8 @@ export default function Home() {
             {activeTags.length > 0 && (
               <div className="animate-in fade-in zoom-in duration-300">
                 <div className="flex items-center justify-between mb-2 px-1">
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-600">
-                    Filtros Ativos ({activeTags.length}/{MAX_TAGS})
+                  <p className="text-[11px] font-medium text-neutral-400">
+                    Filtros ativos ({activeTags.length}/{MAX_TAGS})
                   </p>
                   <div className="flex items-center gap-2">
                     {activeTags.length > 1 && (
@@ -2232,7 +2691,7 @@ export default function Home() {
                           <button
                             key={m}
                             onClick={() => setTagMode(m)}
-                            className={`text-[9px] font-black px-2.5 py-1 rounded-full transition-colors ${
+                            className={`text-[9px] font-semibold px-2.5 py-1 rounded-full transition-colors ${
                               tagMode === m ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
                             }`}
                           >
@@ -2243,7 +2702,7 @@ export default function Home() {
                     )}
                     <button
                       onClick={() => setActiveTags([])}
-                      className="text-[9px] font-black uppercase tracking-widest text-neutral-600 hover:text-neutral-300 transition-colors"
+                      className="text-[9px] font-semibold text-neutral-500 hover:text-neutral-300 transition-colors"
                     >
                       Limpar
                     </button>
@@ -2254,7 +2713,7 @@ export default function Home() {
                     <button
                       key={t}
                       onClick={() => toggleTag(t)}
-                      className="inline-flex items-center gap-2 bg-white text-black text-[10px] font-black px-3.5 py-1.5 rounded-full hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] shadow-xl active:scale-95"
+                      className="inline-flex items-center gap-2 bg-white text-black text-[10px] font-semibold px-3.5 py-1.5 rounded-full hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] shadow-xl active:scale-95"
                     >
                       {t}
                       <X className="w-3 h-3" />
@@ -2265,23 +2724,49 @@ export default function Home() {
             )}
 
             <div className="pb-10">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-600 mb-4 px-1">Taxonomia</p>
+              {/* Eyebrows saíram do `font-black uppercase tracking-[0.2em]`: o
+                  rótulo de uma seção da sidebar tinha o MESMO peso tipográfico do
+                  botão de ação primária e do nome do mockup. Quando tudo grita,
+                  nada grita — e o que precisa gritar aqui é o card.
+                  Placar no arquivo inteiro: 70 `uppercase` → 3, 69 `font-black`
+                  → 1 (só o wordmark, que é logo e pode gritar). */}
+              <p className="text-[11px] font-medium text-neutral-400 mb-4 px-1">Taxonomia</p>
+              {/* RECOLHIDO MOSTRA SÓ O QUE ESTÁ LIGADO.
+                  Antes o chevron dizia "recolhido" e a dimensão renderizava 10
+                  chips assim mesmo — a affordance mentia, e as ~6 dimensões
+                  somavam 60+ controles permanentes ocupando a rolagem inteira da
+                  sidebar. Numa superfície de trabalho o painel de filtro reporta
+                  ESTADO, não anuncia capacidade: `minimalist 1493` de um acervo
+                  de 4.483 não é um filtro, é decoração com número. Recolhido
+                  mostra as tags ativas daquela dimensão (quase sempre nenhuma);
+                  expandido mostra tudo. O chevron passou a dizer a verdade. */}
               {Object.entries(allTags).map(([dim, tags]) => {
-                const label = DIM_LABELS[dim] || dim;
+                const label = dimLabel(dim);
                 const expanded = expandedDims.has(dim);
-                const visible = expanded ? tags : tags.slice(0, 10);
+                const ativosNaDim = tags.filter((t) => activeTags.includes(t.value));
+                const visible = expanded ? tags : ativosNaDim;
 
                 return (
-                  <div key={dim} className="mb-6">
+                  <div key={dim} className={expanded || ativosNaDim.length ? "mb-6" : "mb-1"}>
                     <button
                       onClick={() => toggleDim(dim)}
-                      className="group/tag flex items-center gap-3 text-[11px] font-black text-neutral-400 hover:text-white mb-3 transition-colors w-full"
+                      aria-expanded={expanded}
+                      className={`group/tag flex items-center gap-3 text-[11px] font-semibold hover:text-white transition-colors w-full py-1 ${
+                        ativosNaDim.length ? "text-white" : "text-neutral-400"
+                      } ${expanded || ativosNaDim.length ? "mb-3" : ""}`}
                     >
                       <ChevronRight
-                        className={`w-4 h-4 transition-transform [transition-duration:var(--dur-slow)] ${expanded ? "rotate-90 text-white" : "text-neutral-700"}`}
+                        className={`w-4 h-4 transition-transform [transition-duration:var(--dur-slow)] ${expanded ? "rotate-90 text-white" : "text-neutral-500"}`}
                       />
-                      <span className="flex-1 text-left uppercase tracking-wider">{label}</span>
-                      <span className="text-[9px] text-neutral-700 font-bold group-hover/tag:text-neutral-500">{tags.length}</span>
+                      <span className="flex-1 text-left">{label}</span>
+                      {/* O número que importa é quantas estão LIGADAS. O total só
+                          aparece quando a dimensão está aberta, que é quando ele
+                          ajuda a decidir se vale rolar. */}
+                      {ativosNaDim.length > 0 ? (
+                        <span className="text-[9px] font-bold text-black bg-white rounded-full px-1.5 py-0.5">{ativosNaDim.length}</span>
+                      ) : expanded ? (
+                        <span className="text-[9px] text-neutral-500 font-bold">{tags.length}</span>
+                      ) : null}
                     </button>
                     <div className="flex flex-wrap gap-2 pl-7">
                       {visible.map((t) => {
@@ -2304,17 +2789,20 @@ export default function Home() {
                               isActive
                                 ? "bg-white text-black shadow-2xl z-10"
                                 : willSwap
-                                ? "bg-neutral-900 text-neutral-600 border border-dashed border-neutral-700 hover:text-neutral-300 hover:border-neutral-500"
+                                ? "bg-neutral-900 text-neutral-500 border border-dashed border-neutral-700 hover:text-neutral-300 hover:border-neutral-500"
                                 : "bg-neutral-900 text-neutral-500 border border-neutral-800 hover:border-neutral-600 hover:text-neutral-300"
                             }`}
                           >
                             {t.value}
-                            <span className={`ml-2 ${isActive ? "opacity-40" : "text-neutral-800"}`}>{t.count}</span>
+                            {/* Era text-neutral-600 (#262626) sobre bg-neutral-900
+                                (#171717): ~1.3:1. Não é discreto, é invisível —
+                                o número existia no DOM e não na tela. */}
+                            <span className={`ml-2 ${isActive ? "opacity-40" : "text-neutral-500"}`}>{t.count}</span>
                           </button>
                         );
                       })}
-                      {!expanded && tags.length > 10 && (
-                        <button onClick={() => toggleDim(dim)} className="text-[9px] font-black px-3 py-1.5 text-neutral-700 hover:text-neutral-400 uppercase">+{tags.length - 10} mais</button>
+                      {expanded && (
+                        <button onClick={() => toggleDim(dim)} className="text-[10px] font-bold px-3 py-1.5 text-neutral-500 hover:text-white">Recolher</button>
                       )}
                     </div>
                   </div>
@@ -2328,16 +2816,21 @@ export default function Home() {
 
         {/* Main Area: Grid */}
         <Panel className="relative flex flex-col bg-neutral-950 min-w-0 overflow-hidden">
-          <main className="flex-1 overflow-y-auto p-8 no-scrollbar">
+          <main ref={gridScrollRef} className="flex-1 overflow-y-auto p-8 no-scrollbar">
             {brandId && (
-              <div className="mb-12 animate-in fade-in slide-in-from-left-4 duration-300">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-lg shadow-emerald-500/50" />
-                    <p className="text-xs font-black uppercase tracking-[0.2em] text-neutral-500">
-                      Matches Inteligentes para <span className="text-white bg-white/5 px-2 py-1 rounded-lg">{brands.find((b) => b.id === brandId)?.name}</span>
-                    </p>
-                  </div>
+              <div className="mb-8 animate-in fade-in slide-in-from-left-4 duration-300">
+                <div className="flex items-center justify-between mb-4">
+                  {/* O peso vai no NOME DA MARCA, que é o dado que o usuário
+                      precisa confirmar. Antes ia no adjetivo: "MATCHES
+                      INTELIGENTES" em font-medium, com
+                      uma bolinha esmeralda pulsando para sempre ao lado. Nenhum
+                      dos dois reportava estado — a bolinha não parava nunca e
+                      "inteligentes" é detalhe de implementação, não benefício.
+                      Quem usa quer saber PARA QUEM são as sugestões. */}
+                  <h2 className="text-sm min-w-0 truncate">
+                    <span className="text-neutral-500">Sugeridos para </span>
+                    <span className="font-bold text-white">{brands.find((b) => b.id === brandId)?.name}</span>
+                  </h2>
                   <div className="flex items-center gap-3">
                     {/* Havia DOIS giradores para a mesma operação: um `Loader2` solto
                         ao lado e o ícone do próprio botão girando. Feedback duplicado
@@ -2346,13 +2839,16 @@ export default function Home() {
                     <button
                       onClick={() => loadSuggestions({ force: true })}
                       disabled={loadingSuggestions}
-                      title="Regenerar matches (re-analisa a marca)"
-                      className="flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-400 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 disabled:opacity-40"
+                      title="Recalcular as sugestões desta marca"
+                      className="flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[11px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 disabled:opacity-40"
                     >
+                      {/* Rótulo FIXO. Trocar para "Analisando" era a terceira
+                          cópia do mesmo estado (ícone girando + botão desabilitado
+                          + texto), e nomeava a máquina em vez da ação. */}
                       <RefreshCw className={`w-3.5 h-3.5 ${loadingSuggestions ? "animate-spin" : ""}`} />
-                      {loadingSuggestions ? "Analisando" : "Regenerar"}
+                      Regenerar
                     </button>
-                    <button onClick={() => setBrandId("")} className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-600 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"><X className="w-4 h-4" /></button>
+                    <button onClick={() => setBrandId("")} className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"><X className="w-4 h-4" /></button>
                   </div>
                 </div>
                 {suggestError ? (
@@ -2360,7 +2856,7 @@ export default function Home() {
                 ) : !loadingSuggestions && suggestions.length === 0 ? (
                   <div className="p-8 rounded-2xl border border-dashed border-neutral-900 flex flex-col items-center gap-3 opacity-40">
                     <Zap className="w-8 h-8" />
-                    <p className="text-xs font-bold uppercase tracking-widest text-center">Nenhuma recomendação disponível para os ativos atuais desta marca.</p>
+                    <p className="text-xs font-semibold text-center">Nenhuma recomendação disponível para os ativos atuais desta marca.</p>
                   </div>
                 ) : (
                   <div className="flex gap-5 overflow-x-auto pb-6 -mx-2 px-2 no-scrollbar scroll-smooth">
@@ -2386,10 +2882,10 @@ export default function Home() {
                           loadSuggestions({ limit: next });
                         }}
                         disabled={loadingSuggestions}
-                        className="shrink-0 w-32 rounded-2xl border border-dashed border-neutral-800 flex flex-col items-center justify-center gap-2 text-neutral-600 hover:text-neutral-300 hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 disabled:opacity-40"
+                        className="shrink-0 w-32 rounded-2xl border border-dashed border-neutral-800 flex flex-col items-center justify-center gap-2 text-neutral-500 hover:text-neutral-300 hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 disabled:opacity-40"
                       >
                         {loadingSuggestions ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5" />}
-                        <span className="text-[10px] font-black uppercase tracking-widest">Ver mais</span>
+                        <span className="text-[10px] font-semibold">Ver mais</span>
                       </button>
                     )}
                   </div>
@@ -2404,7 +2900,7 @@ export default function Home() {
                 LIGADO: filtro nenhum, barra nenhuma. */}
             {hasActiveFilters && !initialLoad && (
               <div className="flex flex-wrap items-center gap-2 mb-6 animate-in fade-in slide-in-from-top-1 duration-200">
-                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-700">
+                <span className="text-[10px] text-neutral-500">
                   Filtrando por
                 </span>
                 {[
@@ -2416,6 +2912,11 @@ export default function Home() {
                     clear: () => setAspect(""),
                   },
                   imageSearch && { k: "img", label: "Imagem parecida", clear: clearImageSearch },
+                  similarTo && {
+                    k: "similar",
+                    label: `Parecidos com ${similarTo.name}${similarTo.mode === "lexical" ? " (por tags)" : ""}`,
+                    clear: clearSimilar,
+                  },
                   ...activeTags.map((t) => ({ k: `tag-${t}`, label: t, clear: () => toggleTag(t) })),
                 ]
                   .filter(Boolean)
@@ -2429,16 +2930,46 @@ export default function Home() {
                         className="group inline-flex items-center gap-1.5 h-7 pl-3 pr-2 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-bold text-neutral-300 hover:border-neutral-600 hover:text-white transition-colors active:scale-95"
                       >
                         <span className="max-w-[14rem] truncate">{chip.label}</span>
-                        <X className="w-3 h-3 text-neutral-600 group-hover:text-white transition-colors" />
+                        <X className="w-3 h-3 text-neutral-500 group-hover:text-white transition-colors" />
                       </button>
                     );
                   })}
                 <button
                   onClick={clearAllFilters}
-                  className="h-7 px-3 rounded-full text-[9px] font-black uppercase tracking-widest text-neutral-600 hover:text-white transition-colors"
+                  className="h-7 px-3 rounded-full text-[9px] font-semibold text-neutral-500 hover:text-white transition-colors"
                 >
                   Limpar tudo
                 </button>
+              </div>
+            )}
+
+            {/* Acervo ⟷ Coleção. Só aparece com marca selecionada, porque sem marca não
+                existe coleção para curar — e uma aba que só sabe dizer "escolha uma marca"
+                é um controle que ocupa espaço sem oferecer ação. */}
+            {brandId && (
+              <div className="flex items-center gap-2 mb-4">
+                {([
+                  { k: "all", label: "Acervo", count: total },
+                  { k: "collection", label: collectionName || "Coleção", count: collectionIds.size },
+                ] as const).map(({ k, label, count }) => (
+                  <button
+                    key={k}
+                    onClick={() => setView(k)}
+                    aria-pressed={view === k}
+                    className={`h-8 px-3.5 rounded-full text-[10px] font-bold transition-colors inline-flex items-center gap-2 ${
+                      view === k ? "bg-white text-black" : "text-neutral-400 hover:text-white bg-neutral-900 border border-neutral-800"
+                    }`}
+                  >
+                    {k === "collection" && <Bookmark className="w-3 h-3" />}
+                    <span className="max-w-[14rem] truncate">{label}</span>
+                    <span className={view === k ? "text-black/50" : "text-neutral-600"}>{count.toLocaleString()}</span>
+                  </button>
+                ))}
+                {view === "collection" && collectionIds.size > 0 && (
+                  <span className="text-[10px] text-neutral-500">
+                    arraste para reordenar, a ordem é sua
+                  </span>
+                )}
               </div>
             )}
 
@@ -2447,11 +2978,19 @@ export default function Home() {
                 um default acidental, e o pior possível para um acervo cujos nomes
                 são de arquivo (as cinco primeiras posições eram cinco variações do
                 mesmo bundle). Não renderiza durante a busca por texto: lá quem ordena
-                é a relevância, e um seletor que não faz nada é um controle morto. */}
-            {!search && !imageSearch && !initialLoad && refs.length > 0 && (
+                é a relevância, e um seletor que não faz nada é um controle morto.
+                Na Coleção também não: lá a ordem é a curadoria, arrastada à mão. */}
+            {view === "all" && !search && !imageSearch && !similarTo && !initialLoad && refs.length > 0 && (
               <div className="flex items-center gap-2 mb-6">
-                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-700">Ordem</span>
+                <span className="text-[10px] text-neutral-500">Ordem</span>
                 {([
+                  {
+                    k: "shuffle",
+                    label: "Descobrir",
+                    rule: brandId
+                      ? "galeria nova a cada abertura, puxando o que combina com a marca selecionada"
+                      : "galeria nova a cada abertura, com o acervo inteiro em outra ordem",
+                  },
                   { k: "popular", label: "Mais usados", rule: "os que você mais abre e renderiza primeiro — empate resolve no alfabético" },
                   { k: "name", label: "A–Z", rule: "ordem alfabética pelo nome do arquivo" },
                 ] as const).map(({ k, label, rule }) => (
@@ -2461,21 +3000,45 @@ export default function Home() {
                     aria-pressed={sort === k}
                     title={rule}
                     className={`h-7 px-3 rounded-full text-[10px] font-bold transition-colors ${
-                      sort === k ? "bg-white/10 text-white" : "text-neutral-600 hover:text-neutral-300"
+                      sort === k ? "bg-white/10 text-white" : "text-neutral-500 hover:text-neutral-300"
                     }`}
                   >
                     {label}
                   </button>
                 ))}
-                {sort === "popular" && (
-                  <span className="text-[10px] text-neutral-700 truncate">
-                    aprende com o que você abre
-                  </span>
-                )}
+                {/* Saiu "aprende com o que você abre": nomeava a máquina, ficava
+                    em text-neutral-500 sobre near-black (≈2:1, ilegível) e
+                    repetia o `title` do próprio botão, que é onde a regra
+                    pertence — junto de onde se escolhe. */}
               </div>
             )}
 
-            {initialLoad ? (
+            {view === "collection" && !collectionLoading && collectionRefs.length === 0 ? (
+              // Coleção vazia é o estado NORMAL de uma marca nova, não uma falha. Então ele
+              // ensina o gesto (o marcador no card) em vez de só constatar o vazio — e já
+              // oferece o atalho de encher com o que a marca sugere.
+              <div className="flex flex-col items-center justify-center h-full gap-5 animate-in fade-in zoom-in-95 duration-200">
+                <div className="w-20 h-20 rounded-2xl bg-neutral-900 border border-neutral-800 flex items-center justify-center">
+                  <Bookmark className="w-9 h-9 text-neutral-600" />
+                </div>
+                <div className="text-center max-w-sm">
+                  <p className="text-base font-semibold text-neutral-200">
+                    Nada guardado para {brands.find((b) => b.id === brandId)?.name || "esta marca"}
+                  </p>
+                  <p className="text-xs font-bold text-neutral-500 mt-2 leading-relaxed">
+                    No acervo, o marcador no canto do card guarda o mockup aqui. A ordem desta
+                    lista é sua. Arraste depois para montar a sequência da apresentação.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setView("all")}
+                  className="flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-[11px] font-semibold hover:bg-neutral-200 transition-colors active:scale-[0.97]"
+                >
+                  <Search className="w-4 h-4" />
+                  Ir escolher no acervo
+                </button>
+              </div>
+            ) : initialLoad && view === "all" ? (
               // Mesmo gap e mesma contagem de colunas do masonry — senão o grid
               // "pula" de largura no instante em que os dados chegam.
               <div className="grid" style={{ gap: GRID_GAP, gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}>
@@ -2489,27 +3052,27 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-            ) : fetchError && refs.length === 0 ? (
+            ) : view === "all" && fetchError && refs.length === 0 ? (
               // Distinto do empty-state: aqui a API falhou (Mongo offline, 500…),
               // não é "sem resultados pros filtros". Badge do header já foi
               // zerado no fetchPage pra não contradizer este grid vazio.
-              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-600 animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-500 animate-in fade-in zoom-in-95 duration-200">
                 <div className="w-20 h-20 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center">
                   <AlertTriangle className="w-8 h-8 text-red-400" />
                 </div>
                 <div className="text-center max-w-sm">
-                  <p className="text-base font-black uppercase tracking-widest text-red-400">Não foi possível carregar o catálogo</p>
-                  <p className="text-xs font-bold text-neutral-600 mt-2 uppercase tracking-widest break-words">{fetchError}</p>
+                  <p className="text-base font-semibold text-red-400">Não foi possível carregar o catálogo</p>
+                  <p className="text-xs font-bold text-neutral-500 mt-2 break-words">{fetchError}</p>
                 </div>
                 <button
                   onClick={() => fetchPage(1, false)}
-                  className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
+                  className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white text-black text-[11px] font-semibold hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   Tentar de novo
                 </button>
               </div>
-            ) : refs.length === 0 && !hasActiveFilters ? (
+            ) : view === "all" && refs.length === 0 && !hasActiveFilters ? (
               // PRIMEIRO USO — sem nenhum filtro aplicado, "redefina seus
               // filtros" é conselho para um problema que o usuário não tem: ele
               // não filtrou nada, o acervo é que está vazio. O estado vazio é o
@@ -2519,32 +3082,32 @@ export default function Home() {
                   <FolderPlus className="w-9 h-9 text-acc" />
                 </div>
                 <div className="text-center max-w-sm">
-                  <p className="text-base font-black uppercase tracking-widest text-neutral-200">Seu acervo está vazio</p>
-                  <p className="text-xs font-bold text-neutral-600 mt-2 leading-relaxed">
+                  <p className="text-base font-semibold text-neutral-200">Seu acervo está vazio</p>
+                  <p className="text-xs font-bold text-neutral-500 mt-2 leading-relaxed">
                     Aponte uma pasta com PSDs ou imagens de mockup. Nada é gravado antes de você
                     revisar o que entra. Duplicata e lixo já vêm desmarcados.
                   </p>
                 </div>
                 <button
                   onClick={openIngest}
-                  className="flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.97] shadow-xl shadow-white/5"
+                  className="flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-[11px] font-semibold hover:bg-neutral-200 transition-colors active:scale-[0.97] shadow-xl shadow-white/5"
                 >
                   <FolderPlus className="w-4 h-4" />
                   Adicionar pasta
                 </button>
               </div>
-            ) : refs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-600 animate-in fade-in zoom-in-95 duration-200">
+            ) : view === "all" && refs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-500 animate-in fade-in zoom-in-95 duration-200">
                 <div className="w-20 h-20 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
                   <Search className="w-8 h-8 opacity-20" />
                 </div>
                 <div className="text-center">
-                  <p className="text-base font-black uppercase tracking-widest text-neutral-400">Nenhum mockup encontrado</p>
-                  <p className="text-xs font-bold text-neutral-600 mt-2 uppercase tracking-widest">Tente redefinir seus filtros ou buscar outro termo</p>
+                  <p className="text-base font-semibold text-neutral-400">Nenhum mockup encontrado</p>
+                  <p className="text-xs font-bold text-neutral-500 mt-2">Tente redefinir seus filtros ou buscar outro termo</p>
                 </div>
                 <button
                   onClick={clearAllFilters}
-                  className="flex items-center gap-2 h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                  className="flex items-center gap-2 h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   Limpar filtros
@@ -2554,13 +3117,13 @@ export default function Home() {
               // O grid renderiza `displayRefs`, mas o estado vazio testava
               // `refs`: esconder tudo o que estava carregado dava TELA BRANCA,
               // sem mensagem e sem caminho de volta.
-              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-600 animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex flex-col items-center justify-center h-full gap-4 text-neutral-500 animate-in fade-in zoom-in-95 duration-200">
                 <div className="w-20 h-20 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
                   <EyeOff className="w-8 h-8 opacity-20" />
                 </div>
                 <div className="text-center">
-                  <p className="text-base font-black uppercase tracking-widest text-neutral-400">Tudo oculto nesta página</p>
-                  <p className="text-xs font-bold text-neutral-600 mt-2 uppercase tracking-widest">
+                  <p className="text-base font-semibold text-neutral-400">Tudo oculto nesta página</p>
+                  <p className="text-xs font-bold text-neutral-500 mt-2">
                     {refs.length} carregados · {hiddenDupes > 0 && `${hiddenDupes} duplicados · `}
                     {hiddenIds.size > 0 && `${hiddenIds.size} escondidos`}
                   </p>
@@ -2569,7 +3132,7 @@ export default function Home() {
                   {hideDuplicates && hiddenDupes > 0 && (
                     <button
                       onClick={() => setHideDuplicates(false)}
-                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
                     >
                       Mostrar duplicados
                     </button>
@@ -2577,7 +3140,7 @@ export default function Home() {
                   {hiddenIds.size > 0 && (
                     <button
                       onClick={restoreAllHidden}
-                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
                     >
                       Restaurar ocultos
                     </button>
@@ -2602,9 +3165,9 @@ export default function Home() {
                 <div
                   ref={gridRef}
                   className={`transition-opacity [transition-duration:var(--dur-base)] ${
-                    loading && !initialLoad ? "opacity-50 cursor-wait" : "opacity-100"
+                    (loading || similarLoading) && !initialLoad ? "opacity-50 cursor-wait" : "opacity-100"
                   }`}
-                  aria-busy={loading}
+                  aria-busy={loading || similarLoading}
                 >
                   <MasonryGallery
                     items={displayRefs}
@@ -2619,51 +3182,188 @@ export default function Home() {
                     // há id repetido dentro da mesma lista renderizada.
                     getKey={(ref) => ref.id}
                     renderItem={(ref, i) => (
-                      <MockupCard
-                        mockup={ref}
-                        selected={selected?.id === ref.id}
-                        hasArt={anyArt}
-                        isRendering={renderingRefId === ref.id}
-                        thumbSize={thumbSize}
-                        renderedUrl={renderCache[ref.id]?.url}
-                        // Teto de 240ms no atraso acumulado: `i * step` sem teto
-                        // faria o 60º card entrar quase 2s depois do primeiro —
-                        // isso não lê como cascata, lê como app travando.
-                        enterDelay={Math.min((i % 24) * 20, 240)}
-                        onSelect={selectRef}
-                        onApply={handleCardApply}
-                        onHide={hideMockup}
-                      />
+                      <div
+                        // Arrastar só faz sentido na Coleção: lá a ordem é curadoria e é
+                        // persistida. No acervo a ordem é do motor, e um card arrastável
+                        // prometeria um controle que não existe.
+                        draggable={view === "collection"}
+                        onDragStart={view === "collection" ? () => setDragId(ref.id) : undefined}
+                        onDragOver={view === "collection" ? (e) => e.preventDefault() : undefined}
+                        onDrop={view === "collection" ? () => void dropOn(ref.id) : undefined}
+                        className={view === "collection" && dragId === ref.id ? "opacity-40" : undefined}
+                      >
+                        <MockupCard
+                          mockup={ref}
+                          selected={selected?.id === ref.id}
+                          hasArt={anyArt}
+                          isRendering={renderingRefId === ref.id}
+                          thumbSize={thumbSize}
+                          renderedUrl={renderCache[ref.id]?.url}
+                          // Teto de 240ms no atraso acumulado: `i * step` sem teto
+                          // faria o 60º card entrar quase 2s depois do primeiro —
+                          // isso não lê como cascata, lê como app travando.
+                          enterDelay={Math.min((i % 24) * 20, 240)}
+                          onSelect={selectRef}
+                          onApply={handleCardApply}
+                          onHide={hideMockup}
+                          onToggleCollection={brandId ? toggleCollection : undefined}
+                          onSimilar={showSimilar}
+                          inCollection={collectionIds.has(ref.id)}
+                          collectionLabel={collectionName || "coleção da marca"}
+                        />
+                      </div>
                     )}
                   />
                 </div>
 
+                {/* Completar a coleção: vizinhos semânticos do que já foi curado ⊕ a
+                    sugestão da marca. Fica DEPOIS da coleção, não antes — quem abriu a aba
+                    veio ver o que escolheu; a sugestão é o próximo passo, não a manchete. */}
+                {view === "collection" && (completions.length > 0 || completionsLoading || completionsError) && (
+                  <section className="mt-10 border-t border-neutral-900 pt-8">
+                    <div className="flex items-center gap-2 mb-4">
+                      <ListPlus className="w-3.5 h-3.5 text-neutral-500" />
+                      <h2 className="text-[11px] font-bold text-neutral-300">Para completar a coleção</h2>
+                      <span className="text-[10px] text-neutral-500">
+                        {collectionIds.size > 0
+                          ? "parecidos com o que você já guardou, e o que combina com a marca"
+                          : "o que combina com a marca"}
+                      </span>
+                    </div>
+                    {completionsError ? (
+                      <div className="flex items-center gap-3 text-[10px] text-amber-300">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Não deu para buscar sugestões: {completionsError}</span>
+                        <button
+                          onClick={() => void loadCompletions()}
+                          className="h-7 px-3 rounded-full border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-colors"
+                        >
+                          Tentar de novo
+                        </button>
+                      </div>
+                    ) : completionsLoading ? (
+                      <div className="flex items-center gap-3 text-neutral-500 text-[10px]">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> procurando
+                      </div>
+                    ) : (
+                      <MasonryGallery
+                        items={completions}
+                        cols={Math.max(2, gridCols)}
+                        gap={GRID_GAP}
+                        getKey={(ref) => ref.id}
+                        renderItem={(ref, i) => (
+                          <MockupCard
+                            mockup={ref}
+                            selected={selected?.id === ref.id}
+                            hasArt={anyArt}
+                            isRendering={renderingRefId === ref.id}
+                            thumbSize={thumbSize}
+                            renderedUrl={renderCache[ref.id]?.url}
+                            enterDelay={Math.min((i % 24) * 20, 240)}
+                            onSelect={selectRef}
+                            onApply={handleCardApply}
+                            onHide={hideMockup}
+                            onToggleCollection={toggleCollection}
+                            onSimilar={showSimilar}
+                            inCollection={collectionIds.has(ref.id)}
+                            collectionLabel={collectionName || "coleção da marca"}
+                          />
+                        )}
+                      />
+                    )}
+                  </section>
+                )}
+
+                {/* A continuação: o acervo acabou DENTRO do recorte, não no catálogo.
+                    A faixa marca a fronteira — daqui pra baixo não é mais resultado do
+                    filtro, é sugestão. Esconder essa costura seria a UI fingindo que o
+                    filtro achou mais do que achou. */}
+                {view === "all" && displayTail.length > 0 && (
+                  <section className="mt-10 border-t border-neutral-900 pt-8">
+                    <div className="flex items-center gap-2 mb-4">
+                      <InfinityIcon className="w-3.5 h-3.5 text-neutral-500" />
+                      <h2 className="text-[11px] font-bold text-neutral-300">Continuando a partir daqui</h2>
+                      <span className="text-[10px] text-neutral-500">
+                        {hasActiveFilters ? "o filtro acabou aqui. " : ""}
+                        {tailMode === "semantic"
+                          ? "parecidos com o que você acabou de ver"
+                          : tailMode === "lexical"
+                            ? "pelas tags do que você acabou de ver"
+                            : "o resto do acervo, pelos mais usados"}
+                      </span>
+                    </div>
+                    <MasonryGallery
+                      items={displayTail}
+                      cols={gridCols}
+                      gap={GRID_GAP}
+                      getKey={(ref) => ref.id}
+                      renderItem={(ref, i) => (
+                        <MockupCard
+                          mockup={ref}
+                          selected={selected?.id === ref.id}
+                          hasArt={anyArt}
+                          isRendering={renderingRefId === ref.id}
+                          thumbSize={thumbSize}
+                          renderedUrl={renderCache[ref.id]?.url}
+                          enterDelay={Math.min((i % 24) * 20, 240)}
+                          onSelect={selectRef}
+                          onApply={handleCardApply}
+                          onHide={hideMockup}
+                          onToggleCollection={brandId ? toggleCollection : undefined}
+                          onSimilar={showSimilar}
+                          inCollection={collectionIds.has(ref.id)}
+                          collectionLabel={collectionName || "coleção da marca"}
+                        />
+                      )}
+                    />
+                  </section>
+                )}
+
                 <div ref={sentinelRef} className="flex flex-col items-center justify-center py-20 gap-6">
-                  {loading && (
-                    <div className="flex items-center gap-4 text-neutral-400 text-[10px] font-black uppercase tracking-[0.2em] bg-neutral-900/50 backdrop-blur-xl px-6 py-3 rounded-full border border-neutral-800 shadow-2xl">
+                  {(loading || tailLoading) && (
+                    <div className="flex items-center gap-4 text-neutral-400 text-[10px] font-medium bg-neutral-900/50 backdrop-blur-xl px-6 py-3 rounded-full border border-neutral-800 shadow-2xl">
                       <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      Carregando Catálogo
+                      {tailLoading ? "Procurando mais parecidos" : "Carregando Catálogo"}
                     </div>
                   )}
                   {fetchError && refs.length > 0 && (
                     // Já tinha página carregada quando o scroll infinito bateu erro —
                     // não mostra "Fim da Biblioteca" (mentira: não foi fim, foi falha)
                     // nem refaz fetch sozinho (hasMore já foi pra false no fetchPage).
-                    <div className="flex flex-col items-center gap-3 text-red-400 text-[10px] font-black uppercase tracking-[0.2em]">
+                    <div className="flex flex-col items-center gap-3 text-red-400 text-[10px] font-medium">
                       <span>Falha ao carregar mais mockups — {fetchError}</span>
                       <button
                         onClick={() => fetchPage(page + 1, true)}
-                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
+                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         Tentar de novo
                       </button>
                     </div>
                   )}
-                  {!hasMore && !fetchError && refs.length > 0 && (
-                    <div className="flex items-center gap-4 text-neutral-700 text-[10px] font-black uppercase tracking-[0.3em]">
+                  {tailError && !tailLoading && (
+                    <div className="flex flex-col items-center gap-3 text-red-400 text-[10px] font-medium">
+                      <span>Falha ao buscar mais parecidos: {tailError}</span>
+                      <button
+                        onClick={() => {
+                          setTailError(null);
+                          void loadTail();
+                        }}
+                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Tentar de novo
+                      </button>
+                    </div>
+                  )}
+                  {/* "Fim" só depois de a cauda algorítmica secar também: enquanto houver
+                      QUALQUER coisa no acervo que o usuário não viu, o rodapé não pode
+                      dizer que acabou. Dizia, e acabava só o filtro. Cauda que FALHOU
+                      também não vira fim: ali o rodapé é o erro acima, com saída. */}
+                  {!hasMore && tailDone && !tailLoading && !tailError && !fetchError && refs.length > 0 && (
+                    <div className="flex items-center gap-4 text-neutral-500 text-[10px] font-medium">
                       <div className="h-[1px] w-12 bg-neutral-900" />
-                      Fim da Biblioteca
+                      Você viu o acervo inteiro
                       <div className="h-[1px] w-12 bg-neutral-900" />
                     </div>
                   )}
@@ -2680,12 +3380,12 @@ export default function Home() {
               </span>
               <button
                 onClick={() => unhideMockup(lastHidden.id)}
-                className="flex items-center gap-2 bg-white text-black text-[10px] font-black uppercase tracking-widest px-3.5 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+                className="flex items-center gap-2 bg-white text-black text-[10px] font-semibold px-3.5 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Desfazer
               </button>
-              <button onClick={() => setLastHidden(null)} className="w-7 h-7 rounded-lg flex items-center justify-center text-neutral-600 hover:text-white transition-colors"><X className="w-4 h-4" /></button>
+              <button onClick={() => setLastHidden(null)} className="w-7 h-7 rounded-lg flex items-center justify-center text-neutral-500 hover:text-white transition-colors"><X className="w-4 h-4" /></button>
             </div>
           )}
         </Panel>
@@ -2706,7 +3406,7 @@ export default function Home() {
             <div className="p-4 border-b border-neutral-900 flex justify-between items-center shrink-0">
               <div className="min-w-0">
                 <h2 className="font-bold text-sm truncate pr-2">{selected.name}</h2>
-                <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{selected.studio}</p>
+                <p className="text-[10px] font-bold text-neutral-500">{selected.studio}</p>
               </div>
               <button onClick={() => setSelected(null)} className="p-1.5 rounded-lg hover:bg-neutral-900 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
                 <X className="w-4 h-4" />
@@ -2745,7 +3445,7 @@ export default function Home() {
                     </div>
                   </>
                 ) : (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-neutral-700 group-hover/preview:text-neutral-400 transition-colors">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-neutral-500 group-hover/preview:text-neutral-400 transition-colors">
                     <Upload className="w-7 h-7" />
                     <span className="text-[11px] font-bold">Adicionar arte</span>
                   </div>
@@ -2794,7 +3494,7 @@ export default function Home() {
                 </div>
 
                 {renderResult && isPreviewResult && (
-                  <div className="absolute top-3 right-3 bg-amber-500 text-black text-[10px] font-black px-2 py-0.5 rounded-lg shadow-lg shadow-amber-500/20">PREVIEW</div>
+                  <div className="absolute top-3 right-3 bg-amber-500 text-black text-[10px] font-semibold px-2 py-0.5 rounded-lg shadow-lg shadow-amber-500/20">PREVIEW</div>
                 )}
                 {renderTime != null && renderTime > 0 && (
                   <div className="absolute bottom-3 right-3 bg-black/80 backdrop-blur text-[10px] font-bold text-neutral-400 px-2 py-1 rounded-lg">{(renderTime / 1000).toFixed(1)}s</div>
@@ -2811,7 +3511,7 @@ export default function Home() {
                     <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden">
                       <button
                         onClick={() => setShowSmartObjects(!showSmartObjects)}
-                        className="w-full flex items-center justify-between px-4 py-3 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500 hover:bg-white/5 transition-colors"
+                        className="w-full flex items-center justify-between px-4 py-3 text-[10px] font-medium text-neutral-500 hover:bg-white/5 transition-colors"
                       >
                         <div className="flex items-center gap-2 text-neutral-300">
                           <Layers className="w-3.5 h-3.5 text-neutral-500" />
@@ -2850,11 +3550,11 @@ export default function Home() {
                                 <div className="flex-1 min-w-0">
                                   <p className={`text-[11px] font-bold truncate ${isActive ? "text-white" : isFace ? "text-neutral-300" : "text-neutral-500"}`}>{so.name}</p>
                                   {so.path && so.path.includes(" > ") && (
-                                    <p className="text-[9px] text-neutral-700 truncate">{so.path.split(" > ").slice(0, -1).join(" › ")}</p>
+                                    <p className="text-[9px] text-neutral-500 truncate">{so.path.split(" > ").slice(0, -1).join(" › ")}</p>
                                   )}
                                 </div>
                                 {/* Dims */}
-                                <span className={`text-[9px] font-mono shrink-0 ${isActive ? "text-neutral-400" : "text-neutral-700"}`}>{so.innerWidth}×{so.innerHeight}</span>
+                                <span className={`text-[9px] font-mono shrink-0 ${isActive ? "text-neutral-400" : "text-neutral-500"}`}>{so.innerWidth}×{so.innerHeight}</span>
                                 {/* Face slot thumbnail */}
                                 {isFace ? (
                                   <div
@@ -2866,7 +3566,7 @@ export default function Home() {
                                       <img src={slot.preview} alt={so.name} className="w-full h-full object-cover" />
                                     ) : (
                                       <div className="w-full h-full flex items-center justify-center bg-neutral-900 group-hover:bg-neutral-800">
-                                        <ImageIcon className="w-3 h-3 text-neutral-700" />
+                                        <ImageIcon className="w-3 h-3 text-neutral-500" />
                                       </div>
                                     )}
                                   </div>
@@ -2886,7 +3586,7 @@ export default function Home() {
                     <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden transition-colors [transition-duration:var(--dur-slow)]">
                       <button 
                         onClick={() => setShowAdjustments(!showAdjustments)}
-                        className="w-full flex items-center justify-between p-4 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500 hover:bg-white/5 transition-colors"
+                        className="w-full flex items-center justify-between p-4 text-[10px] font-medium text-neutral-500 hover:bg-white/5 transition-colors"
                       >
                         <div className="flex items-center gap-2 text-neutral-300"><Settings2 className="w-3.5 h-3.5 text-neutral-500" /> Camadas de ajuste</div>
                         <ChevronDown className={`w-4 h-4 transition-transform [transition-duration:var(--dur-slow)] ${showAdjustments ? "" : "-rotate-90"}`} />
@@ -2897,7 +3597,7 @@ export default function Home() {
                             <label key={i} className={`flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer transition-colors ${hiddenLayers.has(a.path || a.name) ? "opacity-40" : "hover:bg-white/5"}`}>
                               <input type="checkbox" checked={!hiddenLayers.has(a.path || a.name)} onChange={() => toggleLayer(a.path || a.name)} className="accent-white w-3.5 h-3.5" />
                               <span className={`text-[11px] font-bold truncate flex-1 ${hiddenLayers.has(a.path || a.name) ? "line-through" : "text-neutral-300"}`}>{a.name}</span>
-                              <span className="text-[9px] font-bold text-neutral-700 uppercase">{a.type}</span>
+                              <span className="text-[9px] font-bold text-neutral-500 uppercase">{a.type}</span>
                             </label>
                           ))}
                         </div>
@@ -2914,7 +3614,7 @@ export default function Home() {
                 
                 {/* Rótulo fora, dado dentro: "Info do arquivo" não desambiguava
                     nada — nome de arquivo, MB e px se anunciam sozinhos. */}
-                <p className="text-[10px] text-neutral-600 text-center leading-relaxed pt-2 pb-6 border-b border-neutral-900">
+                <p className="text-[10px] text-neutral-500 text-center leading-relaxed pt-2 pb-6 border-b border-neutral-900">
                   {selected.psdPath?.split(/[/\\]/).pop()}
                   {selected.psdSizeBytes ? ` · ${(selected.psdSizeBytes / 1e6).toFixed(1)} MB` : ""}
                   {psdInfo ? ` · ${psdInfo.width}×${psdInfo.height} px` : ""}
@@ -2930,10 +3630,10 @@ export default function Home() {
                 onClick={() => setArtSectionCollapsed((v) => !v)}
                 className="h-8 flex items-center justify-between px-4 w-full group select-none"
               >
-                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-neutral-600 group-hover:text-neutral-400 transition-colors">
+                <p className="text-[9px] font-medium text-neutral-500 group-hover:text-neutral-400 transition-colors">
                   {faces.length > 1 && activeFace ? `Arte · ${activeFace.name}` : "Sua Arte"}
                 </p>
-                <ChevronDown className={`w-3.5 h-3.5 text-neutral-700 group-hover:text-neutral-500 transition-colors [transition-duration:var(--dur-base)] ${artSectionCollapsed ? "" : "rotate-180"}`} />
+                <ChevronDown className={`w-3.5 h-3.5 text-neutral-500 group-hover:text-neutral-500 transition-colors [transition-duration:var(--dur-base)] ${artSectionCollapsed ? "" : "rotate-180"}`} />
               </button>
 
               {/* Conteúdo colapsável */}
@@ -2972,7 +3672,7 @@ export default function Home() {
                             <p className="text-xs font-bold text-neutral-400">
                               {faces.length > 1 && activeFace ? <>Arte para <span className="text-white">«{activeFace.name}»</span></> : "Clique ou arraste sua arte"}
                             </p>
-                            <p className="text-[10px] text-neutral-600">JPG, PNG ou Ctrl+V</p>
+                            <p className="text-[10px] text-neutral-500">JPG, PNG ou Ctrl+V</p>
                           </div>
                         </div>
                       )}
@@ -3048,7 +3748,7 @@ export default function Home() {
                 <button
                   onClick={() => handleRender(false)}
                   disabled={renderDisabled}
-                  className="flex-1 py-3 rounded-xl bg-white text-black font-black text-xs disabled:opacity-30 hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.97] shadow-xl shadow-white/5"
+                  className="flex-1 py-3 rounded-xl bg-white text-black font-semibold text-xs disabled:opacity-30 hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.97] shadow-xl shadow-white/5"
                 >
                   RENDER FINAL{faces.length > 1 ? ` · ${filledCount}/${faces.length}` : ""}
                 </button>
@@ -3068,7 +3768,7 @@ export default function Home() {
                 <a
                   href={renderResult}
                   download={`${selected.name.replace(/\s+/g, "_")}_mockup.png`}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500 text-black text-xs font-black hover:bg-emerald-400 transition-[color,background-color,transform] active:scale-[0.97] shadow-lg shadow-emerald-500/10"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400 transition-[color,background-color,transform] active:scale-[0.97] shadow-lg shadow-emerald-500/10"
                 >
                   <Download className="w-4 h-4" /> DOWNLOAD PNG
                 </a>
@@ -3080,7 +3780,7 @@ export default function Home() {
               {renderResult && !rendering && isPreviewResult && (
                 <button
                   onClick={() => handleRender(false)}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-black hover:bg-emerald-500/25 transition-[color,background-color,border-color] active:scale-[0.97]"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold hover:bg-emerald-500/25 transition-[color,background-color,border-color] active:scale-[0.97]"
                 >
                   <Download className="w-4 h-4" /> GERAR PNG FINAL PARA BAIXAR
                 </button>
@@ -3105,18 +3805,18 @@ export default function Home() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-900">
               <div className="flex items-center gap-2">
                 <Terminal className="w-3.5 h-3.5 text-neutral-500" />
-                <span className="text-[11px] font-black text-neutral-300 tracking-wide uppercase">Render Logs</span>
-                <span className="text-[10px] font-bold text-neutral-600 bg-neutral-900 px-1.5 py-0.5 rounded-lg border border-neutral-800">{renderLogs.length}</span>
+                <span className="text-[11px] font-semibold text-neutral-300">Render Logs</span>
+                <span className="text-[10px] font-bold text-neutral-500 bg-neutral-900 px-1.5 py-0.5 rounded-lg border border-neutral-800">{renderLogs.length}</span>
               </div>
-              <button onClick={() => setShowLogs(false)} className="text-neutral-600 hover:text-white transition-colors">
+              <button onClick={() => setShowLogs(false)} className="text-neutral-500 hover:text-white transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="overflow-y-auto flex-1 p-3 space-y-0.5 font-mono">
               {renderLogs.map((log, i) => (
                 <div key={i} className={`flex gap-2 py-0.5 text-[10px] leading-relaxed ${log.step === "error" ? "text-red-400" : log.step === "complete" ? "text-emerald-400" : log.step === "warning" ? "text-amber-400" : "text-neutral-500"}`}>
-                  <span className="shrink-0 text-neutral-700 w-5 text-right">{i + 1}</span>
-                  <span className={`shrink-0 font-bold ${log.step === "error" ? "text-red-500" : log.step === "complete" ? "text-emerald-500" : log.step === "warning" ? "text-amber-500" : "text-neutral-600"}`}>{log.step}</span>
+                  <span className="shrink-0 text-neutral-500 w-5 text-right">{i + 1}</span>
+                  <span className={`shrink-0 font-bold ${log.step === "error" ? "text-red-500" : log.step === "complete" ? "text-emerald-500" : log.step === "warning" ? "text-amber-500" : "text-neutral-500"}`}>{log.step}</span>
                   {log.detail && <span className="break-all">{log.detail}</span>}
                 </div>
               ))}
@@ -3151,7 +3851,7 @@ export default function Home() {
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-neutral-950">
                 <div className="flex items-center gap-3">
-                  <h2 className="text-sm font-black text-white">Session</h2>
+                  <h2 className="text-sm font-semibold text-white">Session</h2>
                   <span className="text-[10px] font-bold text-neutral-500 bg-neutral-900 px-2 py-0.5 rounded-full border border-neutral-800">{entries.length} renders</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -3161,9 +3861,21 @@ export default function Home() {
                   >
                     {allSelected ? "Desmarcar tudo" : "Selecionar tudo"}
                   </button>
+                  {/* O render é o momento em que se descobre que o mockup serve para a
+                      marca — guardar na coleção aqui evita ter que voltar ao grid e
+                      reencontrar o card no meio de milhares. */}
+                  {brandId && (
+                    <button
+                      onClick={() => void addSelectionToCollection(downloadTargets.map(([id]) => id))}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-colors"
+                    >
+                      <Bookmark className="w-3.5 h-3.5" />
+                      {sessionSelected.size > 0 ? `Guardar na coleção (${sessionSelected.size})` : "Guardar tudo na coleção"}
+                    </button>
+                  )}
                   <button
                     onClick={() => triggerDownloads(downloadTargets)}
-                    className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-white text-black text-[10px] font-black hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+                    className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
                   >
                     <Download className="w-3.5 h-3.5" />
                     {sessionSelected.size > 0 ? `Baixar selecionados (${sessionSelected.size})` : "Baixar todos"}
@@ -3264,7 +3976,7 @@ export default function Home() {
             />
           </div>
 
-          <div className="p-4 text-center text-[10px] font-bold text-neutral-600 uppercase tracking-widest bg-neutral-950/50">
+          <div className="p-4 text-center text-[10px] font-bold text-neutral-500 bg-neutral-950/50">
             {renderTime != null && renderTime > 0 && `Processado em ${(renderTime / 1000).toFixed(1)}s`}
             {renderResult && ` · ${isPreviewResult ? "JPEG Preview" : "PNG Lossless"}`}
           </div>
@@ -3283,7 +3995,7 @@ export default function Home() {
               <div className="w-8 h-8 rounded-xl bg-neutral-800 flex items-center justify-center">
                 <Settings2 className="w-4 h-4 text-neutral-300" />
               </div>
-              <p className="text-sm font-black text-white">Configurações avançadas</p>
+              <p className="text-sm font-semibold text-white">Configurações avançadas</p>
             </div>
             <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
               <X className="w-4 h-4" />
@@ -3298,7 +4010,7 @@ export default function Home() {
                 <Copy className="w-4.5 h-4.5 text-amber-400" />
               </div>
               <div>
-                <p className="text-sm font-black text-amber-300">Duplicatas</p>
+                <p className="text-sm font-semibold text-amber-300">Duplicatas</p>
                 <p className="text-[10px] text-neutral-500 font-medium">Encontrar e remover PSDs duplicados</p>
               </div>
             </button>
@@ -3317,8 +4029,8 @@ export default function Home() {
                 <EyeOff className="w-4 h-4 text-neutral-400" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm font-black tracking-tight">Ocultos</h3>
-                <p className="text-[10px] text-neutral-600 font-bold uppercase tracking-widest mt-0.5">
+                <h3 className="text-sm font-semibold tracking-tight">Ocultos</h3>
+                <p className="text-[10px] text-neutral-500 font-semibold mt-0.5">
                   {hiddenIds.size} fora do grid · os arquivos continuam no disco
                 </p>
               </div>
@@ -3354,8 +4066,8 @@ export default function Home() {
 
             {!hiddenLoading && hiddenList?.length === 0 && (
               <div className="flex flex-col items-center justify-center py-16 gap-3">
-                <Eye className="w-10 h-10 text-neutral-800" />
-                <p className="text-[10px] font-black text-neutral-600 uppercase tracking-widest">
+                <Eye className="w-10 h-10 text-neutral-600" />
+                <p className="text-[10px] font-semibold text-neutral-500">
                   Nada oculto — o grid está inteiro
                 </p>
               </div>
@@ -3371,12 +4083,12 @@ export default function Home() {
                   <img src={ref.referenceImageUrl} alt={ref.name} className="w-10 h-10 shrink-0 rounded-lg object-cover border border-neutral-800 opacity-60" />
                 ) : (
                   <div className="w-10 h-10 shrink-0 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center">
-                    <Layers className="w-4 h-4 text-neutral-600" />
+                    <Layers className="w-4 h-4 text-neutral-500" />
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] font-bold text-neutral-300 truncate">{ref.name}</p>
-                  <p className="text-[8px] text-neutral-700 font-mono truncate mt-0.5">
+                  <p className="text-[8px] text-neutral-500 font-mono truncate mt-0.5">
                     {ref.studio ? <span className="mr-1.5 px-1 py-px rounded bg-neutral-800 text-neutral-500">{ref.studio}</span> : null}
                     {ref.psdPath || "—"}
                   </p>
@@ -3393,7 +4105,7 @@ export default function Home() {
 
             {/* Id sem card: a ref sumiu do Mongo/disco depois de escondida. */}
             {!hiddenLoading && hiddenList && hiddenIds.size > hiddenList.length && (
-              <p className="px-3 py-3 text-[9px] font-bold text-neutral-700 uppercase tracking-widest">
+              <p className="px-3 py-3 text-[9px] font-bold text-neutral-500">
                 + {hiddenIds.size - hiddenList.length} id(s) sem card no catálogo — some com &ldquo;Restaurar todos&rdquo;
               </p>
             )}
@@ -3413,8 +4125,8 @@ export default function Home() {
                   <Copy className="w-4 h-4 text-amber-400" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-sm font-black tracking-tight">Arquivos Duplicados</h3>
-                  <p className="text-[10px] text-neutral-600 font-bold uppercase tracking-widest mt-0.5 flex items-center gap-2">
+                  <h3 className="text-sm font-semibold tracking-tight">Arquivos Duplicados</h3>
+                  <p className="text-[10px] text-neutral-500 font-semibold mt-0.5 flex items-center gap-2">
                     <span>
                       {dupesScanning && !dupesSummary
                         ? dupesGroups.length > 0
@@ -3428,7 +4140,7 @@ export default function Home() {
                       )}
                     </span>
                     {dupesScanning && (
-                      <span className="font-mono text-neutral-700 tabular-nums">
+                      <span className="font-mono text-neutral-500 tabular-nums">
                         {String(Math.floor(dupesElapsed / 60)).padStart(2, "0")}:{String(dupesElapsed % 60).padStart(2, "0")}
                       </span>
                     )}
@@ -3444,7 +4156,7 @@ export default function Home() {
                   <RefreshCw className={`w-3 h-3 ${dupesScanning ? "animate-spin" : ""}`} />
                   {dupesScanning ? "Escaneando..." : "Re-escanear"}
                 </button>
-                <button onClick={() => setShowDupes(false)} className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-600 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
+                <button onClick={() => setShowDupes(false)} className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -3454,10 +4166,10 @@ export default function Home() {
             {dupesScanning && dupesProgress && (
               <div className="px-6 py-2.5 bg-neutral-900/20 border-b border-neutral-800/50 shrink-0">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest">
+                  <span className="text-[10px] font-bold text-neutral-500">
                     Hashing {dupesProgress.hashed.toLocaleString()} / {dupesProgress.total.toLocaleString()} arquivos candidatos
                   </span>
-                  <span className="text-[10px] font-black text-amber-500">{dupesProgress.pct}%</span>
+                  <span className="text-[10px] font-semibold text-amber-500">{dupesProgress.pct}%</span>
                 </div>
                 <div className="w-full h-[3px] bg-neutral-800 rounded-full overflow-hidden">
                   <div
@@ -3472,28 +4184,28 @@ export default function Home() {
             {(dupesGroups.length > 0 || dupesSummary) && (
               <div className="px-6 py-3 bg-neutral-900/20 border-b border-neutral-800/50 flex items-center gap-3 shrink-0">
                 <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-500" />
                   <input
                     type="text"
                     value={dupesFilter}
                     onChange={(e) => setDupesFilter(e.target.value)}
                     placeholder="Filtrar por nome ou caminho..."
-                    className="w-full h-8 rounded-xl bg-neutral-900 border border-neutral-800 pl-9 pr-4 text-xs focus:outline-none focus:border-neutral-600 transition-colors placeholder:text-neutral-700"
+                    className="w-full h-8 rounded-xl bg-neutral-900 border border-neutral-800 pl-9 pr-4 text-xs focus:outline-none focus:border-neutral-600 transition-colors placeholder:text-neutral-500"
                   />
                   {dupesFilter && (
-                    <button onClick={() => setDupesFilter("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-600 hover:text-white">
+                    <button onClick={() => setDupesFilter("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white">
                       <X className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <span className="text-[9px] font-black text-neutral-700 uppercase tracking-widest mr-1">Sort</span>
+                  <span className="text-[9px] font-semibold text-neutral-500 mr-1">Sort</span>
                   {(["wasted", "size", "copies"] as const).map((s) => (
                     <button
                       key={s}
                       onClick={() => setDupesSort(s)}
-                      className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-colors ${
-                        dupesSort === s ? "bg-white text-black" : "bg-neutral-900 text-neutral-600 hover:text-white border border-neutral-800"
+                      className={`px-2.5 py-1 rounded-lg text-[9px] font-semibold transition-colors ${
+                        dupesSort === s ? "bg-white text-black" : "bg-neutral-900 text-neutral-500 hover:text-white border border-neutral-800"
                       }`}
                     >
                       {s === "wasted" ? "Desperdício" : s === "size" ? "Tamanho" : "Cópias"}
@@ -3512,7 +4224,7 @@ export default function Home() {
             {filteredSortedGroups.length > 0 && (
               <div className="grid grid-cols-[2.5rem_1fr_7rem_4.5rem_7rem_2.5rem] px-4 py-2 bg-neutral-900/30 border-b border-neutral-800/50 shrink-0">
                 {["#", "Arquivo", "Tamanho", "Cópias", "Desperdiçado", ""].map((h, i) => (
-                  <span key={i} className={`text-[9px] font-black uppercase tracking-[0.15em] text-neutral-700 ${i >= 2 && i < 5 ? "text-right" : ""}`}>{h}</span>
+                  <span key={i} className={`text-[9px] font-medium text-neutral-500 ${i >= 2 && i < 5 ? "text-right" : ""}`}>{h}</span>
                 ))}
               </div>
             )}
@@ -3525,7 +4237,7 @@ export default function Home() {
                 <div className="flex flex-col items-center justify-center py-16 gap-4">
                   <div className="p-4 rounded-full bg-red-500/10 text-red-500"><AlertTriangle className="w-7 h-7" /></div>
                   <p className="text-red-400 text-xs font-bold text-center px-8">{dupesError}</p>
-                  <button onClick={() => scanDuplicates()} className="text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95">
+                  <button onClick={() => scanDuplicates()} className="text-[10px] font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95">
                     Tentar novamente
                   </button>
                 </div>
@@ -3533,9 +4245,9 @@ export default function Home() {
 
               {/* Initial idle state */}
               {!dupesScanning && !dupesError && dupesGroups.length === 0 && !dupesSummary && (
-                <div className="flex flex-col items-center justify-center h-48 gap-3 text-neutral-700">
+                <div className="flex flex-col items-center justify-center h-48 gap-3 text-neutral-500">
                   <HardDrive className="w-10 h-10 opacity-20" />
-                  <p className="text-xs font-bold uppercase tracking-widest">Clique em Re-escanear para iniciar</p>
+                  <p className="text-xs font-semibold">Clique em Re-escanear para iniciar</p>
                 </div>
               )}
 
@@ -3548,7 +4260,7 @@ export default function Home() {
                       <span className="animate-pulse flex-1 truncate">
                         {dupesLogs[dupesLogs.length - 1] || "Processando..."}
                       </span>
-                      <span className="text-neutral-600 font-mono tabular-nums shrink-0">
+                      <span className="text-neutral-500 font-mono tabular-nums shrink-0">
                         {String(Math.floor(dupesElapsed / 60)).padStart(2, "0")}:{String(dupesElapsed % 60).padStart(2, "0")}
                       </span>
                     </div>
@@ -3562,8 +4274,8 @@ export default function Home() {
                   </div>
                   <div className="bg-black/40 rounded-xl border border-neutral-800/50 p-3 h-36 overflow-y-auto no-scrollbar font-mono text-[10px] leading-relaxed space-y-0.5">
                     {dupesLogs.map((line, i) => (
-                      <p key={i} className={line.startsWith("✓") ? "text-emerald-500" : line.startsWith("✗") ? "text-red-400" : line.startsWith("Duplicata") ? "text-amber-400/80" : "text-neutral-600"}>
-                        <span className="text-neutral-800 mr-2 select-none">{String(i + 1).padStart(2, " ")} ›</span>{line}
+                      <p key={i} className={line.startsWith("✓") ? "text-emerald-500" : line.startsWith("✗") ? "text-red-400" : line.startsWith("Duplicata") ? "text-amber-400/80" : "text-neutral-500"}>
+                        <span className="text-neutral-600 mr-2 select-none">{String(i + 1).padStart(2, " ")} ›</span>{line}
                       </p>
                     ))}
                     <div ref={dupesLogsEndRef} />
@@ -3578,8 +4290,8 @@ export default function Home() {
                     <CheckCircle2 className="w-7 h-7 text-emerald-400" />
                   </div>
                   <div className="text-center">
-                    <p className="text-sm font-black text-white uppercase tracking-widest">Nenhuma duplicata</p>
-                    <p className="text-[10px] font-bold text-neutral-600 mt-2 uppercase tracking-widest">
+                    <p className="text-sm font-semibold text-white">Nenhuma duplicata</p>
+                    <p className="text-[10px] font-bold text-neutral-500 mt-2">
                       {dupesSummary.filesScanned.toLocaleString()} arquivos verificados — tudo limpo!
                     </p>
                   </div>
@@ -3605,15 +4317,15 @@ export default function Home() {
                       })}
                       className="w-full grid grid-cols-[2.5rem_1fr_7rem_4.5rem_7rem_2.5rem] items-center px-4 py-3 hover:bg-white/[0.02] transition-colors text-left group"
                     >
-                      <span className="text-[10px] font-black text-neutral-700">{gi + 1}</span>
+                      <span className="text-[10px] font-semibold text-neutral-500">{gi + 1}</span>
                       <div className="flex items-center gap-2 min-w-0 pr-4">
-                        <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-neutral-700 group-hover:text-neutral-400 transition-colors [transition-duration:var(--dur-base)] ${isExpanded ? "rotate-90 text-neutral-400" : ""}`} />
+                        <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-neutral-500 group-hover:text-neutral-400 transition-colors [transition-duration:var(--dur-base)] ${isExpanded ? "rotate-90 text-neutral-400" : ""}`} />
                         <span className="text-[11px] font-bold text-neutral-200 truncate">{fileName}</span>
-                        <span className="shrink-0 text-[8px] font-black text-neutral-700 bg-neutral-800/80 px-1.5 py-0.5 rounded">{ext}</span>
+                        <span className="shrink-0 text-[8px] font-semibold text-neutral-500 bg-neutral-800/80 px-1.5 py-0.5 rounded">{ext}</span>
                       </div>
                       <span className="text-[11px] font-bold text-neutral-500 text-right">{(group.sizeBytes / 1e6).toFixed(1)} MB</span>
                       <span className="text-[11px] font-bold text-neutral-500 text-right">{allPaths.length}×</span>
-                      <span className="text-[11px] font-black text-amber-400 text-right">{(group.wastedBytes / 1e6).toFixed(1)} MB</span>
+                      <span className="text-[11px] font-semibold text-amber-400 text-right">{(group.wastedBytes / 1e6).toFixed(1)} MB</span>
                       <span />
                     </button>
 
@@ -3623,9 +4335,9 @@ export default function Home() {
                         {/* Sub-header */}
                         <div className="grid grid-cols-[1rem_1fr_7rem_8rem_9rem] gap-x-3 px-3 py-1.5 mb-1">
                           <span />
-                          <span className="text-[8px] font-black text-neutral-700 uppercase tracking-[0.15em]">Caminho completo</span>
-                          <span className="text-[8px] font-black text-neutral-700 uppercase tracking-[0.15em] text-right">Tamanho</span>
-                          <span className="text-[8px] font-black text-neutral-700 uppercase tracking-[0.15em] text-right">Modificado</span>
+                          <span className="text-[8px] font-semibold text-neutral-500">Caminho completo</span>
+                          <span className="text-[8px] font-semibold text-neutral-500 text-right">Tamanho</span>
+                          <span className="text-[8px] font-semibold text-neutral-500 text-right">Modificado</span>
                           <span />
                         </div>
                         {allPaths.map((filePath, fi) => {
@@ -3650,12 +4362,12 @@ export default function Home() {
                                   <img src={thumbUrl} alt={name} className="w-7 h-7 shrink-0 rounded-lg object-cover border border-neutral-800" />
                                 ) : (
                                   <div className="w-7 h-7 shrink-0 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center">
-                                    <Layers className="w-3.5 h-3.5 text-neutral-600" />
+                                    <Layers className="w-3.5 h-3.5 text-neutral-500" />
                                   </div>
                                 )}
                                 <div className="min-w-0">
                                   <p className={`text-[10px] font-bold truncate ${isKeep ? "text-emerald-300" : "text-neutral-400"}`}>{name}</p>
-                                  <p className="text-[8px] text-neutral-700 font-mono truncate mt-0.5">
+                                  <p className="text-[8px] text-neutral-500 font-mono truncate mt-0.5">
                                     <span
                                       title={origin.safeToDelete ? undefined : "Fora da sua conta — apagar aqui apaga na origem, para todo mundo"}
                                       className={`mr-1.5 px-1 py-px rounded not-italic ${
@@ -3670,10 +4382,10 @@ export default function Home() {
                                   </p>
                                 </div>
                               </div>
-                              <span className="text-[10px] font-bold text-neutral-600 text-right">{(group.sizeBytes / 1e6).toFixed(2)} MB</span>
-                              <span className="text-[9px] text-neutral-700 font-mono text-right">—</span>
+                              <span className="text-[10px] font-bold text-neutral-500 text-right">{(group.sizeBytes / 1e6).toFixed(2)} MB</span>
+                              <span className="text-[9px] text-neutral-500 font-mono text-right">—</span>
                               <div className="flex items-center justify-end gap-1.5">
-                                <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                <span className={`text-[8px] font-semibold px-2 py-0.5 rounded-full ${
                                   isKeep
                                     ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
                                     : "bg-red-500/10 text-red-400 border border-red-500/15"
@@ -3682,7 +4394,7 @@ export default function Home() {
                                 </span>
                                 <button
                                   onClick={(e) => { e.stopPropagation(); void hidePathFromCatalog(filePath, name); }}
-                                  className="p-1 rounded-lg hover:bg-neutral-800 text-neutral-700 hover:text-white transition-colors"
+                                  className="p-1 rounded-lg hover:bg-neutral-800 text-neutral-500 hover:text-white transition-colors"
                                   title="Esconder do catálogo (não apaga o arquivo)"
                                 >
                                   <EyeOff className="w-3 h-3" />
@@ -3697,7 +4409,7 @@ export default function Home() {
                                       .then((r) => { if (!r.ok) falhou(); })
                                       .catch(falhou);
                                   }}
-                                  className="p-1 rounded-lg hover:bg-neutral-800 text-neutral-700 hover:text-white transition-colors"
+                                  className="p-1 rounded-lg hover:bg-neutral-800 text-neutral-500 hover:text-white transition-colors"
                                   title="Abrir localização"
                                 >
                                   <Folder className="w-3 h-3" />
@@ -3717,13 +4429,13 @@ export default function Home() {
             {dupesSummary && dupesGroups.length > 0 && !dupesScanning && (
               <div className="px-6 py-3 bg-neutral-900/30 border-t border-neutral-800 shrink-0 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <HardDrive className="w-3.5 h-3.5 text-neutral-700" />
-                  <p className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest">
+                  <HardDrive className="w-3.5 h-3.5 text-neutral-500" />
+                  <p className="text-[10px] font-bold text-neutral-500">
                     {dupesGroups.reduce((acc, g) => acc + g.removePaths.length, 0)} arquivos removíveis ·{" "}
                     <span className="text-amber-400">{(dupesSummary.totalWastedBytes / 1e6).toFixed(0)} MB</span> recuperáveis
                   </p>
                 </div>
-                <p className="text-[9px] text-neutral-700 font-bold uppercase tracking-widest">
+                <p className="text-[9px] text-neutral-500 font-semibold">
                   scripts\remove-dupes.ps1 -Mode Trash
                 </p>
               </div>
@@ -3738,10 +4450,10 @@ export default function Home() {
           className="w-[min(56rem,92vw)] max-h-[85vh] rounded-2xl overflow-hidden bg-neutral-900">
             <div className="p-6 border-b border-neutral-800 flex justify-between items-center bg-neutral-950/30">
               <div>
-                <h3 className="text-lg font-black tracking-tight">Biblioteca de Assets</h3>
+                <h3 className="text-lg font-semibold tracking-tight">Biblioteca de Assets</h3>
                 <div className="flex items-center gap-2 mt-1">
                   <div className="w-2 h-2 rounded-full bg-white" />
-                  <p className="text-[10px] text-neutral-500 font-black uppercase tracking-[0.2em]">
+                  <p className="text-[10px] text-neutral-500 font-medium">
                     {brands.find(b => b.id === brandId)?.name}
                   </p>
                 </div>
@@ -3755,7 +4467,7 @@ export default function Home() {
               {loadingAssets ? (
                 <div className="flex flex-col items-center justify-center h-64 gap-4">
                   <Loader2 className="w-10 h-10 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
-                  <p className="text-xs font-bold text-neutral-500 uppercase tracking-widest">Sincronizando assets...</p>
+                  <p className="text-xs font-bold text-neutral-500">Sincronizando assets...</p>
                 </div>
               ) : assetError ? (
                 <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -3763,13 +4475,13 @@ export default function Home() {
                   <p className="text-red-400 text-sm font-bold text-center px-10">{assetError}</p>
                   <button 
                     onClick={openLibrary}
-                    className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+                    className="flex items-center gap-2 text-[10px] font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
                   >
                     Tentar novamente
                   </button>
                 </div>
               ) : brandAssets.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 gap-2 text-neutral-600">
+                <div className="flex flex-col items-center justify-center py-20 gap-2 text-neutral-500">
                   <Library className="w-16 h-16 opacity-10" />
                   <p className="text-sm font-bold">Nenhum asset encontrado</p>
                 </div>
@@ -3790,8 +4502,8 @@ export default function Home() {
                         />
                       </div>
                       <div className="px-1">
-                        <p className="text-[11px] font-black truncate text-neutral-400 group-hover:text-white transition-colors">{asset.label}</p>
-                        <p className="text-[9px] text-neutral-600 font-bold uppercase tracking-widest mt-0.5">{asset.variant}</p>
+                        <p className="text-[11px] font-semibold truncate text-neutral-400 group-hover:text-white transition-colors">{asset.label}</p>
+                        <p className="text-[9px] text-neutral-500 font-semibold mt-0.5">{asset.variant}</p>
                       </div>
                     </button>
                   ))}
@@ -3800,8 +4512,8 @@ export default function Home() {
             </div>
             
             <div className="p-4 bg-neutral-950/50 border-t border-neutral-800 text-center flex items-center justify-center gap-3">
-              <ExternalLink className="w-3.5 h-3.5 text-neutral-700" />
-              <p className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest">Selecione um asset para aplicar ao mockup</p>
+              <ExternalLink className="w-3.5 h-3.5 text-neutral-500" />
+              <p className="text-[10px] font-bold text-neutral-500">Selecione um asset para aplicar ao mockup</p>
             </div>
         </DialogContent>
       </Dialog>

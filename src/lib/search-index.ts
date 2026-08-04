@@ -22,6 +22,7 @@ import {
 } from "./search-engine";
 import { logQuery, getBoostFn } from "./search-telemetry";
 import { getHidden } from "./hidden-store";
+import { semanticRank } from "./semantic-index";
 
 export { aspectBucket, type SearchDoc, type SearchQuery, type Facets, type AspectBucket } from "./search-engine";
 
@@ -277,6 +278,38 @@ export async function hiddenRefs(): Promise<SearchDoc[]> {
 
 // ---------------------------------------------------------------- API pública
 
+// ---------------------------------------------------------------- viés de marca (home)
+
+/**
+ * Ids que a sugestão brand-aware devolve para a marca ativa, cacheados.
+ *
+ * A home embaralhada pede esses ids a cada carga; a sugestão custa uma ida à Visant e um
+ * score sobre 600 candidatos do Mongo. Sem cache, "abrir a home" viraria a operação mais
+ * cara do produto. E se a Visant estiver fora, o viés simplesmente não acontece — a home
+ * embaralha sem marca em vez de falhar, porque a galeria é a tela que não pode depender
+ * de rede de terceiro.
+ */
+const BIAS_TTL_MS = 10 * 60_000;
+const biasCache = new Map<string, { ids: string[]; at: number }>();
+
+export async function brandBiasIds(brandId: string, limit = 40): Promise<string[]> {
+  const hit = biasCache.get(brandId);
+  if (hit && Date.now() - hit.at < BIAS_TTL_MS) return hit.ids;
+  try {
+    const { suggestForBrand } = await import("./suggest-core");
+    const res = await suggestForBrand(brandId, { limit });
+    const ids = res.suggestions
+      .map((s) => (s.ref as { id?: unknown }).id)
+      .filter((id): id is string => typeof id === "string");
+    biasCache.set(brandId, { ids, at: Date.now() });
+    return ids;
+  } catch (e) {
+    console.error("[search-index] viés de marca indisponível:", e instanceof Error ? e.message : e);
+    biasCache.set(brandId, { ids: [], at: Date.now() });
+    return [];
+  }
+}
+
 export async function searchRefs(q: SearchQuery) {
   const t0 = Date.now();
   const { mini, docs } = await getIndex();
@@ -288,7 +321,19 @@ export async function searchRefs(q: SearchQuery) {
   // `getBoostFn("")` devolve só a popularidade global (afinidade query↔doc vazia),
   // que é exatamente o sinal certo para uma listagem.
   const boost = q.sort === "name" ? undefined : await getBoostFn(term);
-  const { pass, ...result } = runSearch(docs, mini, q, boost);
+
+  // Camada densa: só entra quando há texto, e nunca pode derrubar a busca. Embeddings
+  // desligados, cache vazio ou provedor fora ⇒ `null` ⇒ o resultado é o léxico de sempre.
+  let semanticIds: string[] | undefined;
+  if (term) {
+    try {
+      semanticIds = (await semanticRank(term, { k: 120 })) ?? undefined;
+    } catch (e) {
+      console.error("[search-index] camada densa falhou (seguindo só no léxico):", e instanceof Error ? e.message : e);
+    }
+  }
+
+  const { pass, ...result } = runSearch(docs, mini, q, boost, semanticIds);
 
   if (term) {
     void logQuery({

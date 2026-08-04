@@ -12,7 +12,10 @@ export function loadImg(url: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
     const img = new Image();
     img.onload = () => res(img);
-    img.onerror = rej;
+    // `onerror = rej` rejeitava com o **Event** cru, e o overlay do Next imprime
+    // `String(event)` → "[object Event]": um erro que não diz o que falhou nem
+    // onde. A URL é a única pista que importa quando uma máscara não carrega.
+    img.onerror = () => rej(new Error(`Não carregou a imagem da máscara: ${url}`));
     img.src = url;
   });
 }

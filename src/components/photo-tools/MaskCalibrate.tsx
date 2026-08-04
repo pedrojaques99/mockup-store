@@ -10,7 +10,7 @@
  * grava sidecar `<name>.mask.png` referenciado em `QuadEntry.surfaceMaskRel`.
  */
 import { useRef, useState, useCallback } from "react";
-import { Pen, Brush, Wand2, Sparkles, Eraser, RotateCcw, Plus, Minus, Eye, EyeOff } from "lucide-react";
+import { Pen, Brush, Wand2, Pipette, Eraser, RotateCcw, Plus, Minus, Eye, EyeOff } from "lucide-react";
 import PenMaskCanvas, { type PenApi } from "@/components/PenMaskCanvas";
 import BrushCanvas, { type BrushApi } from "@/components/BrushCanvas";
 import SegmentCanvas, { type SegApi, type SegMode } from "@/components/SegmentCanvas";
@@ -21,7 +21,7 @@ type Instrument = "pen" | "brush" | "wand" | "sam";
 const INSTRUMENTS: { id: Instrument; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
   { id: "pen", label: "Caneta", icon: Pen },
   { id: "brush", label: "Pincel", icon: Brush },
-  { id: "wand", label: "Conta-gotas", icon: Sparkles }, // smart = magic wand (color picker + flood)
+  { id: "wand", label: "Conta-gotas", icon: Pipette }, // smart = magic wand (color picker + flood)
   { id: "sam", label: "SAM", icon: Wand2 },
 ];
 

@@ -7,7 +7,7 @@
  * SAM são instrumentos: TODOS pintam na MESMA máscara do alvo ativo. A seleção da
  * edição (aiedit) tem painel próprio (EditSelectionPanel) — aqui só surface/occluder.
  */
-import { Loader2, Plus, Minus, Undo2, FlipHorizontal2, Trash2, PenTool, Paintbrush, Wand2, Sparkles, Layers, Radio, Eye, Contrast } from "lucide-react";
+import { Loader2, Plus, Minus, Undo2, FlipHorizontal2, Trash2, PenTool, Paintbrush, Wand2, MousePointerClick, Layers, Radio, Eye, Contrast } from "lucide-react";
 import { Slider } from "@/components/ui/Slider";
 import { IconButton } from "@/components/ui/IconButton";
 import { IconSegmented } from "@/components/ui/IconSegmented";
@@ -48,7 +48,7 @@ const INSTRUMENTS: { value: MaskInstrument; label: string; icon: typeof PenTool;
   { value: "pen", label: "Caneta", icon: PenTool, tip: "Vetor: cantos e curvas bézier" },
   { value: "brush", label: "Pincel", icon: Paintbrush, tip: "Pinta à mão livre, ao vivo" },
   { value: "wand", label: "Varinha", icon: Wand2, tip: "Seleção por cor (clique)" },
-  { value: "sam", label: "Objeto", icon: Sparkles, tip: "Seleção de objeto (clique)" },
+  { value: "sam", label: "Objeto", icon: MousePointerClick, tip: "Seleção de objeto (clique)" },
 ];
 
 /** Rótulo de seção (módulo-scope → não recria componente em render). */

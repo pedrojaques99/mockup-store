@@ -8,7 +8,9 @@ export function toBase64File(file: File): Promise<string> {
   return new Promise((res, rej) => {
     const fr = new FileReader();
     fr.onload = () => res(fr.result as string);
-    fr.onerror = rej;
+    // Ver mask-compose: `onerror = rej` rejeita com o Event cru e vira
+    // "[object Event]" no overlay. O nome do arquivo é a pista útil.
+    fr.onerror = () => rej(new Error(`Não deu para ler o arquivo "${file.name}"`));
     fr.readAsDataURL(file);
   });
 }
@@ -18,7 +20,7 @@ export async function urlToDataUrl(url: string): Promise<string> {
   return new Promise((res, rej) => {
     const fr = new FileReader();
     fr.onload = () => res(fr.result as string);
-    fr.onerror = rej;
+    fr.onerror = () => rej(new Error(`Não deu para ler os bytes de ${url}`));
     fr.readAsDataURL(blob);
   });
 }

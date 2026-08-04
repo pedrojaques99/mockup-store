@@ -11,7 +11,7 @@
  * /calibrate completo numa aba nova quando o usuário precisa esculpir.
  */
 import { useEffect, useState } from "react";
-import { Loader2, Download, Upload as UploadIcon, ExternalLink, CheckCircle2, Sparkles, Cpu } from "lucide-react";
+import { Loader2, Download, Upload as UploadIcon, ExternalLink, CheckCircle2, Scan, Waves, Cpu } from "lucide-react";
 import type { SceneAnalysis } from "@/lib/scene-classify";
 import { useDocField, useEditorDoc } from "@/stores/editorDoc";
 import { meshIsWarped } from "@/lib/mesh-core";
@@ -192,7 +192,7 @@ export function CalibrationPanel() {
             </div>
             {cls.ai && (
               <div className="flex items-center gap-1.5 text-purple-300">
-                <Sparkles size={10} />
+                <Scan size={10} />
                 <span className="truncate">{cls.ai.description}</span>
               </div>
             )}
@@ -219,7 +219,7 @@ export function CalibrationPanel() {
 
       {/* displacement (relevo) */}
       <div className="space-y-2 p-2 rounded bg-zinc-900/60 border border-zinc-800">
-        <div className="text-[10px] uppercase tracking-wide text-zinc-500 flex items-center gap-1"><Sparkles size={11} />Relevo (displacement)</div>
+        <div className="text-[10px] uppercase tracking-wide text-zinc-500 flex items-center gap-1"><Waves size={11} />Relevo (displacement)</div>
         <label className="flex items-center justify-between gap-2">amplitude
           <input type="range" min={0} max={20} step={1} value={dispScale} onChange={(e) => setDispScale(+e.target.value)} className="flex-1" />
           <span className="font-mono text-zinc-300 w-6 text-right">{dispScale}</span>

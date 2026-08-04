@@ -18,7 +18,11 @@
     "ui:audit": "tsx scripts/ui-audit.ts",
     "setup": "tsx --env-file-if-exists=.env.local scripts/setup.ts",
     "visual:ingest": "tsx scripts/ingest-visual-check.ts",
-    "fixture:virt": "tsx scripts/make-virt-fixture.ts"
+    "visual:home": "tsx scripts/home-visual-check.ts",
+    "visual:console": "tsx scripts/console-check.ts",
+    "fixture:virt": "tsx scripts/make-virt-fixture.ts",
+    "search:embed": "npx tsx --env-file=.env.local scripts/embed-catalog.ts",
+    "search:eval": "npx tsx --env-file=.env.local scripts/search-eval.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",

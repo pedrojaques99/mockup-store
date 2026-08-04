@@ -2,7 +2,7 @@
 
 /** CropPanel — moldura livre (8 alças) estilo Photoshop. Proporção opcional,
  *  reset, e expansão por IA quando a moldura passa da imagem. Reusa Segmented. */
-import { Crop as CropIcon, Loader2, Sparkles, Maximize, RotateCcw } from "lucide-react";
+import { Crop as CropIcon, Loader2, Expand, Maximize, RotateCcw } from "lucide-react";
 import { Segmented } from "@/components/ui/Segmented";
 
 export type CropAspect = "free" | "1:1" | "16:9" | "4:5";
@@ -95,7 +95,7 @@ export function CropPanel({
         {applying ? (
           <><Loader2 size={12} className="animate-spin" /> {expanding ? "Expandindo…" : "Cortando…"}</>
         ) : expanding ? (
-          <><Sparkles size={12} /> Expandir cena</>
+          <><Expand size={12} /> Expandir cena</>
         ) : (
           <><CropIcon size={12} /> Aplicar corte</>
         )}

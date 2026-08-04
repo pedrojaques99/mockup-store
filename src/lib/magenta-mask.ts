@@ -18,7 +18,7 @@ function loadImg(src: string): Promise<HTMLImageElement> {
     const im = new Image();
     im.crossOrigin = "anonymous";
     im.onload = () => res(im);
-    im.onerror = rej;
+    im.onerror = () => rej(new Error(`Não carregou a imagem da cena: ${src}`));
     im.src = src;
   });
 }

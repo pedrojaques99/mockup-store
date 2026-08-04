@@ -16,15 +16,25 @@ export function Switch({
   onCheckedChange,
   label,
   className,
+  id,
 }: {
   checked: boolean;
   onCheckedChange: (v: boolean) => void;
   /** Nome acessível quando não há `<label>` associado. */
   label?: string;
   className?: string;
+  /**
+   * Para parear com um `<label htmlFor>`. É o jeito CORRETO de tornar a linha
+   * inteira clicável: o Radix renderiza um `<button role="switch">`, então
+   * envolvê-lo num `<button>` produz botão-dentro-de-botão — HTML inválido que
+   * **quebra a hidratação** (o React descarta o HTML do servidor e regenera a
+   * árvore). Já aconteceu aqui, na linha "Esconder duplicados".
+   */
+  id?: string;
 }) {
   return (
     <RS.Root
+      id={id}
       checked={checked}
       onCheckedChange={onCheckedChange}
       aria-label={label}

@@ -25,7 +25,7 @@ export function ExportBar({ src }: { src: string | null }) {
         const im = new Image();
         im.crossOrigin = "anonymous";
         im.onload = () => res(im);
-        im.onerror = rej;
+        im.onerror = () => rej(new Error(`Não carregou a imagem para exportar: ${src}`));
         im.src = src;
       });
       const c = document.createElement("canvas");

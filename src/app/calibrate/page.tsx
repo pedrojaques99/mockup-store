@@ -14,7 +14,7 @@ import { Select } from "@/components/ui/Select";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Loader2, Save, ChevronLeft, ChevronRight, RefreshCw, Eye, EyeOff, CheckCircle2,
-  Ban, RotateCcw, FolderOpen, Upload, Mountain, Shirt, Play, Grid3x3, Lasso, Sparkles,
+  Ban, RotateCcw, FolderOpen, Upload, Mountain, Shirt, Play, Grid3x3, Lasso, Scan,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { defaultMesh, ensureTangents, autoSmoothTangents, applyDispToMesh, meshFromDepth, type WarpMesh } from "@/lib/mesh-core";
@@ -697,7 +697,7 @@ export default function CalibratePage() {
               engine v{engineMeta.global.version}·{engineMeta.global.samples}
             </span>
           )}
-          <button onClick={() => setUseAI((v) => !v)} title="Visant vision — análise mais precisa, ~1s + custo" className={["p-1.5 rounded hover:bg-zinc-800", useAI ? "text-purple-400" : "text-zinc-500"].join(" ")}><Sparkles size={16} /></button>
+          <button onClick={() => setUseAI((v) => !v)} title="Visant vision — análise mais precisa, ~1s + custo" className={["p-1.5 rounded hover:bg-zinc-800", useAI ? "text-purple-400" : "text-zinc-500"].join(" ")}><Scan size={16} /></button>
           <button onClick={toggleMesh} title="Malha / Warp envelope (W)" className={["p-1.5 rounded hover:bg-zinc-800", meshMode ? "text-lime-400" : "text-zinc-500"].join(" ")}><Grid3x3 size={16} /></button>
           <button onClick={toggleMask} title="Máscara (K) — pen / brush / wand / SAM" className={["p-1.5 rounded hover:bg-zinc-800", maskMode ? "text-cyan-400" : "text-zinc-500"].join(" ")}><Lasso size={16} /></button>
           <button onClick={() => { setDispMode((v) => !v); setMatMode(false); }} title="Displacement (D)" className={["p-1.5 rounded hover:bg-zinc-800", dispMode ? "text-orange-400" : "text-zinc-500"].join(" ")}><Mountain size={16} /></button>
@@ -759,7 +759,7 @@ export default function CalibratePage() {
         {/* AI vision result — descrição + tags + provider. */}
         {data?.analysis?.ai && (
           <div className="flex items-center gap-2 px-4 py-1.5 border-b border-zinc-800 bg-purple-950/20 text-[11px] overflow-x-auto">
-            <Sparkles size={12} className="text-purple-400 shrink-0" />
+            <Scan size={12} className="text-purple-400 shrink-0" />
             <span className="text-purple-300 shrink-0">{data.analysis.ai.provider}</span>
             <span className="text-zinc-300 truncate">{data.analysis.ai.description}</span>
             {data.analysis.ai.attributes.slice(0, 6).map((a) => (

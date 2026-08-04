@@ -6,9 +6,10 @@
  * dois algoritmos de busca concorrentes e um merge que descartava o score de relevância.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { searchRefs, refsByIds, type AspectBucket } from "@/lib/search-index";
+import { searchRefs, refsByIds, brandBiasIds, type AspectBucket } from "@/lib/search-index";
 
 const ASPECTS = new Set<AspectBucket>(["square", "portrait", "landscape"]);
+const SORTS = new Set(["name", "popular", "shuffle"]);
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -37,10 +38,20 @@ export async function GET(req: NextRequest) {
   const aspect = ASPECTS.has(aspectRaw) ? aspectRaw : undefined;
   const hasPsd = searchParams.get("has_psd") === "true";
   // Só a listagem ordena; com texto quem manda é a relevância (o motor ignora).
-  const sort = searchParams.get("sort") === "name" ? "name" : "popular";
+  const sortRaw = searchParams.get("sort") || "popular";
+  const sort = (SORTS.has(sortRaw) ? sortRaw : "popular") as "name" | "popular" | "shuffle";
+
+  // Home que muda: a semente vem do cliente (uma por carga da página) para que rolar até a
+  // página 3 não re-sorteie o acervo. Sem semente, o shuffle seria uma ordem por request —
+  // ou seja, card repetido enquanto o usuário rola.
+  const seedRaw = parseInt(searchParams.get("seed") || "");
+  const seed = isNaN(seedRaw) ? 1 : seedRaw;
+  // Marca ativa enviesa o embaralhamento (não filtra). Só custa quando o shuffle está em uso.
+  const brandId = searchParams.get("brandId") || "";
+  const biasIds = sort === "shuffle" && brandId && !search ? await brandBiasIds(brandId) : undefined;
 
   const result = await searchRefs({
-    search, studio, tags, tagMode, aspect, sort,
+    search, studio, tags, tagMode, aspect, sort, seed, biasIds,
     requirePsd: hasPsd,
     page: isNaN(page) ? 1 : page,
     limit: isNaN(limit) ? 60 : limit,

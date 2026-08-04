@@ -9,7 +9,7 @@ import {
   FolderPlus,
   Layers,
   Search,
-  Sparkles,
+  Import,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -1038,7 +1038,7 @@ export default function IngestDialog({
                   onClick={commit}
                   className="h-10 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.97] shadow-xl shadow-white/5 flex items-center gap-2"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
+                  <Import className="w-3.5 h-3.5" />
                   Ingerir {selected.size}
                 </button>
               )}

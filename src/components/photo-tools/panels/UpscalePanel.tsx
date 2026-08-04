@@ -1,7 +1,7 @@
 "use client";
 
 /** UpscalePanel — aumenta foto ou arte. Bicubic (local, grátis) ou Visant (crédito). */
-import { Scaling, Loader2, Sparkles, Image as ImageIcon, Palette } from "lucide-react";
+import { Scaling, Loader2, ZoomIn, Image as ImageIcon, Palette } from "lucide-react";
 import { Segmented } from "@/components/ui/Segmented";
 
 /** Opção de Segmented com ícone comunicativo + texto. */
@@ -117,7 +117,7 @@ export function UpscalePanel({
         ) : mode === "bicubic" ? (
           <><Scaling size={12} /> Aumentar</>
         ) : (
-          <><Sparkles size={12} /> Aumentar ({METHOD_META[mode].label})</>
+          <><ZoomIn size={12} /> Aumentar ({METHOD_META[mode].label})</>
         )}
       </button>
 
