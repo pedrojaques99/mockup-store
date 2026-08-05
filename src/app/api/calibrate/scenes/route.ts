@@ -49,7 +49,12 @@ export async function GET(req: NextRequest) {
 
     scenes.push({
       name, width, height,
-      url: `/api/local-image?path=${encodeURIComponent(full)}`,
+      // `raw=1` é obrigatório: a tela de calibração desenha esta imagem num
+      // canvas do tamanho de `naturalWidth`/`naturalHeight` e lê os pixels para
+      // detectar o quad, comparando com o `width`/`height` que o sharp mediu no
+      // arquivo ORIGINAL logo acima. Um derivado reduzido passaria despercebido
+      // e deslocaria todo quad calibrado a partir daqui.
+      url: `/api/local-image?path=${encodeURIComponent(full)}&raw=1`,
       status,
       confidence: entry?.confidence,
       iou: entry?.iou,

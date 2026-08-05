@@ -12,6 +12,8 @@
     "smoke": "tsx scripts/smoke.ts",
     "doctor": "tsx --env-file-if-exists=.env.local scripts/scene-doctor.ts",
     "search:report": "tsx scripts/search-report.ts",
+    "psd:triage": "tsx --env-file-if-exists=.env.local scripts/psd-triage.ts",
+    "psd:prune": "tsx --env-file-if-exists=.env.local scripts/psd-prune.ts",
     "render": "bun scripts/render-server.ts",
     "render:ps": "bun scripts/ps-render-server.ts",
     "perf:catalog": "tsx --env-file-if-exists=.env.local scripts/measure-catalog.ts",
@@ -24,7 +26,12 @@
     "search:embed": "npx tsx --env-file=.env.local scripts/embed-catalog.ts",
     "search:eval": "npx tsx --env-file=.env.local scripts/search-eval.ts",
     "audit:design": "tsx scripts/ui-audit.ts",
-    "visual:touch": "tsx scripts/touch-check.ts"
+    "visual:touch": "tsx scripts/touch-check.ts",
+    "img:warm": "tsx --env-file-if-exists=.env.local scripts/img-warm.ts",
+    "perf:memory": "tsx scripts/mem-report.ts",
+    "psd:repoint": "tsx --env-file-if-exists=.env.local scripts/psd-repoint.ts",
+    "pack:publish": "tsx --env-file-if-exists=.env.local scripts/publish-pack.ts",
+    "pack:fidelity": "bun scripts/scene-fidelity.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",

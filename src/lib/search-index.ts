@@ -23,11 +23,25 @@ import {
 import { logQuery, getBoostFn } from "./search-telemetry";
 import { getHidden } from "./hidden-store";
 import { semanticRank } from "./semantic-index";
+import { filtrarPsdsSumidos } from "./psd-presence";
 
 export { aspectBucket, type SearchDoc, type SearchQuery, type Facets, type AspectBucket } from "./search-engine";
 
 const PREVIEW_DIR = join(process.cwd(), "public", "photo-previews");
-const CATALOG_TTL_MS = 60_000;
+
+/**
+ * Janela do stale-while-revalidate. Era 60s, e isso custava caro em memória: o
+ * rebuild é um scan completo (Mongo + PSD no disco + cenas, ~6s) que aloca um
+ * array novo de ~4.5k docs e — pelo `visibleCache = null` logo abaixo — jogava
+ * fora o índice MiniSearch para reconstruí-lo do zero. A cada minuto de uso.
+ * Medido no dev: a RSS subia ~100 MB por rodada de carga e não voltava.
+ *
+ * 5 min é o compromisso: escrita DENTRO do app já invalida na hora
+ * (`invalidateCatalog()` no ingest e no publish) e esconder tem versão própria,
+ * então a janela só vale para escrita FEITA POR FORA (os scripts do CLI).
+ * `CATALOG_TTL_MS` no ambiente ajusta para quem estiver batendo CLI e UI juntos.
+ */
+const CATALOG_TTL_MS = Number(process.env.CATALOG_TTL_MS) || 300_000;
 
 /**
  * Thumbnail da cena. Preferimos `.webp` (os previews passaram a ser gerados reduzidos —
@@ -63,9 +77,17 @@ function dimsToTags(dimensions: Record<string, unknown> | undefined): string[] {
 
 // ---------------------------------------------------------------- catálogo
 
-let catalogCache: { docs: SearchDoc[]; at: number } | null = null;
+let catalogCache: { docs: SearchDoc[]; at: number; fp: string } | null = null;
 let visibleCache: VisibleView | null = null;
 let building: Promise<SearchDoc[]> | null = null;
+
+/** Placar do último rebuild: quanto o disco desmentiu o Mongo. Ver `catalogStats()`. */
+let ultimaPresenca: {
+  removidos: number;
+  pastasSumidas: number;
+  raizesOffline: string[];
+  abortadoPeloTeto: boolean;
+} = { removidos: 0, pastasSumidas: 0, raizesOffline: [], abortadoPeloTeto: false };
 
 interface VisibleView {
   docs: SearchDoc[];
@@ -78,6 +100,20 @@ interface VisibleView {
 export function invalidateCatalog() {
   catalogCache = null;
   visibleCache = null;
+}
+
+/** O que este módulo está segurando na memória. Consumido por `/api/diag/memory`. */
+export function catalogStats() {
+  return {
+    docs: catalogCache?.docs.length ?? 0,
+    idadeSeg: catalogCache ? Math.round((Date.now() - catalogCache.at) / 1000) : null,
+    ttlSeg: Math.round(CATALOG_TTL_MS / 1000),
+    fingerprint: catalogCache?.fp ?? null,
+    visiveis: visibleCache?.docs.length ?? 0,
+    indiceMontado: !!visibleCache?.mini,
+    rebuildEmVoo: !!building,
+    presenca: ultimaPresenca,
+  };
 }
 
 async function fetchMongoDocs(): Promise<SearchDoc[]> {
@@ -192,14 +228,61 @@ async function buildCatalog(): Promise<SearchDoc[]> {
   const { docs: withThumbs, borrowed } = borrowSiblingThumbnails(merged);
   if (borrowed) console.log(`[search-index] ${borrowed} thumbnails herdadas de irmão de mesmo nome-base`);
 
-  return withThumbs;
+  // O disco manda: PSD apagado não vira card. Só de leitura — quem limpa o Mongo
+  // é `npm run psd:prune`, porque disco de rede que pisca não pode apagar banco.
+  const presenca = filtrarPsdsSumidos(withThumbs);
+  ultimaPresenca = {
+    removidos: presenca.removidos,
+    pastasSumidas: presenca.pastasSumidas.length,
+    raizesOffline: presenca.raizesOffline,
+    abortadoPeloTeto: presenca.abortadoPeloTeto,
+  };
+  if (presenca.abortadoPeloTeto) {
+    console.warn(
+      "[search-index] mais da metade dos PSDs sumiu de uma vez — tratando como disco fora do ar, nada foi escondido",
+    );
+  } else if (presenca.removidos) {
+    console.log(
+      `[search-index] ${presenca.removidos} registro(s) escondidos: PSD não está mais no disco ` +
+        `(${presenca.pastasSumidas.length} pasta(s)). Rode \`npm run psd:prune\` para limpar o Mongo.`,
+    );
+  }
+  if (presenca.raizesOffline.length) {
+    console.warn(`[search-index] raiz do PSD_DIRS inacessível, ignorada: ${presenca.raizesOffline.join(", ")}`);
+  }
+
+  return presenca.docs;
+}
+
+/**
+ * Impressão digital do catálogo: muda quando muda algo que a busca enxerga.
+ * Não é hash criptográfico — é um resumo barato (id + o que o ranking indexa)
+ * para responder UMA pergunta: "o rebuild trouxe a mesma coisa?".
+ */
+function fingerprint(docs: SearchDoc[]): string {
+  let h = 5381;
+  for (const d of docs) {
+    const s = `${d.id}|${d.name}|${d.studio}|${d.aspect}|${d.referenceImageUrl ?? ""}|${d.tags.length}`;
+    for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  }
+  return `${docs.length}:${h.toString(36)}`;
 }
 
 function refresh(): Promise<SearchDoc[]> {
   // Dedup de builds concorrentes: 10 requests simultâneos varriam o disco 10 vezes.
   building ??= buildCatalog()
     .then((docs) => {
-      catalogCache = { docs, at: Date.now() };
+      // O rebuild quase sempre devolve EXATAMENTE o mesmo catálogo — o acervo não
+      // muda sozinho a cada 5 minutos. Antes, mesmo assim, o `visibleCache = null`
+      // descartava o índice MiniSearch inteiro (4.5k docs) e a próxima busca pagava
+      // para reconstruí-lo, deixando o anterior de lixo para o GC. Comparando a
+      // impressão digital, catálogo igual = índice preservado, zero alocação.
+      const fp = fingerprint(docs);
+      if (catalogCache && catalogCache.fp === fp) {
+        catalogCache.at = Date.now(); // só re-carimba: docs e índice seguem válidos
+        return catalogCache.docs;
+      }
+      catalogCache = { docs, at: Date.now(), fp };
       visibleCache = null;
       return docs;
     })

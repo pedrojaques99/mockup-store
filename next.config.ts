@@ -20,6 +20,12 @@ const nextConfig: NextConfig = {
         hostname: "pub-0acbd500af3b4beaa8b93b07f6490d58.r2.dev",
       },
     ],
+    // O TTL efetivo do otimizador é `max(minimumCacheTTL, max-age da fonte)` —
+    // com o default de 4h, a variante já otimizada era descartada e o Next voltava
+    // a BUSCAR a fonte de 13 MB no Google Drive para regerar exatamente o mesmo
+    // WebP. O arquivo-fonte não muda (e quando muda, muda de mtime e a chave do
+    // cache da rota muda junto), então revalidar de 4 em 4 horas é trabalho puro.
+    minimumCacheTTL: 2_678_400, // 31 dias
   },
   // Thumbnail do grid é imutável por id (o id É o hash da cena) — sem isto o browser
   // revalidava os 60 cards da primeira página a cada visita. `must-revalidate` de fora
@@ -36,7 +42,51 @@ const nextConfig: NextConfig = {
     "ag-psd", "sharp", "mongodb", "@printmadehq/mockup-generator",
     "puppeteer", "canvas", "@visant/psd-engine",
   ],
-  webpack(config, { isServer }) {
+  experimental: {
+    /**
+     * O dev server pré-carregava TODAS as rotas na memória ao subir: 566 MB de RSS
+     * antes de servir o primeiro request (medido). Com isto, cada rota entra quando
+     * é pedida — o custo continua existindo, mas só para as rotas que você abre, e
+     * não para as ~40 rotas de API que este app tem.
+     */
+    preloadEntriesOnStart: false,
+    /**
+     * Troca memória por um pouco de tempo de compilação no webpack. É o knob que a
+     * própria doc do Next indica para "Building large applications".
+     */
+    webpackMemoryOptimizations: true,
+  },
+  /**
+   * TURBOPACK: NÃO dá para usar neste repo hoje.
+   *
+   * Medido: `next dev --turbopack` morre em toda rota que toca o engine, com
+   * "Can't resolve '@visant/psd-engine'". O pacote é um symlink para fora da
+   * árvore (`Z:\Cursor\visantlabs-os\packages\psd-engine`) e o Turbopack, depois
+   * de seguir o symlink, recusa o caminho real por estar fora da raiz do projeto
+   * — inclusive quando apontado por `resolveAlias` absoluto. As saídas seriam
+   * alargar a raiz para `Z:\` (o watcher passaria a vigiar o disco inteiro, com
+   * milhares de PSDs) ou reescrever os 5 pontos de import do engine para fugir do
+   * bundler. Nenhuma das duas paga o preço. O alias abaixo fica pronto para o dia
+   * em que o engine virar dependência publicada — aí `--turbopack` deve valer os
+   * ~900 MB de diferença.
+   */
+  turbopack: {
+    resolveAlias: {
+      // SAM2 no browser: bundle pré-compilado WebGPU+WASM.
+      "onnxruntime-web/all": "./node_modules/onnxruntime-web/dist/ort.all.bundle.min.mjs",
+    },
+  },
+  webpack(config, { isServer, dev }) {
+    /**
+     * Source map do dev é caro em memória: o webpack guarda o mapa de CADA módulo
+     * do grafo, e este app compila a home inteira num arquivo só. Ligar
+     * `DEV_NO_SOURCEMAPS=1` desliga (útil quando a máquina está apertada ou num
+     * lote longo de render); o padrão continua sendo o do Next, com stack trace
+     * apontando para o `.tsx` de verdade. Opt-in de propósito: debugar às cegas
+     * custa mais caro que RAM.
+     */
+    if (dev && process.env.DEV_NO_SOURCEMAPS === "1") config.devtool = false;
+
     // onnxruntime-web/all → prebuilt WebGPU+WASM bundle (SAM2 client-side segmentation)
     config.resolve.alias = {
       ...config.resolve.alias,

@@ -148,8 +148,16 @@ function runBatch(args: string[], label: string): number {
   const cmd = ["npx", "tsx", "--env-file=.env.local", "scripts/brand-mockup-batch.ts", ...args].map(q).join(" ");
   console.log(`\n▶ lote ${label}: ${args.join(" ")}`);
   const r = spawnSync(cmd, { stdio: "inherit", shell: true });
-  if (r.status !== 0) console.warn(`! lote ${label} saiu com status ${r.status}`);
-  return r.status ?? 1;
+  if (r.status !== 0) {
+    // Um aviso não bastava: o kit seguia, contava os PNGs ANTIGOS que já estavam
+    // na pasta e imprimia "★ Kit … 28 logo" em cima de um lote que morreu no
+    // primeiro item. Entrega falsa é pior que entrega faltando — quem lê o
+    // resumo não tem como saber que está olhando o resultado da rodada passada.
+    console.error(`\n✗ lote ${label} FALHOU (status ${r.status}). Nada foi entregue nesta rodada.`);
+    console.error(`  Qualquer arquivo que já esteja na pasta de saída é de uma rodada anterior.`);
+    process.exit(r.status ?? 1);
+  }
+  return 0;
 }
 
 async function main() {
@@ -238,8 +246,27 @@ async function main() {
     const SQ = 1600;
     const artDir = resolve(".tmp/brand-kit-art", brandId);
     mkdirSync(artDir, { recursive: true });
-    // trim do símbolo (densidade alta p/ SVG)
-    const trimmed = await sharp(symBuf, { density: 384 }).trim({ threshold: 12 }).png().toBuffer();
+    // Trim do símbolo. A densidade só existe para SVG (rasterização), e ela NÃO
+    // pode ser fixa: o logo da Arbolt vem de um `.png` que na verdade é um SVG
+    // de 4356pt, e 384 dpi o rasterizava a 23.232px de lado — 540 megapixels,
+    // 2x o teto do sharp, e o kit morria com "Input image exceeds pixel limit".
+    //
+    // A densidade certa é a que entrega ~2x o tamanho final (SQ), com folga para
+    // o trim: acima disso é pixel jogado fora, abaixo o símbolo serrilha.
+    const densidadeAlvo = async () => {
+      try {
+        const m = await sharp(symBuf).metadata();
+        if (m.format !== "svg" || !m.width) return 384;
+        const d = Math.round((72 * SQ * 2) / m.width);
+        return Math.max(72, Math.min(384, d));
+      } catch {
+        return 72; // ilegível sem densidade: o default do sharp já serve
+      }
+    };
+    const trimmed = await sharp(symBuf, { density: await densidadeAlvo() })
+      .trim({ threshold: 12 })
+      .png()
+      .toBuffer();
 
     const place = async (fg: string | null, bg: string, inner: number, name: string) => {
       const innerPx = Math.round(SQ * inner);
@@ -282,6 +309,11 @@ async function main() {
     const artDir = useLogo ? await prepareSymbolArt() : layoutsArg!;
     console.log(`Arte do lote: ${useLogo ? "logo/símbolo da marca" : layoutsArg}`);
     const a = ["--layouts", artDir, "--psds", collectionList, "--out", join(outDir, half)];
+    // Logo NUNCA em `cover`: a coleção curada tem tela de celular (aspecto 0,46)
+    // e página de caderno, e a arte do símbolo é quadrada — cobrir corta o logo
+    // fora do quadro e sobra fundo chapado. `contain` + fundo amostrado da arte
+    // mantém o símbolo inteiro com a cor certa em volta.
+    if (useLogo) a.push("--fit", "contain", "--bg", "auto");
     if (maxCropArg) a.push("--max-crop", maxCropArg);
     if (has("preview")) a.push("--preview");
     if (has("fresh")) a.push("--fresh");

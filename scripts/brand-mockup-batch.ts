@@ -58,6 +58,33 @@ const fresh = has("fresh");
 const minKb = parseInt(flag("min-kb", "0")!);
 const includeCats = (flag("include") || "").split(",").map((s) => s.trim()).filter(Boolean);
 const maxCrop = parseFloat(flag("max-crop", "0")!);
+/**
+ * Enquadramento da arte na face. `cover` é o certo para criativo full-bleed e
+ * era o ÚNICO modo aqui — o que quebra logo: arte quadrada do símbolo entrando
+ * numa tela de aspecto 0,46 é escalada para cobrir e cortada dos lados, sobrando
+ * o miolo (que num logo centralizado é fundo). Deu retângulo chapado no iPhone e
+ * dois fragmentos no binder do kit da Arbolt.
+ *
+ * A regra já estava escrita no AGENTS.md e o motor não seguia: layout = cover,
+ * logo = contain + fundo da marca.
+ */
+const fitMode = (flag("fit", "cover") as "cover" | "contain" | "stretch");
+/** hex, ou "auto" para amostrar o fundo da própria arte. */
+const fitBg = flag("bg") || null;
+
+/** Cor do pixel do canto — o fundo da arte, por construção. */
+const cacheCanto = new Map<string, string>();
+async function corDoCanto(p: string): Promise<string> {
+  const emCache = cacheCanto.get(p);
+  if (emCache) return emCache;
+  // `sharp` é importado dinamicamente mais abaixo (nativo); aqui precisa do seu
+  // próprio import, senão dá `ReferenceError` no primeiro item do lote.
+  const sharp = (await import("sharp")).default;
+  const { data } = await sharp(p).extract({ left: 0, top: 0, width: 1, height: 1 }).raw().toBuffer({ resolveWithObject: true });
+  const hex = "#" + [data[0], data[1], data[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+  cacheCanto.set(p, hex);
+  return hex;
+}
 const psdsArg = flag("psds");
 
 /**
@@ -298,7 +325,12 @@ async function main() {
     // varia a arte por mockup (i) E por face (fi) → vizinhos nunca repetem
     for (const [fi, face] of faces.entries()) {
       const art = pickArt(face.innerWidth / face.innerHeight, i + fi);
-      const framed = await frameArt(readFileSync(art.path), face.innerWidth, face.innerHeight, { mode: "cover", bg: null });
+      // `--bg auto`: amostra o canto da própria arte. A arte do símbolo já vem
+      // com o fundo da marca chapado, e cada variação usa um fundo diferente
+      // (escuro ou accent) — um `--bg` fixo pintaria borda da cor errada em
+      // metade dos renders. O canto é o fundo por construção.
+      const bg = fitBg === "auto" ? await corDoCanto(art.path) : fitBg;
+      const framed = await frameArt(readFileSync(art.path), face.innerWidth, face.innerHeight, { mode: fitMode, bg });
       const ap = join(artTmp, `${slug(t.fileName)}-${fi}.png`);
       writeFileSync(ap, framed);
       replacements.push({ smartObject: face.smartObject, artPath: ap });
