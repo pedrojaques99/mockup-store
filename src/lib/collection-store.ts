@@ -34,6 +34,21 @@ export type BrandCollection = {
   name: string;
   items: CollectionItem[];
   updatedAt: number;
+  /**
+   * Marca dona, quando existe. Coleção de marca é chaveada PELO brandId (legado e
+   * atual); coleção avulsa tem chave `col_…` e nenhum brandId. O campo existe para
+   * a lista saber dizer de quem é a coleção sem adivinhar pelo formato da chave.
+   */
+  brandId?: string;
+};
+
+/** Resumo para o seletor — sem carregar os itens de todas as coleções. */
+export type CollectionSummary = {
+  id: string;
+  name: string;
+  count: number;
+  updatedAt: number;
+  brandId?: string;
 };
 
 export type CollectionsFile = {
@@ -54,9 +69,35 @@ function emptyFile(): CollectionsFile {
   return { version: SCHEMA_VERSION, collections: {} };
 }
 
-/** Nome default de uma coleção que ainda não foi renomeada à mão. */
-export function defaultCollectionName(brandId: string): string {
-  return `Coleção ${brandId}`;
+/**
+ * Nome default de uma coleção que ainda não foi renomeada à mão.
+ *
+ * Era `Coleção ${brandId}` — e o id da marca (`69e8e78b51a13978c9bc90d8`) vazava
+ * para a aba do grid. Id de banco não é nome: não se lê, não se digita, não diz de
+ * quem é. O nome default agora é neutro, e quem sabe o nome da marca (a UI) é quem
+ * o exibe no lugar.
+ */
+export function defaultCollectionName(): string {
+  return "Coleção";
+}
+
+/**
+ * O nome legado (`Coleção <id>`) precisa ser tratado como "nunca renomeado", não
+ * como escolha do usuário — senão o id continuaria na tela para sempre em toda
+ * coleção já criada.
+ */
+function normalizeName(name: unknown, key: string): string {
+  const clean = typeof name === "string" ? name.trim() : "";
+  if (!clean) return defaultCollectionName();
+  if (clean === `Coleção ${key}` || /^Cole(ç|c)ão\s+[A-Za-z0-9_-]{12,}$/.test(clean)) {
+    return defaultCollectionName();
+  }
+  return clean;
+}
+
+/** Id de coleção avulsa. Prefixo `col_` distingue da chave que É um brandId. */
+export function newCollectionId(): string {
+  return `col_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
 async function atomicWrite(path: string, content: string): Promise<void> {
@@ -77,9 +118,9 @@ function sanitize(parsed: unknown): CollectionsFile {
   const raw = (parsed as { collections?: unknown }).collections;
   if (!raw || typeof raw !== "object") return out;
 
-  for (const [brandId, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!brandId || !value || typeof value !== "object") continue;
-    const v = value as { name?: unknown; items?: unknown; updatedAt?: unknown };
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!key || !value || typeof value !== "object") continue;
+    const v = value as { name?: unknown; items?: unknown; updatedAt?: unknown; brandId?: unknown };
     const items: CollectionItem[] = [];
     const seen = new Set<string>();
     if (Array.isArray(v.items)) {
@@ -96,10 +137,15 @@ function sanitize(parsed: unknown): CollectionsFile {
         items.push(item);
       }
     }
-    out.collections[brandId] = {
-      name: typeof v.name === "string" && v.name ? v.name : defaultCollectionName(brandId),
+    // Chave que não é `col_…` é um brandId (formato legado e atual das coleções de marca).
+    const brandId = typeof v.brandId === "string" && v.brandId
+      ? v.brandId
+      : key.startsWith("col_") ? undefined : key;
+    out.collections[key] = {
+      name: normalizeName(v.name, key),
       items,
       updatedAt: typeof v.updatedAt === "number" ? v.updatedAt : 0,
+      ...(brandId ? { brandId } : {}),
     };
   }
   return out;
@@ -120,11 +166,28 @@ export async function getCollections(): Promise<{ data: CollectionsFile; version
   return cache;
 }
 
-/** A coleção de uma marca, ou `null` se ela nunca foi tocada. */
-export async function getCollection(brandId: string): Promise<BrandCollection | null> {
-  if (!brandId || typeof brandId !== "string") return null;
+/**
+ * A coleção de uma chave, ou `null` se ela nunca foi tocada. A chave é o brandId
+ * (coleção da marca) ou um `col_…` (coleção avulsa) — as duas moram no mesmo mapa.
+ */
+export async function getCollection(collectionId: string): Promise<BrandCollection | null> {
+  if (!collectionId || typeof collectionId !== "string") return null;
   const { data } = await getCollections();
-  return data.collections[brandId] ?? null;
+  return data.collections[collectionId] ?? null;
+}
+
+/** Todas as coleções em resumo, mais recente primeiro — alimenta o seletor. */
+export async function listCollections(): Promise<CollectionSummary[]> {
+  const { data } = await getCollections();
+  return Object.entries(data.collections)
+    .map(([id, col]) => ({
+      id,
+      name: col.name,
+      count: col.items.length,
+      updatedAt: col.updatedAt,
+      ...(col.brandId ? { brandId: col.brandId } : {}),
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 /**
@@ -132,25 +195,36 @@ export async function getCollection(brandId: string): Promise<BrandCollection | 
  * novo, `version++` e cache atualizado acontecem sempre, num lugar só.
  */
 async function mutate(
-  brandId: string,
+  collectionId: string,
   fn: (col: BrandCollection) => void,
 ): Promise<BrandCollection> {
-  if (!brandId || typeof brandId !== "string") {
-    throw new Error("brandId obrigatório");
+  if (!collectionId || typeof collectionId !== "string") {
+    throw new Error("brandId (ou collectionId) obrigatório");
   }
   const { data } = await getCollections();
   const next: CollectionsFile = {
     version: SCHEMA_VERSION,
     collections: { ...data.collections },
   };
-  const current = next.collections[brandId];
+  const current = next.collections[collectionId];
   const col: BrandCollection = current
-    ? { name: current.name, items: current.items.map((i) => ({ ...i })), updatedAt: current.updatedAt }
-    : { name: defaultCollectionName(brandId), items: [], updatedAt: 0 };
+    ? {
+        name: current.name,
+        items: current.items.map((i) => ({ ...i })),
+        updatedAt: current.updatedAt,
+        ...(current.brandId ? { brandId: current.brandId } : {}),
+      }
+    : {
+        name: defaultCollectionName(),
+        items: [],
+        updatedAt: 0,
+        // Coleção criada pelo toggle do grid é sempre de marca: a chave É o brandId.
+        ...(collectionId.startsWith("col_") ? {} : { brandId: collectionId }),
+      };
 
   fn(col);
   col.updatedAt = Date.now();
-  next.collections[brandId] = col;
+  next.collections[collectionId] = col;
 
   await atomicWrite(COLLECTIONS_FILE, JSON.stringify(next, null, 2));
   version++;
@@ -209,12 +283,52 @@ export async function reorder(brandId: string, order: string[]): Promise<BrandCo
   });
 }
 
-/** Renomeia. Nome vazio volta para o default derivado do brandId. */
-export async function renameCollection(brandId: string, name: string): Promise<BrandCollection> {
-  return mutate(brandId, (col) => {
+/** Renomeia. Nome vazio volta para o default neutro. */
+export async function renameCollection(
+  collectionId: string,
+  name: string,
+): Promise<BrandCollection> {
+  return mutate(collectionId, (col) => {
     const clean = typeof name === "string" ? name.trim() : "";
-    col.name = clean || defaultCollectionName(brandId);
+    col.name = clean || defaultCollectionName();
   });
+}
+
+/**
+ * Cria uma coleção **avulsa** — sem marca. Nem toda curadoria é de um cliente:
+ * "referências de tipografia", "o que mandar pro fotógrafo". Antes só existia
+ * coleção como efeito colateral de conectar uma marca.
+ */
+export async function createCollection(name?: string, brandId?: string): Promise<CollectionSummary> {
+  const id = newCollectionId();
+  const col = await mutate(id, (c) => {
+    const clean = typeof name === "string" ? name.trim() : "";
+    c.name = clean || defaultCollectionName();
+    if (typeof brandId === "string" && brandId) c.brandId = brandId;
+  });
+  return {
+    id,
+    name: col.name,
+    count: col.items.length,
+    updatedAt: col.updatedAt,
+    ...(col.brandId ? { brandId: col.brandId } : {}),
+  };
+}
+
+/**
+ * Apaga a coleção inteira. Só existe porque criar avulsa passou a existir: uma
+ * lista que só cresce vira lixo permanente no seletor. `false` = não havia nada.
+ */
+export async function deleteCollection(collectionId: string): Promise<boolean> {
+  if (!collectionId || typeof collectionId !== "string") return false;
+  const { data } = await getCollections();
+  if (!data.collections[collectionId]) return false;
+  const next: CollectionsFile = { version: SCHEMA_VERSION, collections: { ...data.collections } };
+  delete next.collections[collectionId];
+  await atomicWrite(COLLECTIONS_FILE, JSON.stringify(next, null, 2));
+  version++;
+  cache = { data: next, version };
+  return true;
 }
 
 /** Anota um item. Note vazio **remove o campo** — não grava string vazia. */

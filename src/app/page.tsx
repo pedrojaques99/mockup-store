@@ -48,6 +48,7 @@ import {
   BookmarkCheck,
   ScanSearch,
   ListPlus,
+  Pencil,
 } from "lucide-react";
 import {
   DEFAULT_FRAME,
@@ -301,10 +302,13 @@ function MockupCardImpl({
                 onClick={(e) => { e.stopPropagation(); onToggleCollection(mockup); }}
                 title={inCollection ? `Tirar de ${collectionLabel}  (B)` : `Guardar em ${collectionLabel}  (B)`}
                 aria-pressed={!!inCollection}
-                className={`w-7 h-7 rounded-lg backdrop-blur-sm flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl ${
+                className={`w-7 h-7 rounded-lg backdrop-blur-sm flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 ${
                   inCollection
-                    ? "opacity-100 bg-white text-black"
-                    : `${REVEAL_CONTROL} bg-black/70 text-white/90 hover:bg-white hover:text-black`
+                    // Ligado, ele é ESTADO, não ação: um bloco branco chapado em cada
+                    // card curado gritava mais que a própria thumbnail. Marca discreta
+                    // (fundo escuro, ícone na cor da ação) que fica nítida no hover.
+                    ? "opacity-100 bg-black/55 text-acc2 hover:bg-black/75"
+                    : `${REVEAL_CONTROL} bg-black/70 text-white/90 hover:bg-white hover:text-black shadow-xl`
                 }`}
               >
                 {inCollection ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
@@ -650,7 +654,13 @@ export default function Home() {
   // Formato da superfície — o critério que o pipeline usa o tempo todo pra casar arte↔cena.
   const [aspect, setAspect] = useState<"" | "square" | "portrait" | "landscape">("");
   const [activeTags, setActiveTags] = useState<string[]>([]);
-  const [tagMode, setTagMode] = useState<"AND" | "OR">("AND");
+  // OR é o PADRÃO, não uma opção escondida. Marcar mais uma tag na taxonomia é
+  // um gesto de "quero ver também isto" — quem clica em `billboard` e depois em
+  // `outdoor` está ampliando a busca, não pedindo o mockup que é as duas coisas
+  // ao mesmo tempo. Com AND o segundo clique quase sempre esvaziava o grid, e o
+  // acervo parecia menor a cada tag ligada. O AND continua alcançável no
+  // seletor E/OU (e por `?tagMode=AND` na URL) para o caso raro de interseção.
+  const [tagMode, setTagMode] = useState<"AND" | "OR">("OR");
   /** Ordem da LISTAGEM. Com busca ativa quem ordena é a relevância (o motor ignora). */
   const [sort, setSort] = useState<"popular" | "name" | "shuffle">("shuffle");
   /**
@@ -689,6 +699,8 @@ export default function Home() {
   const [brandId, setBrandId] = useState<string>("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  /** O X do painel fecha o PAINEL. Desconectar a marca é outra ação (a do seletor). */
+  const [suggestionsOpen, setSuggestionsOpen] = useState(true);
 
   /**
    * Coleção da marca ativa — a curadoria manual.
@@ -702,6 +714,17 @@ export default function Home() {
   const [collectionRefs, setCollectionRefs] = useState<Reference[]>([]);
   const [collectionName, setCollectionName] = useState("");
   const [collectionLoading, setCollectionLoading] = useState(false);
+  /**
+   * Coleção ativa. Vazio = "a da marca conectada" (chave = brandId, como sempre foi).
+   * Uma coleção avulsa (`col_…`) não depende de marca nenhuma — curadoria também é
+   * feita fora de cliente ("referências de tipografia").
+   */
+  const [collectionId, setCollectionId] = useState("");
+  const [collections, setCollections] = useState<
+    { id: string; name: string; count: number; brandId?: string }[]
+  >([]);
+  /** Dialog de nome: `create` nasce vazio, `rename` nasce com o nome atual. */
+  const [nameDialog, setNameDialog] = useState<{ mode: "create" | "rename"; value: string } | null>(null);
   /** Aba do grid: o acervo inteiro ou só o que foi curado para a marca. */
   const [view, setView] = useState<"all" | "collection">("all");
   const [completions, setCompletions] = useState<Reference[]>([]);
@@ -986,7 +1009,8 @@ export default function Home() {
     if (a === "square" || a === "portrait" || a === "landscape") setAspect(a);
     const t = p.get("tags");
     if (t) setActiveTags(t.split(",").filter(Boolean).slice(0, 5));
-    if (p.get("tagMode") === "OR") setTagMode("OR");
+    // Só o AND vem na URL: ele é que é o desvio do padrão agora.
+    if (p.get("tagMode") === "AND") setTagMode("AND");
     const s = p.get("sort");
     if (s === "name" || s === "popular" || s === "shuffle") setSort(s);
     setUrlReady(true);
@@ -1000,7 +1024,7 @@ export default function Home() {
     if (aspect) p.set("aspect", aspect);
     if (activeTags.length) {
       p.set("tags", activeTags.join(","));
-      if (tagMode === "OR") p.set("tagMode", "OR");
+      if (tagMode === "AND") p.set("tagMode", "AND");
     }
     if (sort !== "popular") p.set("sort", sort);
     const qs = p.toString();
@@ -1126,14 +1150,33 @@ export default function Home() {
   // Recarrega quando a marca muda (volta ao limite base).
   useEffect(() => {
     setSuggestLimit(18);
+    setSuggestionsOpen(true); // marca nova ⇒ recomendações de novo à vista
     loadSuggestions({ limit: 18 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandId]);
 
-  // ------------------------------------------------------------ coleção da marca
+  // ------------------------------------------------------------ coleção (marca ou avulsa)
+
+  /** A chave que vai no servidor: a coleção escolhida à mão, ou a da marca conectada. */
+  const collectionKey = collectionId || brandId;
+
+  /** Lista do seletor. Recarregada depois de toda escrita que muda nome/contagem. */
+  const loadCollections = useCallback(async () => {
+    try {
+      const r = await fetch("/api/collections");
+      const d = await r.json();
+      if (r.ok) setCollections(d.collections || []);
+    } catch {
+      // Lista é conveniência: falhar em carregá-la não pode atrapalhar a curadoria.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCollections();
+  }, [loadCollections]);
 
   const loadCollection = useCallback(async () => {
-    if (!brandId) {
+    if (!collectionKey) {
       setCollectionIds(new Set());
       setCollectionRefs([]);
       setCollectionName("");
@@ -1141,7 +1184,7 @@ export default function Home() {
     }
     setCollectionLoading(true);
     try {
-      const r = await fetch(`/api/collections?brandId=${encodeURIComponent(brandId)}`);
+      const r = await fetch(`/api/collections?collectionId=${encodeURIComponent(collectionKey)}`);
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setCollectionRefs(d.references || []);
@@ -1154,14 +1197,18 @@ export default function Home() {
     } finally {
       setCollectionLoading(false);
     }
+  }, [collectionKey]);
+
+  // Trocar de marca solta a coleção avulsa: a marca nova traz a coleção dela.
+  useEffect(() => {
+    setCollectionId("");
   }, [brandId]);
 
   useEffect(() => {
     void loadCollection();
-    // Trocar de marca com a aba Coleção aberta não pode deixar o usuário olhando a
-    // coleção da marca anterior enquanto a nova carrega.
-    if (!brandId) setView("all");
-  }, [brandId, loadCollection]);
+    // Sem coleção ativa (nem marca, nem avulsa) a aba Coleção não tem o que mostrar.
+    if (!collectionKey) setView("all");
+  }, [collectionKey, loadCollection]);
 
   /**
    * Guardar/tirar da coleção. Otimista: o marcador acende na hora e volta atrás se o
@@ -1170,7 +1217,7 @@ export default function Home() {
    */
   const toggleCollection = useCallback(
     async (mockup: Reference) => {
-      if (!brandId) return;
+      if (!collectionKey) return;
       const member = !collectionIds.has(mockup.id);
       setCollectionIds((prev) => {
         const next = new Set(prev);
@@ -1185,7 +1232,7 @@ export default function Home() {
         const r = await fetch("/api/collections", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ brandId, ids: [mockup.id], member }),
+          body: JSON.stringify({ collectionId: collectionKey, ids: [mockup.id], member }),
         });
         if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
         // Desfazer em vez de confirmar. Tirar da coleção é reversível, então pedir
@@ -1205,7 +1252,7 @@ export default function Home() {
         void loadCollection();
       }
     },
-    [brandId, collectionIds, loadCollection],
+    [collectionKey, collectionIds, loadCollection],
   );
   // O desfazer chama a própria callback, que ainda não existe quando ela é criada.
   // O ref quebra o ciclo sem custar a identidade estável de que o card memoizado depende.
@@ -1215,12 +1262,12 @@ export default function Home() {
   /** Curar em lote o que já está selecionado no grid. */
   const addSelectionToCollection = useCallback(
     async (ids: string[]) => {
-      if (!brandId || !ids.length) return;
+      if (!collectionKey || !ids.length) return;
       try {
         const r = await fetch("/api/collections", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ brandId, ids, member: true }),
+          body: JSON.stringify({ collectionId: collectionKey, ids, member: true }),
         });
         if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
         await loadCollection();
@@ -1229,7 +1276,7 @@ export default function Home() {
         toast.error(`Não salvou na coleção: ${String((err as Error).message || err)}`);
       }
     },
-    [brandId, loadCollection],
+    [collectionKey, loadCollection],
   );
 
   /**
@@ -1269,13 +1316,13 @@ export default function Home() {
    */
   const applyOrder = useCallback(
     async (ids: string[]) => {
-      if (!brandId) return;
+      if (!collectionKey) return;
       setCollectionRefs((prev) => ids.map((id) => prev.find((r) => r.id === id)!).filter(Boolean));
       try {
         const r = await fetch("/api/collections", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ brandId, order: ids }),
+          body: JSON.stringify({ collectionId: collectionKey, order: ids }),
         });
         if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
       } catch (err) {
@@ -1283,13 +1330,13 @@ export default function Home() {
         void loadCollection();
       }
     },
-    [brandId, loadCollection],
+    [collectionKey, loadCollection],
   );
 
   /** Reordenar arrastando. */
   const dropOn = useCallback(
     async (targetId: string) => {
-      if (!dragId || dragId === targetId || !brandId) return;
+      if (!dragId || dragId === targetId || !collectionKey) return;
       const ids = collectionRefs.map((r) => r.id);
       const from = ids.indexOf(dragId);
       const to = ids.indexOf(targetId);
@@ -1298,8 +1345,88 @@ export default function Home() {
       setDragId(null);
       await applyOrder(ids);
     },
-    [dragId, brandId, collectionRefs, applyOrder],
+    [dragId, collectionKey, collectionRefs, applyOrder],
   );
+
+  /**
+   * Nome que aparece na aba. O default do servidor é neutro ("Coleção") porque ele
+   * não conhece marca nenhuma — quem sabe o nome da marca é aqui. Antes o servidor
+   * mandava "Coleção 69e8e78b51a13978c9bc90d8" e o id de banco ia parar na tela.
+   */
+  const collectionLabel = useMemo(() => {
+    if (collectionName && collectionName !== "Coleção") return collectionName;
+    const owner = collections.find((c) => c.id === collectionKey)?.brandId || (collectionId ? "" : brandId);
+    const brand = owner ? brands.find((b) => b.id === owner) : undefined;
+    return brand ? `Coleção ${brand.name}` : "Coleção";
+  }, [collectionName, collections, collectionKey, collectionId, brandId, brands]);
+
+  /** Carregando e ainda sem nada para mostrar — não vale reservar altura de card. */
+  const suggestionsPending = loadingSuggestions && suggestions.length === 0;
+
+  /** Opções do seletor: as coleções do disco ⊕ a da marca conectada (que pode ainda não existir). */
+  const collectionOptions = useMemo(() => {
+    const nameOf = (c: { id: string; name: string; brandId?: string }) => {
+      if (c.name && c.name !== "Coleção") return c.name;
+      const brand = c.brandId ? brands.find((b) => b.id === c.brandId) : undefined;
+      return brand ? `Coleção ${brand.name}` : "Coleção";
+    };
+    const opts = collections.map((c) => ({ value: c.id, label: nameOf(c), hint: c.count }));
+    if (brandId && !collections.some((c) => c.id === brandId)) {
+      const brand = brands.find((b) => b.id === brandId);
+      opts.unshift({ value: brandId, label: brand ? `Coleção ${brand.name}` : "Coleção", hint: 0 });
+    }
+    return opts;
+  }, [collections, brands, brandId]);
+
+  /** Cria (avulsa, sem exigir marca) ou renomeia — o mesmo diálogo, um caminho de escrita. */
+  const submitCollectionName = useCallback(async () => {
+    if (!nameDialog) return;
+    const name = nameDialog.value.trim();
+    try {
+      if (nameDialog.mode === "create") {
+        const r = await fetch("/api/collections", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ create: true, name }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+        setCollectionId(d.collection.id);
+        setView("collection");
+      } else {
+        if (!collectionKey) return;
+        const r = await fetch("/api/collections", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ collectionId: collectionKey, name }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+        setCollectionName(d.name || "");
+      }
+      setNameDialog(null);
+      await loadCollections();
+    } catch (err) {
+      toast.error(`Não deu para salvar o nome: ${String((err as Error).message || err)}`);
+    }
+  }, [nameDialog, collectionKey, loadCollections]);
+
+  /** Apagar existe porque criar avulsa existe — senão o seletor só acumula lixo. */
+  const removeCollection = useCallback(async () => {
+    if (!collectionKey) return;
+    try {
+      const r = await fetch(`/api/collections?collectionId=${encodeURIComponent(collectionKey)}`, {
+        method: "DELETE",
+      });
+      if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
+      setCollectionId("");
+      setView("all");
+      await loadCollections();
+      toast.success("Coleção apagada");
+    } catch (err) {
+      toast.error(`Não deu para apagar: ${String((err as Error).message || err)}`);
+    }
+  }, [collectionKey, loadCollections]);
 
   const [assetError, setAssetError] = useState<string | null>(null);
 
@@ -2616,6 +2743,92 @@ export default function Home() {
         </div>
       </header>
 
+      {/* O RECORTE ATIVO MORA NO HEADER.
+          Ele já esteve em dois lugares ao mesmo tempo — um bloco "Filtros ativos"
+          na sidebar esquerda e uma barra de chips dentro do `<main>` — e nenhum
+          dos dois funcionava: a sidebar é colapsável (some o estado justo quando
+          se ganha espaço) e o `<main>` ROLA, então a barra saía de vista no
+          primeiro scroll e o grid passava a mostrar um recorte sem dizer que era
+          um recorte — o acervo parecia ter encolhido. Aqui é uma faixa irmã do
+          header, fora de todo container de rolagem: enquanto houver filtro, ele
+          está na tela, na mesma zona onde se busca e se limpa. Sem filtro, a
+          faixa não existe (altura zero, não uma barra vazia). */}
+      {hasActiveFilters && !initialLoad && (
+        <div className="shrink-0 z-10 border-b border-neutral-900 bg-neutral-950/50 backdrop-blur-md px-4 py-2 flex flex-wrap items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+          <span className="text-[10px] text-neutral-500 shrink-0">Filtrando por</span>
+          {[
+            search && { k: "q", label: `“${search}”`, clear: () => { setSearch(""); if (searchInputRef.current) searchInputRef.current.value = ""; } },
+            studio && { k: "studio", label: studio, clear: () => setStudio("") },
+            aspect && {
+              k: "aspect",
+              label: aspect === "square" ? "1:1" : aspect === "portrait" ? "Retrato" : "Paisagem",
+              clear: () => setAspect(""),
+            },
+            imageSearch && { k: "img", label: "Imagem parecida", clear: clearImageSearch },
+            similarTo && {
+              k: "similar",
+              label: `Parecidos com ${similarTo.name}${similarTo.mode === "lexical" ? " (por tags)" : ""}`,
+              clear: clearSimilar,
+            },
+            ...activeTags.map((t) => ({ k: `tag-${t}`, label: t, clear: () => toggleTag(t) })),
+          ]
+            .filter(Boolean)
+            .map((f) => {
+              const chip = f as { k: string; label: string; clear: () => void };
+              return (
+                <button
+                  key={chip.k}
+                  onClick={chip.clear}
+                  title="Remover este filtro"
+                  className="group inline-flex items-center gap-1.5 h-7 pl-3 pr-2 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-bold text-neutral-300 hover:border-neutral-600 hover:text-white transition-colors active:scale-95"
+                >
+                  <span className="max-w-[14rem] truncate">{chip.label}</span>
+                  <X className="w-3 h-3 text-neutral-500 group-hover:text-white transition-colors" />
+                </button>
+              );
+            })}
+
+          {/* O seletor só aparece quando há duas tags — antes disso não existe
+              diferença entre unir e cruzar, e um controle que não muda nada é
+              ruído. Rótulo diz o EFEITO, não a operação booleana: quem filtra
+              quer "qualquer uma" ou "todas", não AND e OR. */}
+          {activeTags.length > 1 && (
+            <div
+              role="group"
+              aria-label="Como combinar as tags"
+              className="flex shrink-0 rounded-full bg-neutral-900 border border-neutral-800 p-0.5"
+            >
+              {([
+                { m: "OR", label: "Qualquer uma", dica: "Mostra o que tem QUALQUER UMA das tags — cada tag a mais amplia o recorte" },
+                { m: "AND", label: "Todas", dica: "Mostra só o que tem TODAS as tags — cada tag a mais afunila o recorte" },
+              ] as const).map(({ m, label, dica }) => (
+                <button
+                  key={m}
+                  onClick={() => setTagMode(m)}
+                  aria-pressed={tagMode === m}
+                  title={dica}
+                  className={`text-[9px] font-semibold px-2.5 py-1 rounded-full transition-colors ${
+                    tagMode === m ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <button
+            onClick={clearAllFilters}
+            /* Sem `ml-auto`: encostado na borda direita de uma tela de 1920 ele
+               fica a um metro do último chip e o olho não liga os dois. A ação
+               de limpar pertence ao FIM DA LISTA que ela limpa. */
+            className="h-7 px-3 rounded-full text-[9px] font-semibold text-neutral-500 hover:text-white transition-colors shrink-0"
+          >
+            Limpar tudo
+          </button>
+        </div>
+      )}
+
       <PanelGroup orientation="horizontal" className="flex-1 min-h-0 w-full">
         {/* Left Sidebar: Catalog & Filters */}
         <Panel
@@ -2778,51 +2991,11 @@ export default function Home() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-4 min-h-0 space-y-8 no-scrollbar">
-            {activeTags.length > 0 && (
-              <div className="animate-in fade-in zoom-in duration-300">
-                <div className="flex items-center justify-between mb-2 px-1">
-                  <p className="text-[11px] font-medium text-neutral-400">
-                    Filtros ativos ({activeTags.length}/{MAX_TAGS})
-                  </p>
-                  <div className="flex items-center gap-2">
-                    {activeTags.length > 1 && (
-                      <div className="flex rounded-full bg-neutral-900 border border-neutral-800 p-0.5">
-                        {(["AND", "OR"] as const).map((m) => (
-                          <button
-                            key={m}
-                            onClick={() => setTagMode(m)}
-                            className={`text-[9px] font-semibold px-2.5 py-1 rounded-full transition-colors ${
-                              tagMode === m ? "bg-white text-black" : "text-neutral-500 hover:text-neutral-300"
-                            }`}
-                          >
-                            {m === "AND" ? "E" : "OU"}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <button
-                      onClick={() => setActiveTags([])}
-                      className="text-[9px] font-semibold text-neutral-500 hover:text-neutral-300 transition-colors"
-                    >
-                      Limpar
-                    </button>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {activeTags.map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => toggleTag(t)}
-                      className="inline-flex items-center gap-2 bg-white text-black text-[10px] font-semibold px-3.5 py-1.5 rounded-full hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] shadow-xl active:scale-95"
-                    >
-                      {t}
-                      <X className="w-3 h-3" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
+            {/* O bloco "Filtros ativos" saiu daqui: as tags ligadas agora vivem
+                na faixa do header (uma cópia só, sempre visível, mesmo com esta
+                sidebar colapsada). O que sobra aqui é a ESCOLHA — a taxonomia —,
+                e cada dimensão continua marcando na própria linha quantas tags
+                dela estão ligadas. */}
             <div className="pb-10">
               {/* Eyebrows saíram do `font-black uppercase tracking-[0.2em]`: o
                   rótulo de uma seção da sidebar tinha o MESMO peso tipográfico do
@@ -2917,9 +3090,22 @@ export default function Home() {
         {/* Main Area: Grid */}
         <Panel className="relative flex flex-col bg-neutral-950 min-w-0 overflow-hidden">
           <main ref={gridScrollRef} className="flex-1 overflow-y-auto p-8 no-scrollbar">
-            {brandId && (
-              <div className="mb-8 animate-in fade-in slide-in-from-left-4 duration-300">
-                <div className="flex items-center justify-between mb-4">
+            {brandId && !suggestionsOpen && (
+              <button
+                onClick={() => setSuggestionsOpen(true)}
+                className="mb-6 flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[11px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                Ver sugeridos para {brands.find((b) => b.id === brandId)?.name}
+              </button>
+            )}
+
+            {brandId && suggestionsOpen && (
+              // Enquanto carrega ainda não há o que espaçar: o painel reservava a
+              // altura da fila de cards (mb-4 + pb-6 + mb-8) e o usuário olhava para
+              // um buraco entre o título e o grid. Espaço se abre com o conteúdo.
+              <div className={`${suggestionsPending ? "mb-4" : "mb-8"} animate-in fade-in slide-in-from-left-4 duration-300`}>
+                <div className={`flex items-center justify-between ${suggestionsPending ? "" : "mb-4"}`}>
                   {/* O peso vai no NOME DA MARCA, que é o dado que o usuário
                       precisa confirmar. Antes ia no adjetivo: "MATCHES
                       INTELIGENTES" em font-medium, com
@@ -2948,12 +3134,14 @@ export default function Home() {
                       <RefreshCw className={`w-3.5 h-3.5 ${loadingSuggestions ? "animate-spin" : ""}`} />
                       Regenerar
                     </button>
-                    <button onClick={() => setBrandId("")} className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"><X className="w-4 h-4" /></button>
+                    {/* Fecha o PAINEL — a marca continua conectada (coleção, aba
+                        Coleção e logo dependem dela). Desconectar é no seletor. */}
+                    <button onClick={() => setSuggestionsOpen(false)} title="Fechar as recomendações (a marca continua conectada)" className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"><X className="w-4 h-4" /></button>
                   </div>
                 </div>
                 {suggestError ? (
                   <div className="p-5 bg-red-500/5 border border-red-500/10 rounded-2xl text-[11px] text-red-400 font-bold flex items-center gap-3"><AlertTriangle className="w-5 h-5" /> {suggestError}</div>
-                ) : !loadingSuggestions && suggestions.length === 0 ? (
+                ) : suggestionsPending ? null : !loadingSuggestions && suggestions.length === 0 ? (
                   <div className="p-8 rounded-2xl border border-dashed border-neutral-900 flex flex-col items-center gap-3 opacity-40">
                     <Zap className="w-8 h-8" />
                     <p className="text-xs font-semibold text-center">Nenhuma recomendação disponível para os ativos atuais desta marca.</p>
@@ -2993,68 +3181,28 @@ export default function Home() {
               </div>
             )}
 
-            {/* Filtros ativos ONDE O OLHO ESTÁ.
-                Eles moram na sidebar esquerda, que o usuário colapsa — e aí o
-                grid mostra um recorte sem dizer que é um recorte, o que faz
-                parecer que o acervo encolheu. Aqui só rendeiza o que está
-                LIGADO: filtro nenhum, barra nenhuma. */}
-            {hasActiveFilters && !initialLoad && (
-              <div className="flex flex-wrap items-center gap-2 mb-6 animate-in fade-in slide-in-from-top-1 duration-200">
-                <span className="text-[10px] text-neutral-500">
-                  Filtrando por
-                </span>
-                {[
-                  search && { k: "q", label: `“${search}”`, clear: () => { setSearch(""); if (searchInputRef.current) searchInputRef.current.value = ""; } },
-                  studio && { k: "studio", label: studio, clear: () => setStudio("") },
-                  aspect && {
-                    k: "aspect",
-                    label: aspect === "square" ? "1:1" : aspect === "portrait" ? "Retrato" : "Paisagem",
-                    clear: () => setAspect(""),
-                  },
-                  imageSearch && { k: "img", label: "Imagem parecida", clear: clearImageSearch },
-                  similarTo && {
-                    k: "similar",
-                    label: `Parecidos com ${similarTo.name}${similarTo.mode === "lexical" ? " (por tags)" : ""}`,
-                    clear: clearSimilar,
-                  },
-                  ...activeTags.map((t) => ({ k: `tag-${t}`, label: t, clear: () => toggleTag(t) })),
-                ]
-                  .filter(Boolean)
-                  .map((f) => {
-                    const chip = f as { k: string; label: string; clear: () => void };
-                    return (
-                      <button
-                        key={chip.k}
-                        onClick={chip.clear}
-                        title="Remover este filtro"
-                        className="group inline-flex items-center gap-1.5 h-7 pl-3 pr-2 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-bold text-neutral-300 hover:border-neutral-600 hover:text-white transition-colors active:scale-95"
-                      >
-                        <span className="max-w-[14rem] truncate">{chip.label}</span>
-                        <X className="w-3 h-3 text-neutral-500 group-hover:text-white transition-colors" />
-                      </button>
-                    );
-                  })}
-                <button
-                  onClick={clearAllFilters}
-                  className="h-7 px-3 rounded-full text-[9px] font-semibold text-neutral-500 hover:text-white transition-colors"
-                >
-                  Limpar tudo
-                </button>
-              </div>
-            )}
+            {/* A barra de filtros ativos que ficava AQUI subiu para o header:
+                dentro do `<main>` ela rolava junto com o grid e sumia no
+                primeiro scroll, que é exatamente quando o usuário mais precisa
+                lembrar que está vendo um recorte. */}
 
-            {/* Acervo ⟷ Coleção. Só aparece com marca selecionada, porque sem marca não
-                existe coleção para curar — e uma aba que só sabe dizer "escolha uma marca"
-                é um controle que ocupa espaço sem oferecer ação. */}
-            {brandId && (
+            {/* Acervo ⟷ Coleção. Aparece com marca conectada OU com qualquer coleção
+                existente: curadoria avulsa ("referências de tipografia") não depende de
+                cliente nenhum, e antes ela era impossível — coleção só nascia de marca. */}
+            {(collectionKey || collections.length > 0) && (
               <div className="flex items-center gap-2 mb-4">
                 {([
                   { k: "all", label: "Acervo", count: totalDistinct },
-                  { k: "collection", label: collectionName || "Coleção", count: collectionIds.size },
+                  { k: "collection", label: collectionLabel, count: collectionIds.size },
                 ] as const).map(({ k, label, count }) => (
                   <button
                     key={k}
-                    onClick={() => setView(k)}
+                    onClick={() => {
+                      // Sem marca conectada, "Coleção" precisa apontar para alguma:
+                      // uma aba que abre vazia porque nada foi escolhido é um beco.
+                      if (k === "collection" && !collectionKey && collections[0]) setCollectionId(collections[0].id);
+                      setView(k);
+                    }}
                     aria-pressed={view === k}
                     className={`h-8 px-3.5 rounded-full text-[10px] font-bold transition-colors inline-flex items-center gap-2 ${
                       view === k ? "bg-white text-black" : "text-neutral-400 hover:text-white bg-neutral-900 border border-neutral-800"
@@ -3062,9 +3210,64 @@ export default function Home() {
                   >
                     {k === "collection" && <Bookmark className="w-3 h-3" />}
                     <span className="max-w-[14rem] truncate">{label}</span>
-                    <span className={view === k ? "text-black/50" : "text-neutral-600"}>{count.toLocaleString()}</span>
+                    {/* text-neutral-600 sobre neutral-900 dá 2.29:1 — o portão visual
+                        pegou. Contagem é dado, não decoração: precisa ser legível. */}
+                    <span className={view === k ? "text-black/50" : "text-neutral-500"}>{count.toLocaleString()}</span>
                   </button>
                 ))}
+
+                {/* Trocar de coleção. Só dentro da aba Coleção (no Acervo ele repetiria
+                    o rótulo da aba sem fazer nada) e só com mais de uma — seletor de um
+                    item só é enfeite. A coleção da marca conectada entra na lista mesmo
+                    sem existir ainda no disco: é para onde o marcador do card escreve. */}
+                {view === "collection" && collectionOptions.length > 1 && (
+                  <Select
+                    value={collectionKey}
+                    onChange={(v) => { setCollectionId(v === brandId ? "" : v); setView("collection"); }}
+                    options={collectionOptions}
+                    ariaLabel="Trocar de coleção"
+                    placeholder="Trocar de coleção"
+                    boxed
+                    // O gatilho é `w-full` por padrão (nasceu para sidebar/painel).
+                    // Numa fila de pílulas isso o faz engolir a linha inteira.
+                    className="h-8 w-auto max-w-[16rem] rounded-full text-[10px]"
+                  />
+                )}
+
+                <button
+                  onClick={() => setNameDialog({ mode: "create", value: "" })}
+                  title="Nova coleção (não precisa de marca)"
+                  aria-label="Nova coleção"
+                  className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+                >
+                  <FolderPlus className="w-3.5 h-3.5" />
+                </button>
+
+                {view === "collection" && collectionKey && (
+                  <>
+                    <button
+                      onClick={() => setNameDialog({ mode: "rename", value: collectionName === "Coleção" ? "" : collectionName })}
+                      title="Renomear esta coleção"
+                      aria-label="Renomear coleção"
+                      className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    {/* Só coleção avulsa some daqui: a da marca é o destino padrão do
+                        marcador do card — apagá-la por engano tiraria o chão do grid. */}
+                    {collectionKey.startsWith("col_") && (
+                      <button
+                        onClick={() => void removeCollection()}
+                        title="Apagar esta coleção"
+                        aria-label="Apagar coleção"
+                        className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-red-400 hover:border-red-500/40 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </>
+                )}
+
                 {view === "collection" && collectionIds.size > 0 && (
                   <span className="text-[10px] text-neutral-500">
                     arraste ou use alt+seta para reordenar, a ordem é sua
@@ -3321,10 +3524,10 @@ export default function Home() {
                           onSelect={selectRef}
                           onApply={handleCardApply}
                           onHide={hideMockup}
-                          onToggleCollection={brandId ? toggleCollection : undefined}
+                          onToggleCollection={collectionKey ? toggleCollection : undefined}
                           onSimilar={showSimilar}
                           inCollection={collectionIds.has(ref.id)}
-                          collectionLabel={collectionName || "coleção da marca"}
+                          collectionLabel={collectionLabel}
                         />
                       </div>
                     )}
@@ -3381,7 +3584,7 @@ export default function Home() {
                             onToggleCollection={toggleCollection}
                             onSimilar={showSimilar}
                             inCollection={collectionIds.has(ref.id)}
-                            collectionLabel={collectionName || "coleção da marca"}
+                            collectionLabel={collectionLabel}
                           />
                         )}
                       />
@@ -3424,10 +3627,10 @@ export default function Home() {
                           onSelect={selectRef}
                           onApply={handleCardApply}
                           onHide={hideMockup}
-                          onToggleCollection={brandId ? toggleCollection : undefined}
+                          onToggleCollection={collectionKey ? toggleCollection : undefined}
                           onSimilar={showSimilar}
                           inCollection={collectionIds.has(ref.id)}
-                          collectionLabel={collectionName || "coleção da marca"}
+                          collectionLabel={collectionLabel}
                         />
                       )}
                     />
@@ -4115,6 +4318,50 @@ export default function Home() {
       {/* Advanced Settings Modal — Radix: foco preso, ESC, rolagem do fundo travada
           e `aria-modal`. A versão à mão não tinha nada disso: Tab saía para o grid
           atrás e o leitor de tela nunca soube que havia um diálogo. */}
+      {/* Nome da coleção — criar avulsa e renomear são a MESMA tela: o único dado
+          é o nome, e duas telas para um campo divergiriam no primeiro conserto. */}
+      <Dialog open={!!nameDialog} onOpenChange={(o) => !o && setNameDialog(null)}>
+        <DialogContent
+          title={nameDialog?.mode === "rename" ? "Renomear coleção" : "Nova coleção"}
+          skin="neutral"
+          showClose={false}
+          className="w-[min(24rem,92vw)] rounded-2xl overflow-hidden"
+        >
+          <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/30">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-neutral-800 flex items-center justify-center">
+                <Bookmark className="w-4 h-4 text-neutral-300" />
+              </div>
+              <p className="text-sm font-semibold text-white">
+                {nameDialog?.mode === "rename" ? "Renomear coleção" : "Nova coleção"}
+              </p>
+            </div>
+            <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
+              <X className="w-4 h-4" />
+            </DialogClose>
+          </div>
+          <div className="p-5 flex flex-col gap-3">
+            <input
+              autoFocus
+              value={nameDialog?.value ?? ""}
+              onChange={(e) => setNameDialog((d) => (d ? { ...d, value: e.target.value } : d))}
+              onKeyDown={(e) => { if (e.key === "Enter") void submitCollectionName(); }}
+              placeholder="Referências de tipografia"
+              className="w-full h-10 px-3 rounded-xl bg-neutral-900 border border-neutral-800 text-sm text-white placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600"
+            />
+            <p className="text-[10px] text-neutral-500">
+              Coleção avulsa não precisa de marca — vira o destino do marcador enquanto estiver ativa.
+            </p>
+            <button
+              onClick={() => void submitCollectionName()}
+              className="h-10 rounded-xl bg-white text-black text-[11px] font-bold hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
+            >
+              {nameDialog?.mode === "rename" ? "Salvar nome" : "Criar coleção"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
         <DialogContent title="Configurações avançadas" skin="neutral" showClose={false}
           className="w-[min(24rem,92vw)] rounded-2xl overflow-hidden">

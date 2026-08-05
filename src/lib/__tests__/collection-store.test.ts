@@ -81,7 +81,7 @@ describe("collection-store", () => {
     const { setMembers, renameCollection, defaultCollectionName } = await freshStore();
     await setMembers("acme", ["a"], true);
     expect((await renameCollection("acme", "Campanha 2026")).name).toBe("Campanha 2026");
-    expect((await renameCollection("acme", "   ")).name).toBe(defaultCollectionName("acme"));
+    expect((await renameCollection("acme", "   ")).name).toBe(defaultCollectionName());
   });
 
   it("note vazio remove o campo em vez de gravar string vazia", async () => {
@@ -130,6 +130,54 @@ describe("collection-store", () => {
     const col = await getCollection("acme");
     expect(col?.name).toBe("Acme");
     expect(col && ids(col)).toEqual(["a"]);
+  });
+
+  it("nome legado com o id da marca conta como default, não como escolha do usuário", async () => {
+    mkdirSync(join(ROOT, "data"), { recursive: true });
+    writeFileSync(
+      FILE,
+      JSON.stringify({
+        version: 1,
+        collections: {
+          "69e8e78b51a13978c9bc90d8": {
+            name: "Coleção 69e8e78b51a13978c9bc90d8",
+            items: [{ id: "a", addedAt: 1 }],
+            updatedAt: 1,
+          },
+          globex: { name: "Campanha 2026", items: [], updatedAt: 2 },
+        },
+      }),
+    );
+    const { getCollection } = await freshStore();
+    // O id de banco não pode vazar para a tela como se fosse nome.
+    expect((await getCollection("69e8e78b51a13978c9bc90d8"))?.name).toBe("Coleção");
+    // Nome de gente continua intacto.
+    expect((await getCollection("globex"))?.name).toBe("Campanha 2026");
+  });
+
+  it("cria coleção avulsa (sem marca) e ela convive com as de marca", async () => {
+    const { createCollection, setMembers, getCollection, listCollections } = await freshStore();
+    await setMembers("acme", ["a"], true);
+    const avulsa = await createCollection("Referências de tipografia");
+    expect(avulsa.id.startsWith("col_")).toBe(true);
+    expect(avulsa.brandId).toBeUndefined();
+
+    // A chave que não é `col_…` é brandId — é assim que a lista sabe de quem é.
+    expect((await getCollection("acme"))?.brandId).toBe("acme");
+    expect((await getCollection(avulsa.id))?.brandId).toBeUndefined();
+
+    const items = await setMembers(avulsa.id, ["x", "y"], true);
+    expect(ids(items)).toEqual(["x", "y"]);
+    expect((await listCollections()).map((c) => c.id).sort()).toEqual([avulsa.id, "acme"].sort());
+  });
+
+  it("apagar tira a coleção do arquivo; apagar o que não existe é false", async () => {
+    const { createCollection, deleteCollection, getCollection } = await freshStore();
+    const col = await createCollection("Temporária");
+    expect(await deleteCollection(col.id)).toBe(true);
+    expect(await getCollection(col.id)).toBeNull();
+    expect(await deleteCollection(col.id)).toBe(false);
+    expect(JSON.parse(readFileSync(FILE, "utf8")).collections[col.id]).toBeUndefined();
   });
 
   it("brandId inválido não escreve nada", async () => {

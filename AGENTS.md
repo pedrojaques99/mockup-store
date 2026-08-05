@@ -63,6 +63,13 @@ npx tsx --env-file=.env.local scripts/brand-mockup-batch.ts \
 A coleção por marca (marcador no card → `data/brand-collections.json`) vira entrega
 num comando, sem redigitar a marca nem clicar 20 vezes:
 
+> **Chave da coleção**: é o `brandId` (coleção da marca) **ou** um `col_…` (coleção
+> avulsa, criada na home pelo botão de pasta — não precisa de marca). A API aceita
+> `collectionId` e, por compat, `brandId`. `brand-kit --collection` continua sendo
+> por marca. O nome default é neutro ("Coleção") e quem exibe o nome da marca é a UI:
+> o servidor não conhece marca, e o antigo default `Coleção <id>` vazava id de banco
+> para a tela.
+
 ```
 npx tsx --env-file=.env.local scripts/brand-kit.ts \
   --brand <visantId> --collection --layouts "<dir criativos>" --out "<dir>"

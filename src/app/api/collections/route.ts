@@ -1,20 +1,29 @@
 /**
- * Coleção curada por marca. Espelha `api/references/hide/route.ts`.
+ * Coleções curadas. Espelha `api/references/hide/route.ts`.
  *
- * GET   ?brandId=  → { brandId, name, items, references } — cards hidratados por
- *                    `refsByIds` (ORDEM PRESERVADA: a ordem é a curadoria).
- * GET   (sem id)   → { counts } — para o badge do seletor de marca.
- * POST  { brandId, ids?|id?, member } → { brandId, items } — toggle em lote.
- * PATCH { brandId, order?, name?, note? } → { brandId, name, items }.
+ * A chave de uma coleção é o `brandId` (coleção da marca) **ou** um `col_…`
+ * (coleção avulsa, sem marca). Toda rota aceita `collectionId` e, por compat,
+ * `brandId` — são a mesma chave, e o cliente antigo continua funcionando.
  *
- * Marca sem coleção não é 404: é uma coleção vazia com nome derivado. A aba
- * "Coleção" precisa abrir e dizer "ainda não tem nada aqui", não quebrar.
+ * GET    ?collectionId=|?brandId= → { id, brandId, name, items, references }
+ *                                   (cards por `refsByIds`; ORDEM PRESERVADA — é a curadoria)
+ * GET    (sem id)                 → { counts, collections } — badge do seletor + lista
+ * POST   { create: true, name?, brandId? }        → { collection } (avulsa)
+ * POST   { collectionId, ids?|id?, member }       → { id, items } — toggle em lote
+ * PATCH  { collectionId, order?, name?, note? }   → { id, name, items }
+ * DELETE ?collectionId=                           → { deleted }
+ *
+ * Coleção inexistente não é 404 no GET: é uma coleção vazia com nome default. A
+ * aba "Coleção" precisa abrir e dizer "ainda não tem nada aqui", não quebrar.
  */
 import { NextRequest, NextResponse } from "next/server";
 import {
   collectionCounts,
+  createCollection,
   defaultCollectionName,
+  deleteCollection,
   getCollection,
+  listCollections,
   renameCollection,
   reorder,
   setMembers,
@@ -35,17 +44,33 @@ function boom(err: unknown) {
   return fail(err instanceof Error ? err.message : "erro inesperado", 500);
 }
 
+/** `collectionId` é o nome novo; `brandId` continua valendo e aponta para a mesma chave. */
+function keyOf(source: { collectionId?: unknown; brandId?: unknown }): string {
+  const { collectionId, brandId } = source;
+  if (typeof collectionId === "string" && collectionId) return collectionId;
+  if (typeof brandId === "string" && brandId) return brandId;
+  return "";
+}
+
 export async function GET(req: NextRequest) {
   try {
-    const brandId = req.nextUrl.searchParams.get("brandId");
-    if (!brandId) return NextResponse.json({ counts: await collectionCounts() });
+    const p = req.nextUrl.searchParams;
+    const id = keyOf({ collectionId: p.get("collectionId"), brandId: p.get("brandId") });
+    if (!id) {
+      return NextResponse.json({
+        counts: await collectionCounts(),
+        collections: await listCollections(),
+      });
+    }
 
-    const col = await getCollection(brandId);
+    const col = await getCollection(id);
     const items = col?.items ?? [];
     const references = await refsByIds(items.map((i) => i.id));
     return NextResponse.json({
-      brandId,
-      name: col?.name ?? defaultCollectionName(brandId),
+      id,
+      // O cliente legado lê `brandId` da resposta; para coleção de marca a chave É o brandId.
+      brandId: col?.brandId ?? (id.startsWith("col_") ? undefined : id),
+      name: col?.name ?? defaultCollectionName(),
       items,
       references,
     });
@@ -62,19 +87,33 @@ export async function POST(req: NextRequest) {
     return fail("body inválido");
   }
 
-  const { brandId, ids, id, member } = (body ?? {}) as {
-    brandId?: unknown; ids?: unknown; id?: unknown; member?: unknown;
+  const { create, name, ids, id, member, ...rest } = (body ?? {}) as {
+    create?: unknown; name?: unknown; ids?: unknown; id?: unknown; member?: unknown;
+    collectionId?: unknown; brandId?: unknown;
   };
-  if (typeof brandId !== "string" || !brandId) return fail("brandId obrigatório");
+
+  // Criar coleção avulsa: não exige marca — é o ponto da feature.
+  if (create) {
+    if (name !== undefined && typeof name !== "string") return fail("name deve ser string");
+    try {
+      const brandId = typeof rest.brandId === "string" && rest.brandId ? rest.brandId : undefined;
+      return NextResponse.json({ collection: await createCollection(name as string | undefined, brandId) });
+    } catch (err) {
+      return boom(err);
+    }
+  }
+
+  const key = keyOf(rest);
+  if (!key) return fail("collectionId (ou brandId) obrigatório");
   if (typeof member !== "boolean") return fail("member deve ser boolean");
 
   const list = strings(ids ?? id);
   try {
     // Lista vazia não é erro — devolve o estado atual e a UI segue.
     const col: BrandCollection | null = list.length
-      ? await setMembers(brandId, list, member)
-      : await getCollection(brandId);
-    return NextResponse.json({ brandId, items: col?.items ?? [] });
+      ? await setMembers(key, list, member)
+      : await getCollection(key);
+    return NextResponse.json({ id: key, brandId: col?.brandId, items: col?.items ?? [] });
   } catch (err) {
     return boom(err);
   }
@@ -88,10 +127,11 @@ export async function PATCH(req: NextRequest) {
     return fail("body inválido");
   }
 
-  const { brandId, order, name, note } = (body ?? {}) as {
-    brandId?: unknown; order?: unknown; name?: unknown; note?: unknown;
+  const { order, name, note, ...rest } = (body ?? {}) as {
+    order?: unknown; name?: unknown; note?: unknown; collectionId?: unknown; brandId?: unknown;
   };
-  if (typeof brandId !== "string" || !brandId) return fail("brandId obrigatório");
+  const key = keyOf(rest);
+  if (!key) return fail("collectionId (ou brandId) obrigatório");
   if (order === undefined && name === undefined && note === undefined) {
     return fail("nada para alterar: informe order, name ou note");
   }
@@ -109,15 +149,27 @@ export async function PATCH(req: NextRequest) {
 
   try {
     let col: BrandCollection | null = null;
-    if (order !== undefined) col = await reorder(brandId, strings(order));
-    if (name !== undefined) col = await renameCollection(brandId, name);
-    if (noteId) col = await setNote(brandId, noteId, noteText);
-    col ??= await getCollection(brandId);
+    if (order !== undefined) col = await reorder(key, strings(order));
+    if (name !== undefined) col = await renameCollection(key, name);
+    if (noteId) col = await setNote(key, noteId, noteText);
+    col ??= await getCollection(key);
     return NextResponse.json({
-      brandId,
-      name: col?.name ?? defaultCollectionName(brandId),
+      id: key,
+      brandId: col?.brandId,
+      name: col?.name ?? defaultCollectionName(),
       items: col?.items ?? [],
     });
+  } catch (err) {
+    return boom(err);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  const p = req.nextUrl.searchParams;
+  const key = keyOf({ collectionId: p.get("collectionId"), brandId: p.get("brandId") });
+  if (!key) return fail("collectionId obrigatório");
+  try {
+    return NextResponse.json({ deleted: await deleteCollection(key) });
   } catch (err) {
     return boom(err);
   }
