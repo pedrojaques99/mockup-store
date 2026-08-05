@@ -44,6 +44,8 @@ import { saveSession, loadSession, clearSession } from "@/stores/photoSession";
 import { runAiOp, AiOpError } from "@/lib/ai-op";
 import { Toaster, toast } from "sonner";
 import { Undo2, Redo2 } from "lucide-react";
+import { BoxyMark } from "@/components/BoxyMark";
+import { ACC, ACC2, ACC2_RGB } from "@/lib/brand";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1251,10 +1253,9 @@ function PhotoMockupPageInner() {
         {/* Left: brand + nav */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 pr-4 border-r border-zinc-800">
-            <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center shrink-0">
-              <div className="w-3.5 h-3.5 bg-black rounded-sm" />
-            </div>
-            <span className="text-sm font-black tracking-tighter uppercase text-white">Boxy Store</span>
+            {/* Sem `label` aqui: a aba ativa da nav ao lado já diz "Scene Maker".
+                Com o descritor, a mesma palavra aparecia duas vezes em 200px. */}
+            <BoxyMark />
           </div>
 
           <nav className="flex items-center gap-1">
@@ -1531,7 +1532,7 @@ function PhotoMockupPageInner() {
                             <div aria-hidden
                               style={{
                                 position: "absolute", inset: 0, pointerEvents: "none", opacity: 0.5,
-                                backgroundColor: maskTarget === "surface" ? "#3df27e" : maskTarget === "occluder" ? "#22d3ee" : "#a78bfa",
+                                backgroundColor: maskTarget === "surface" ? ACC2 : maskTarget === "occluder" ? ACC : "#a78bfa",
                                 WebkitMaskImage: `url(${maskUrlFor(maskTarget)!})`, maskImage: `url(${maskUrlFor(maskTarget)!})`,
                                 WebkitMaskSize: "100% 100%", maskSize: "100% 100%",
                                 WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat",
@@ -1556,7 +1557,7 @@ function PhotoMockupPageInner() {
                             <div className="absolute inset-0">
                               <BrushCanvas transparentImg patchMode imageUrl={baseSrc} imageW={imgDims.w} imageH={imgDims.h}
                                 brush={brushSize} eraseMode={false} apiRef={brushApiRef}
-                                tint={maskMode === "add" ? "61,242,126" : "248,113,113"}
+                                tint={maskMode === "add" ? ACC2_RGB : "248,113,113"}
                                 onChange={(url) => { if (url) applyMaskPatch(url); }} />
                             </div>
                           )}
@@ -1683,7 +1684,10 @@ function PhotoMockupPageInner() {
                   <button
                     onClick={() => setShowAiResult(v => !v)}
                     className={["absolute top-3 left-4 z-20 text-[11px] px-2 py-0.5 rounded-full backdrop-blur-sm flex items-center gap-1 transition-colors",
-                      showAiResult ? "bg-acc/80 text-white" : "bg-black/50 text-zinc-400 hover:text-white"].join(" ")}
+                      // Branco sobre o verde da marca dá ~2.6:1 e não passa em lugar
+                      // nenhum. Verde é cor CLARA: texto em cima é quase-preto
+                      // (guideline BOXY, seção acessibilidade).
+                      showAiResult ? "bg-acc text-zinc-950" : "bg-black/50 text-zinc-400 hover:text-white"].join(" ")}
                   >
                     <Wand2 size={9} /> {showAiResult ? "Visant" : "Original"}
                   </button>

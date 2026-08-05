@@ -67,6 +67,7 @@ import { Switch } from "@/components/ui/Switch";
 import { useContainerColumns } from "@/hooks/use-container-columns";
 import { Toaster, toast } from "sonner";
 import { pathOrigin } from "@/lib/path-origin";
+import { BoxyMark } from "@/components/BoxyMark";
 
 // Reveal-on-hover clássico (opacity-0 + group-hover) esconde a ação primária
 // pra sempre em tablet/touch (sem :hover) e não reage a foco de teclado — a
@@ -436,7 +437,7 @@ function SuggestionCard({
         )}
         
         {ref.psdPath && !isRendering && (
-          <span className="absolute top-2 right-2 bg-emerald-500/90 backdrop-blur-sm text-[8px] font-semibold px-1.5 py-0.5 rounded text-white">PSD</span>
+          <span className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-[8px] font-semibold px-1.5 py-0.5 rounded text-neutral-300">PSD</span>
         )}
 
         {isRendering && (
@@ -2383,6 +2384,18 @@ export default function Home() {
     (faces.length === 0 && psdInfo != null && psdInfo.smartObjects.length > 1 && !selectedSo);
 
   /**
+   * Já existe algum resultado na tela? É o que decide QUEM é a ação primária.
+   *
+   * Só UM botão verde por vez: verde é a única cor de ação da BOXY, e dois
+   * verdes ao mesmo tempo mandam o usuário escolher entre dois "clique aqui".
+   * Sem resultado, a ação é renderizar. Com preview, a ação é o botão explícito
+   * de gerar o PNG final (que chama exatamente o mesmo `handleRender(false)` —
+   * medido na tela: os dois ficavam verdes e faziam a mesma coisa). Com o final
+   * pronto, a ação é baixar. Em todos esses casos RENDER FINAL vira contorno.
+   */
+  const hasResult = Boolean(renderResult) && !rendering;
+
+  /**
    * Aviso de baixa resolução.
    *
    * As duas pontas já eram conhecidas — as dimensões internas do Smart Object
@@ -2431,10 +2444,9 @@ export default function Home() {
           </button>
           
           <div className="flex items-center gap-2 pr-2 sm:pr-4 border-r border-neutral-900 shrink-0">
-            <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center">
-              <div className="w-3.5 h-3.5 bg-black rounded-sm" />
-            </div>
-            <h1 className="text-sm font-black tracking-tighter uppercase hidden sm:block">Boxy Store</h1>
+            <h1 className="flex items-center">
+              <BoxyMark label="Store" />
+            </h1>
           </div>
 
           <Link
@@ -3580,7 +3592,7 @@ export default function Home() {
                       <button
                         onClick={copyRenderAsPng}
                         title="Copiar como PNG"
-                        className={`backdrop-blur shadow-xl w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 ${copiedPng ? "bg-emerald-500 text-black" : "bg-black/80 hover:bg-white hover:text-black text-white"}`}
+                        className={`backdrop-blur shadow-xl w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 ${copiedPng ? "bg-acc2 text-zinc-950" : "bg-black/80 hover:bg-white hover:text-black text-white"}`}
                       >
                         {copiedPng ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                       </button>
@@ -3755,7 +3767,11 @@ export default function Home() {
                     >
                       {artPreview ? (
                         <div onClick={(e) => e.stopPropagation()}>
+                          {/* `source`, não `full`: esta tela JÁ tem uma superfície
+                              grande logo acima (cena/render). Duas imagens grandes
+                              empilhadas obrigavam a montar o resultado de cabeça. */}
                           <ArtFramePanel
+                            variant="source"
                             artPreview={artPreview}
                             artDims={artDims}
                             frame={frame}
@@ -3848,10 +3864,19 @@ export default function Home() {
                 >
                   Preview Rápido
                 </button>
+                {/* Exatamente UM botão verde por vez, e ele é sempre o PRÓXIMO
+                    passo. Antes havia dois primários fortes competindo (branco
+                    sólido aqui, verde sólido no download) e o verde nem era o da
+                    marca. Feito o render final, este demote para contorno: quem
+                    passa a ser a ação é baixar o arquivo. */}
                 <button
                   onClick={() => handleRender(false)}
                   disabled={renderDisabled}
-                  className="flex-1 py-3 rounded-xl bg-white text-black font-semibold text-xs disabled:opacity-30 hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.97] shadow-xl shadow-white/5"
+                  className={`flex-1 py-3 rounded-xl font-semibold text-xs disabled:opacity-30 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.97] ${
+                    hasResult
+                      ? "border border-neutral-800 text-neutral-300 hover:bg-neutral-900 hover:text-white"
+                      : "bg-acc2 text-zinc-950 hover:bg-acc2/90 shadow-xl shadow-acc2/10"
+                  }`}
                 >
                   RENDER FINAL{faces.length > 1 ? ` · ${filledCount}/${faces.length}` : ""}
                 </button>
@@ -3871,7 +3896,7 @@ export default function Home() {
                 <a
                   href={renderResult}
                   download={`${selected.name.replace(/\s+/g, "_")}_mockup.png`}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400 transition-[color,background-color,transform] active:scale-[0.97] shadow-lg shadow-emerald-500/10"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-acc2 text-zinc-950 text-xs font-semibold hover:bg-acc2/90 transition-[color,background-color,transform] active:scale-[0.97] shadow-lg shadow-acc2/10"
                 >
                   <Download className="w-4 h-4" /> DOWNLOAD PNG
                 </a>
@@ -3883,7 +3908,7 @@ export default function Home() {
               {renderResult && !rendering && isPreviewResult && (
                 <button
                   onClick={() => handleRender(false)}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold hover:bg-emerald-500/25 transition-[color,background-color,border-color] active:scale-[0.97]"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-acc2 text-zinc-950 text-xs font-semibold hover:bg-acc2/90 transition-[color,background-color,border-color] active:scale-[0.97] shadow-lg shadow-acc2/10"
                 >
                   <Download className="w-4 h-4" /> GERAR PNG FINAL PARA BAIXAR
                 </button>
@@ -4049,7 +4074,7 @@ export default function Home() {
             <div className="flex gap-2">
               <button
                 onClick={(e) => { e.stopPropagation(); copyRenderAsPng(); }}
-                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 ${copiedPng ? "bg-emerald-500 text-black" : "bg-neutral-800 hover:bg-neutral-700 text-white"}`}
+                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 ${copiedPng ? "bg-acc2 text-zinc-950" : "bg-neutral-800 hover:bg-neutral-700 text-white"}`}
               >
                 {copiedPng ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copiedPng ? "Copiado!" : "Copiar PNG"}
               </button>

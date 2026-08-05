@@ -9,7 +9,7 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #161616; /* Ink Black da BOXY, não o #171717 do scaffolding */
 }
 
 /* ─── SSoT de motion ────────────────────────────────────────────────────────
@@ -85,21 +85,32 @@
   }
 }
 
-/* Boxy theme — TWO accents only. Everything else is chumbo (zinc) + off-white.
- *   acc  = cyan-blue  → interactive (sliders, links, info)
- *   acc2 = neon green → active / primary action / success
- *   ink  = warm off-white → highlights, primary-on-dark text
- * Generates bg-acc / text-acc / border-acc / accent-acc / ring-acc (and acc2/ink). */
+/* ─── Marca BOXY® ───────────────────────────────────────────────────────────
+ * SSoT: brand guideline 69e8e78b51a13978c9bc90d8 no Visant Labs. Os hex não são
+ * escolha de front-end — saíram dos arquivos da marca em `Z:\BOXY\@LOGO BOXY`
+ * (os SVGs) e do gradiente `Rodapé.png`. Plano: docs/PLAN-branding-boxy.md.
+ *
+ * A paleta da BOXY é mono-verde: não existe um segundo MATIZ para gastar. Então
+ * os dois acentos se separam por ÊNFASE, e o `acc` é o verde-folha do meio do
+ * gradiente da casa, não um ciano de fora da marca (era #22d3ee, e nenhuma peça
+ * da BOXY tem ciano).
+ *   acc  = verde-folha → transitório: em progresso, arraste-aqui, dica
+ *   acc2 = verde BOXY  → ação primária, estado ativo, confirmado
+ *   ink  = sage        → texto de destaque sobre escuro
+ *
+ * Contraste sobre #161616: acc 7.7:1, acc2 16.6:1, ink 13.4:1. O verde BOXY é
+ * cor CLARA — texto em cima dele é sempre quase-preto, nunca branco.
+ * Gera bg-acc / text-acc / border-acc / accent-acc / ring-acc (e acc2/ink). */
 @theme {
-  --color-acc: #22d3ee;
-  --color-acc2: #3df27e;
-  --color-ink: #f5f4f0;
+  --color-acc: #84b028;
+  --color-acc2: #bfff38;
+  --color-ink: #d7dfc6;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #161616; /* Ink Black */
+    --foreground: #d7dfc6; /* Sage */
   }
 }
 

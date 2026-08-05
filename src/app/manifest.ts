@@ -11,15 +11,19 @@ import type { MetadataRoute } from "next";
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "BOXY Mockup Store",
-    short_name: "BOXY",
+    name: "BOXY® Mockup Store",
+    short_name: "BOXY®",
     description: "Editor de mockups foto → arte (photo-mockup).",
     start_url: "/photo-mockup",
     display: "standalone",
-    background_color: "#0a0a0a",
-    theme_color: "#0a0a0a",
+    /* Ink Black e o verde da marca, não o `#0a0a0a` genérico. O ícone era o
+     * `/globe.svg` do scaffolding do Next: o app instalado no OS aparecia com o
+     * globinho do framework. Agora é o arquivo oficial `logo-boxy-icon.png`,
+     * copiado sem edição (também em `app/icon.png`, para o favicon). */
+    background_color: "#161616",
+    theme_color: "#BFFF38",
     icons: [
-      { src: "/globe.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+      { src: "/brand/boxy-symbol.png", sizes: "574x481", type: "image/png", purpose: "any" },
     ],
     file_handlers: [
       { action: "/photo-mockup", accept: { "application/octet-stream": [".vsn"] } },

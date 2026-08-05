@@ -9,6 +9,7 @@
  */
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useViewerZoom } from "@/components/viewer-zoom";
+import { ACC, ACC_RGB, ACC2, INK, OLIVE } from "@/lib/brand";
 
 type Role = "surface" | "occluder";
 type Pt = { x: number; y: number };
@@ -80,7 +81,7 @@ export default function PenMaskCanvas({
       const last = anchors[anchors.length - 1];
       ctx.save();
       ctx.setLineDash([k(4), k(4)]);
-      ctx.lineWidth = k(1.5); ctx.strokeStyle = "rgba(34,211,238,0.55)";
+      ctx.lineWidth = k(1.5); ctx.strokeStyle = `rgba(${ACC_RGB},0.55)`;
       ctx.beginPath();
       ctx.moveTo(last.x * s, last.y * s);
       ctx.lineTo(hover.current.x * s, hover.current.y * s);
@@ -88,22 +89,25 @@ export default function PenMaskCanvas({
       ctx.restore();
     }
     tracePath(ctx, anchors, closed, s);
-    if (closed) { ctx.fillStyle = "rgba(34,211,238,0.18)"; ctx.fill(); }
-    ctx.lineWidth = k(2); ctx.strokeStyle = "#22d3ee"; ctx.stroke();
-    ctx.lineWidth = k(1); ctx.strokeStyle = "#22d3ee";
+    // A caneta era toda da família ciano (#22d3ee / #67e8f9 / #0e7490), que não
+    // existe na paleta da BOXY. Vira a família verde mantendo a MESMA hierarquia
+    // de leitura: traço (acc) < alça de Bézier (sage) < âncora inicial (acc2).
+    if (closed) { ctx.fillStyle = `rgba(${ACC_RGB},0.18)`; ctx.fill(); }
+    ctx.lineWidth = k(2); ctx.strokeStyle = ACC; ctx.stroke();
+    ctx.lineWidth = k(1); ctx.strokeStyle = ACC;
     anchors.forEach((p) => {
       for (const hp of [p.hIn, p.hOut]) {
         if (!hp) continue;
         ctx.beginPath(); ctx.moveTo(p.x * s, p.y * s); ctx.lineTo(hp.x * s, hp.y * s); ctx.stroke();
-        ctx.fillStyle = "#67e8f9"; ctx.fillRect(hp.x * s - k(3), hp.y * s - k(3), k(6), k(6));
+        ctx.fillStyle = INK; ctx.fillRect(hp.x * s - k(3), hp.y * s - k(3), k(6), k(6));
       }
     });
     anchors.forEach((p, i) => {
       ctx.beginPath();
       ctx.arc(p.x * s, p.y * s, k(i === 0 && !closed ? 7 : 5), 0, Math.PI * 2);
-      ctx.fillStyle = i === 0 && !closed ? "#3df27e" : "#fff";
+      ctx.fillStyle = i === 0 && !closed ? ACC2 : "#fff";
       ctx.fill();
-      ctx.lineWidth = k(2); ctx.strokeStyle = "#0e7490"; ctx.stroke();
+      ctx.lineWidth = k(2); ctx.strokeStyle = OLIVE; ctx.stroke();
     });
   }, [anchors, closed, imageW, zoom]);
 

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
 import { ViewerZoomContext } from "./viewer-zoom";
+import { ACC2 } from "@/lib/brand";
 
 const MIN_SCALE = 0.4; // 40% min
 const MAX_SCALE = 32; // até 3200% — pixel peeping sem trava prática
@@ -242,7 +243,7 @@ export default function ZoomPanViewer({
           <div className="absolute bottom-6 right-6 z-20 rounded-lg overflow-hidden border border-zinc-700/60 shadow-lg" style={{ width: mmW, height: mmH }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={minimapSrc} alt="" aria-hidden draggable={false} className="w-full h-full object-contain opacity-80" />
-            <div style={{ position: "absolute", left: `${fx0 * 100}%`, top: `${fy0 * 100}%`, width: `${(fx1 - fx0) * 100}%`, height: `${(fy1 - fy0) * 100}%`, border: "1.5px solid #3df27e", boxShadow: "0 0 0 9999px rgba(0,0,0,0.4)" }} />
+            <div style={{ position: "absolute", left: `${fx0 * 100}%`, top: `${fy0 * 100}%`, width: `${(fx1 - fx0) * 100}%`, height: `${(fy1 - fy0) * 100}%`, border: `1.5px solid ${ACC2}`, boxShadow: "0 0 0 9999px rgba(0,0,0,0.4)" }} />
           </div>
         );
       })()}

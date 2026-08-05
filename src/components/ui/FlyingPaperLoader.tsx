@@ -18,8 +18,10 @@ import { DUR, EASE_OUT } from "@/lib/motion";
  *  · `framer-motion` → `motion/react` (o pacote instalado aqui).
  *  · O hook de glitch inline virou `<GlitchChars />` — a mesma primitiva do
  *    registry, uma implementação só.
- *  · `bg-brand-cyan` → `bg-acc`: o acento cyan deste projeto (#22d3ee), que é o
- *    mesmo papel na paleta. Nenhum hex novo.
+ *  · `bg-brand-cyan` → `bg-acc`: o acento de "em progresso" deste projeto, que é
+ *    o mesmo papel na paleta. Nenhum hex novo. (O `acc` era o ciano #22d3ee até
+ *    o app adotar a paleta da BOXY; hoje é o verde-folha #84b028. Como isto
+ *    sempre foi token e nunca hex, a troca chegou aqui de graça.)
  *
  * `prefers-reduced-motion`: os papéis param no meio do voo (a cena continua
  * legível como ilustração) e a barra de progresso continua — ela é informação,

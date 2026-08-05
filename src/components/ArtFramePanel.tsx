@@ -4,9 +4,18 @@
  * ArtFramePanel — shared fit-mode + crop UI for artwork placement.
  * Single source of truth used by both the Mockup Store and the Scene Maker.
  * All framing math lives in @/lib/art-frame; this is purely the control surface.
+ *
+ * `variant="source"` existe por um defeito de conceito, não por estética: no
+ * painel da Store este componente desenhava uma SEGUNDA imagem grande, logo
+ * abaixo da superfície que mostra a cena/o render. O resultado é que antes de
+ * renderizar o topo mostrava a cena SEM a arte e o bloco de baixo mostrava a
+ * arte SEM a cena — nenhuma das duas mostrava a coisa que o usuário está
+ * decidindo, e ajustar enquadramento virava editar num lugar e conferir no
+ * outro, rolando entre eles. Em `source` a arte é FONTE (miniatura + nome +
+ * controles) e o recorte abre sob demanda, então sobra uma superfície grande só.
  */
 import { useEffect, useState } from "react";
-import { Crop, Minimize2, Maximize2, X, AlertTriangle } from "lucide-react";
+import { Crop, Minimize2, Maximize2, X, AlertTriangle, SlidersHorizontal } from "lucide-react";
 import Cropper from "react-easy-crop";
 import type { Area } from "react-easy-crop";
 import {
@@ -29,6 +38,13 @@ export interface ArtFramePanelProps {
   previewHeightClass?: string;
   /** Compact mode shrinks the type scale for the floating panel. */
   compact?: boolean;
+  /**
+   * `"full"` desenha a imagem da arte em tamanho grande (Scene Maker, onde ela é
+   * a única superfície). `"source"` trata a arte como fonte: miniatura + nome +
+   * controles, e o recorte só aparece quando pedido. Use `"source"` sempre que a
+   * tela JÁ tiver uma superfície grande mostrando o resultado.
+   */
+  variant?: "full" | "source";
 }
 
 export default function ArtFramePanel({
@@ -42,15 +58,23 @@ export default function ArtFramePanel({
   onClear,
   previewHeightClass = "h-44",
   compact = false,
+  variant = "full",
 }: ArtFramePanelProps) {
   const [cropPos, setCropPos] = useState({ x: 0, y: 0 });
   const [cropZoom, setCropZoom] = useState(1);
+  /* Em `source` o recorte começa fechado: ele é ajuste fino, não a primeira
+   * coisa que alguém precisa ver. Aberto por padrão era o que criava a segunda
+   * imagem grande competindo com o preview do render. */
+  const [cropOpen, setCropOpen] = useState(false);
 
   // Reset cropper when a new image loads
   useEffect(() => {
     setCropPos({ x: 0, y: 0 });
     setCropZoom(1);
+    setCropOpen(false);
   }, [artPreview]);
+
+  const isSource = variant === "source";
 
   const aspect = soWidth && soHeight ? soWidth / soHeight : 16 / 9;
 
@@ -78,10 +102,11 @@ export default function ArtFramePanel({
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Preview */}
-      {frame.mode === "cover" ? (
+      {/* Preview. Em `source` a imagem grande só existe com o recorte ABERTO —
+          fora disso quem mostra o trabalho é a superfície de resultado da tela. */}
+      {frame.mode === "cover" && (!isSource || cropOpen) ? (
         <>
-          <div className={`relative ${previewHeightClass} w-full overflow-hidden rounded-xl bg-black`}>
+          <div className={`relative ${isSource ? "h-40" : previewHeightClass} w-full overflow-hidden rounded-xl bg-black`}>
             <Cropper
               image={artPreview}
               crop={cropPos}
@@ -111,7 +136,7 @@ export default function ArtFramePanel({
             />
           </div>
         </>
-      ) : (
+      ) : isSource ? null : (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={artPreview}
@@ -123,15 +148,38 @@ export default function ArtFramePanel({
 
       {/* Info + mode controls */}
       <div className="flex items-center gap-2">
+        {/* Em `source` a arte aparece como MINIATURA: identifica o arquivo sem
+            virar uma segunda superfície grande. */}
+        {isSource && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={artPreview}
+            alt=""
+            className="w-10 h-10 rounded-lg bg-black object-contain shrink-0 border border-neutral-800"
+          />
+        )}
         <div className="min-w-0 flex-1">
           <p className={`${nameSize} font-bold text-white truncate`}>{fileName || "Artwork"}</p>
           {artDims && (
             <p className={`${dimsSize} text-neutral-500`}>
               {artDims.width}×{artDims.height}px
-              {soWidth && soHeight ? ` · superfície ${Math.round(soWidth)}×${Math.round(soHeight)}` : ""}
+              {soWidth && soHeight ? `, superfície ${Math.round(soWidth)}×${Math.round(soHeight)}` : ""}
             </p>
           )}
         </div>
+
+        {/* Abre o recorte sob demanda, só onde ele faz sentido (cover recorta). */}
+        {isSource && frame.mode === "cover" && (
+          <button
+            type="button"
+            onClick={() => setCropOpen((v) => !v)}
+            title="Ajustar recorte"
+            aria-expanded={cropOpen}
+            className={`p-1.5 rounded-lg shrink-0 transition-colors ${cropOpen ? "bg-white text-black" : "text-neutral-500 hover:text-white"}`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+          </button>
+        )}
 
         {lowRes && (
           <AlertTriangle className="w-4 h-4 text-acc shrink-0" aria-label="Low resolution" />
@@ -141,21 +189,21 @@ export default function ArtFramePanel({
           <button
             onClick={() => setMode("cover")}
             className={`p-1.5 rounded-lg transition-colors ${frame.mode === "cover" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
-            title="Cover — preenche cortando"
+            title="Preencher: corta o que sobra"
           >
             <Crop className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setMode("contain")}
             className={`p-1.5 rounded-lg transition-colors ${frame.mode === "contain" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
-            title="Fit — arte inteira visível"
+            title="Encaixar: arte inteira visível"
           >
             <Minimize2 className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setMode("stretch")}
             className={`p-1.5 rounded-lg transition-colors ${frame.mode === "stretch" ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-white"}`}
-            title="Esticar — distorce para preencher"
+            title="Esticar: distorce para preencher"
           >
             <Maximize2 className="w-3.5 h-3.5" />
           </button>

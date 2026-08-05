@@ -8,11 +8,12 @@
  */
 import { useEffect, useRef, useCallback } from "react";
 import { useViewerZoom } from "@/components/viewer-zoom";
+import { ACC_RGB } from "@/lib/brand";
 
 export type BrushApi = { clear: () => void };
 
 export default function BrushCanvas({
-  imageUrl, imageW, imageH, onChange, brush, eraseMode, tint = "34,211,238", apiRef, transparentImg, patchMode,
+  imageUrl, imageW, imageH, onChange, brush, eraseMode, tint = ACC_RGB, apiRef, transparentImg, patchMode,
 }: {
   imageUrl: string;
   imageW: number;

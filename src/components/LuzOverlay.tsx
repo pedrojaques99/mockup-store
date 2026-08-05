@@ -23,6 +23,7 @@ import { isFullCrop, type LuzLayer, type LuzLayerId } from "@/types/luz";
 import { quadToMatrix3d } from "@/lib/luz-warp";
 import { useViewerZoom } from "@/components/viewer-zoom";
 import { HANDLE_PX, HANDLE_BORDER, OUTLINE_PX } from "@/components/photo-tools/handle-style";
+import { ACC2, ACC2_RGB } from "@/lib/brand";
 
 type CropRect = { x: number; y: number; w: number; h: number };
 const cropClip = (c: CropRect) =>
@@ -324,7 +325,7 @@ export function LuzOverlay({
                   Só no modo afim; com warpQuad as alças são o QuadEditor (page). */}
               {/* Hover numa camada INATIVA — só contorno sutil (sem alças); clique ativa. */}
               {interactive && !isActive && !cropMode && !warped && hoverId === l.id && (
-                <div style={{ ...wrapBase, outline: `${k(OUTLINE_PX)}px solid rgba(61,242,126,0.45)`, outlineOffset: k(1), zIndex: 2 }} />
+                <div style={{ ...wrapBase, outline: `${k(OUTLINE_PX)}px solid rgba(${ACC2_RGB},0.45)`, outlineOffset: k(1), zIndex: 2 }} />
               )}
 
               {isActive && !cropMode && !warped && (
@@ -332,7 +333,7 @@ export function LuzOverlay({
                   ...wrapBase,
                   zIndex: 4,
                   // Figma-like: contorno sólido/brilhante no hover, tracejado fora dele.
-                  outline: hoverId === l.id ? `${k(2)}px solid #3df27e` : `${k(1)}px dashed rgba(61,242,126,0.6)`,
+                  outline: hoverId === l.id ? `${k(2)}px solid ${ACC2}` : `${k(1)}px dashed rgba(${ACC2_RGB},0.6)`,
                   outlineOffset: hoverId === l.id ? k(1) : 0,
                   transition: "outline-color 0.1s",
                 }}>
@@ -347,7 +348,7 @@ export function LuzOverlay({
                       onPointerCancel={handleUp}
                     />
                   ))}
-                  <div style={{ position: "absolute", left: "50%", top: 0, width: k(1), height: k(22), transform: "translate(-50%,-100%)", background: "rgba(61,242,126,0.6)", pointerEvents: "none" }} />
+                  <div style={{ position: "absolute", left: "50%", top: 0, width: k(1), height: k(22), transform: "translate(-50%,-100%)", background: `rgba(${ACC2_RGB},0.6)`, pointerEvents: "none" }} />
                   <div
                     className="absolute -translate-x-1/2 rounded-full bg-acc2 border-zinc-950 shadow"
                     style={{ left: "50%", top: 0, width: k(14), height: k(14), borderWidth: k(2), borderStyle: "solid", transform: `translate(-50%, calc(-100% - ${k(22)}px))`, pointerEvents: "auto", cursor: "grab", touchAction: "none" }}

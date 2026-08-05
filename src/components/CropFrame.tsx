@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Moveable from "react-moveable";
 import { useViewerZoom } from "@/components/viewer-zoom";
 import { HANDLE_FILL, HANDLE_PX, HANDLE_BORDER, OUTLINE_PX } from "@/components/photo-tools/handle-style";
+import { ACC, ACC2 } from "@/lib/brand";
 
 export interface CropRect { x: number; y: number; width: number; height: number }
 
@@ -136,7 +137,7 @@ export function CropFrame({
   }, [readNatural]);
 
   const expanding = rect.x < -0.5 || rect.y < -0.5 || rect.x + rect.width > naturalW + 0.5 || rect.y + rect.height > naturalH + 0.5;
-  const accent = expanding ? "#22d3ee" : "#3df27e";
+  const accent = expanding ? ACC : ACC2;
 
   // Posição de descanso do alvo (layout px; img na origem → sem offset)
   const left = rect.x * scale, top = rect.y * scale;

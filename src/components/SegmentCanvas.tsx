@@ -17,6 +17,7 @@ import { refineAlphaGuided } from "@/lib/guided-filter";
 import { Sam2Client, type DecodedMask } from "@/lib/sam2/client";
 import { maskToImageData, maskToAlphaCanvas } from "@/lib/sam2/imageutils";
 import type { SamPoint } from "@/lib/sam2/SAM2";
+import { ACC2, ACC_RGB } from "@/lib/brand";
 
 type Role = "surface" | "occluder";
 export type SegMode = "sam" | "smart";
@@ -131,7 +132,7 @@ export default function SegmentCanvas({
     const octx = overlay.getContext("2d")!;
     const oimg = octx.createImageData(imageW, imageH);
     const od = oimg.data;
-    for (let i = 0; i < n; i++) if (data[i]) { alpha[i] = 255; const j = i * 4; od[j] = 34; od[j + 1] = 211; od[j + 2] = 238; od[j + 3] = 130; }
+    for (let i = 0; i < n; i++) if (data[i]) { alpha[i] = 255; const j = i * 4; const [tr, tg, tb] = ACC_RGB.split(",").map(Number); od[j] = tr; od[j + 1] = tg; od[j + 2] = tb; od[j + 3] = 130; }
     octx.putImageData(oimg, 0, 0);
     smartAlphaRef.current = alpha;
     smartOverlayRef.current = overlay;
@@ -170,7 +171,7 @@ export default function SegmentCanvas({
       for (const p of points) {
         const cx = p.x * sx, cy = p.y * sy, inc = p.label === 1;
         ctx.beginPath(); ctx.arc(cx, cy, k(7), 0, Math.PI * 2);
-        ctx.fillStyle = inc ? "#3df27e" : "#ef4444"; ctx.fill();
+        ctx.fillStyle = inc ? ACC2 : "#ef4444"; ctx.fill();
         ctx.lineWidth = k(2); ctx.strokeStyle = "#fff"; ctx.stroke();
         // Glifo +/− (incluir / excluir)
         ctx.strokeStyle = "#0a0a0a"; ctx.lineWidth = k(1.6); ctx.lineCap = "round";

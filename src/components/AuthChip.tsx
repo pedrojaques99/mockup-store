@@ -7,6 +7,12 @@
  * mesmo tab (redirect OAuth completo). Quando logado, mostra nome+inicial e
  * dropdown com logout. Plug no header dos editores; quando o boxy adicionar
  * `VisantProvider` no NextAuth, este componente continua funcionando.
+ *
+ * Cinza, não violeta. O botão era `bg-violet-600` — a cor da Visant — e virava a
+ * coisa mais forte da tela, competindo com o verde BOXY, que é a única cor de
+ * ação da casa. Login não é a ação principal de nenhuma destas telas: é como
+ * você entra, não o que você veio fazer. Em cinza ele fica disponível sem
+ * gritar, e o verde continua significando "clique aqui".
  */
 import { useEffect, useRef, useState } from "react";
 import { LogIn, LogOut, User } from "lucide-react";
@@ -38,8 +44,8 @@ export function AuthChip({ compact }: { compact?: boolean } = {}) {
     const returnTo = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
     return (
       <a href={`/api/auth/visant/login?returnTo=${encodeURIComponent(returnTo)}`}
-        title="Entrar com Visant — sua conta vira tenant da engine pai"
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-medium transition-colors">
+        title="Entrar com a sua conta Visant"
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-[11px] font-medium transition-colors">
         <LogIn size={12} /> {compact ? "" : "Entrar"} com Visant
       </a>
     );
@@ -52,7 +58,7 @@ export function AuthChip({ compact }: { compact?: boolean } = {}) {
     <div ref={ref} className="relative">
       <button onClick={() => setOpen((v) => !v)} title={`Visant: ${label}`}
         className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-800 transition-colors">
-        <span className="w-6 h-6 rounded-full bg-violet-600 text-white text-[11px] font-semibold flex items-center justify-center">{initial}</span>
+        <span className="w-6 h-6 rounded-full bg-zinc-700 text-zinc-200 text-[11px] font-semibold flex items-center justify-center">{initial}</span>
         {!compact && <span className="text-[11px] text-zinc-300 max-w-[140px] truncate">{label}</span>}
       </button>
       {open && (

@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mockup Store",
-  description: "Browse and render mockups locally",
+  title: "BOXY® Mockup Store",
+  description:
+    "Acervo de mockups da BOXY®: navegue, enquadre a arte e renderize localmente.",
 };
 
 export default function RootLayout({
