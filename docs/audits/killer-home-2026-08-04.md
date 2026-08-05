@@ -1,7 +1,11 @@
 # Killer: home do mockup-store (`src/app/page.tsx`) + coleção, vibe, shuffle, similares
 
-**Tier** T2 rota · **Nota** 66/100 · **Veredito** não vai pra PR até o portão de copy fechar
-**Superfície** B trabalho (throughput de escolha: a tela existe para escolher UM mockup entre 4.482)
+**Tier** T2 rota · **Nota** 66 → **92/100** (2ª rodada) · **Veredito** passou, commitado
+**Superfície** B trabalho (throughput de escolha: a tela existe para escolher UM mockup entre 3.655)
+
+> **2ª rodada (mesmo dia).** O usuário mandou rodar de novo até fechar. Fechou: portão
+> inteiro verde, os três itens de maior alavanca entregues, e os quatro "não verificado"
+> viraram medição. O que mudou está em "Segunda rodada", no fim. Commits `5b4180e` e `1e88a9c`.
 
 ## Decisão pendente (do usuário, não minha)
 
@@ -248,3 +252,98 @@ Os 16 achados de copy pré-existentes, com o texto antes e depois:
   tipo, não num tablet. Ele repete um conserto que já vive no mesmo arquivo e foi validado
   antes, o que reduz o risco mas não substitui a tela.
 - **Os 16 achados de copy** seguem no arquivo por causa da outra sessão ativa.
+
+
+---
+
+# Segunda rodada — o que fechou
+
+## Portão (era 0/20, agora 20/20)
+
+| Detector | 1ª rodada | 2ª rodada |
+|---|---|---|
+| impeccable | 0 | 0 |
+| audit:design | **pulado** (o repo não tinha o script) | **0** — `audit:design` agora é alias de `ui-audit.ts`, o detector de consistência que este repo realmente tem. Todas as 9 métricas dentro do orçamento. |
+| copy (vício) | 25 | **0** (210 strings de interface extraídas) |
+
+## O falso negativo do próprio detector
+
+O portão dizia copy **zero** enquanto o header da home exibia `59 à vista · 4.480 no acervo`.
+A bolinha estava na tela e o detector aprovava.
+
+Causa: copy de JSX chega **partida** por interpolação. Em
+`<span>{n} à vista · </span>` o fragmento que sobra depois da máscara é `à vista ·` — uma
+palavra só, e a regra "menos de duas palavras não é frase" (que existe para matar sobra de
+assinatura de tipo) o descartava. Falso **negativo**, que é o grave: parece aprovação.
+
+Conserto na regra, não no arquivo auditado: fragmento que carrega bolinha ou travessão conta
+como copy mesmo com uma palavra. O ponto-e-vírgula ficou **fora** da exceção porque
+`(k: string): ;` termina em `;` e voltaria como falso positivo — a primeira versão do conserto
+fez exatamente isso e o fixture pegou. Caso travado em `fixtures/copy-extractor.tsx`.
+
+Assim que a regra foi corrigida, ela achou **mais 3 violações reais** que o portão vinha dando
+como limpas.
+
+## Slop consertado (2ª rodada)
+
+| # | Catálogo | Onde | Conserto |
+|---|---|---|---|
+| 4 | 3 · spinner no lugar de skeleton | aba Coleção | skeleton com a mesma forma do grid. Trocar de aba dava branco, e branco é indistinguível de "esta coleção está vazia". |
+| 5 | — · número que a tela afirma e o disco não sustenta | badge do header | `4.480 no acervo` eram 4.480 **registros**: 3.520 arquivos `.psd` distintos + 135 cenas = **3.655** mockups. 825 registros apontam para o mesmo arquivo. `mockupKey` conta a coisa, não a linha; 3 testes travam (mesmo arquivo, caminho Windows/POSIX, cena-foto). O "à vista" saiu junto, a pedido. |
+
+## Os treze detalhes: 13/13
+
+| # | Detalhe | 1ª | 2ª |
+|---|---|---|---|
+| 1 | Teclado alcança toda ação | falta | **feito** — `B` guarda, `S` parecidos, `alt+seta` reordena, e o atalho aparece no `title` |
+| 3 | Zero salto entre carregando e carregado | parcial | **feito** — skeleton na aba Coleção |
+| 4 | Escrita otimista com desfazer | parcial | **feito** — tirar da coleção oferece "Desfazer"; guardar não pede nada (guardar por engano não custa, perder curadoria custa) |
+| 12 | Volta na mesma posição depois de agir | falta | **feito** — sair de "parecidos" devolve o `scrollTop` |
+| 13 | Copy na voz da casa | falta | **feito** — portão zero |
+
+## Os três de maior alavanca: 3/3
+
+1. **Renderizar a coleção em lote** — `brand-kit --collection`. Verificado ponta a ponta com
+   marca real: 27 itens curados, 27 renderizados na ordem curada. Coleção vazia falha
+   ensinando a curar, em vez de cair na sugestão automática. Item que não resolve é pulado
+   **com o motivo**, e o teste trava `psdPaths + skipped == ids`.
+2. **Portão de copy** — fechado.
+3. **Teclado nas ações novas** — feito.
+
+## "Não verificado" da 1ª rodada: todos medidos
+
+| Era | Agora |
+|---|---|
+| backend realmente parado | **medido.** Com `MONGODB_URI` apontando para porta morta: o catálogo degrada para as **135 cenas de disco** (não zera, não quebra) e a coleção grava e lê normalmente, porque ela é arquivo. |
+| performance em produção | **medido.** Build isolado (`NEXT_DIST_DIR=.next-prod`, para não brigar pelo `.next` do dev) + `next start`: HTML **39ms**, `/api/references` **5,3s no primeiro request** (montagem do catálogo) e **27–37ms** depois, busca com camada densa **149ms**. |
+| toque de verdade | **portão novo.** `npm run visual:touch` roda o Chrome com `hover: none` e falha se qualquer controle do card ficar em `opacity 0`. Provado nos dois sentidos: reintroduzi o defeito e ele acusou os 4 controles pelo nome. |
+| feel a 25% | segue não olhado. Nenhuma animação nova foi escrita; as transições vêm dos tokens (`--dur-*`), que o `audit:design` cobre. |
+
+## Um achado que não estava no roteiro
+
+`__webpack_require__.n is not a function` na home, com o grid vazio. **Não é do código**: é o
+`.next` corrompido por mais de um dev server escrevendo no mesmo diretório. Provado rodando a
+mesma árvore em build de produção isolado — console 0 erros, 12/12 no portão visual. O mesmo
+mecanismo já tinha derrubado um `next build` nesta sessão.
+
+Regra que fica: **um dev server por `.next`**, e para medir produção use
+`NEXT_DIST_DIR=.next-prod`.
+
+## Nota
+
+| Faixa | Peso | 2ª rodada |
+|---|---|---|
+| Portão | 20 | **20** — três detectores verdes, nenhum pulado |
+| Julgamento | 40 | **36** — 5 itens de slop consertados; fica `−4` pela cor crua (`emerald`/`amber`) nos painéis de ingest e duplicatas, pré-existente e fora do que esta rodada tocou: o design system não tem token semântico de estado, e criar um é mudança de sistema, que precisa de autorização |
+| Interrogatório | 40 | **36** — T1+T2 e F1–F6 respondidos com `arquivo:linha`; `−4` porque o feel a 25% não foi olhado |
+| **Total** | 100 | **92** |
+
+Acima de 90 = passou. A pendência de gosto que sobra é a cor crua, e ela é decisão de design
+system, não de tela.
+
+## Ainda em aberto (decisão de produto, não defeito)
+
+- `--collection` renderiza com os layouts OU com o símbolo, um por vez. Os dois no mesmo
+  `--out` são duas execuções. Vale unificar se virar incômodo.
+- A busca por vibe depende de chave de embeddings. Sem ela, os clusters de setor sozinhos já
+  resolvem o caso do enunciado (`"engenharia"` → 703 hits, top-5 todos CONSTRUCTION).
