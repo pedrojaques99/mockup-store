@@ -25,9 +25,27 @@ jobs:
           node-version: 22
           cache: npm
 
+      # `@visant/psd-engine` é um LINK LOCAL no lockfile
+      # (`../../Cursor/visantlabs-os/packages/psd-engine`): existe na máquina do autor e não
+      # no runner. O sintoma nunca foi falha de install — o `npm ci` passava e deixava um
+      # symlink pendurado — era o `tsc` explodindo em 26 erros, 20 deles cascata de
+      # `implicitly any` porque o módulo tipado tinha sumido. CI vermelho em 5 runs
+      # seguidas, o que é o mesmo que não ter CI.
+      #
+      # O repo do pacote é público, ele não tem dependência de runtime e o `dist` é
+      # gitignored: basta clonar no caminho que o lockfile espera e compilar com o tsc
+      # deste repo. Nada aqui muda como alguém instala na própria máquina.
+      - name: psd-engine (o link local que o lockfile espera)
+        shell: bash
+        run: git clone --depth 1 https://github.com/pedrojaques99/visantlabs-os.git ../../Cursor/visantlabs-os
+
       # .npmrc já tem legacy-peer-deps=true (conflito ag-psd 30 vs peer ^28, aceito de propósito).
       - name: Install
         run: npm ci
+
+      - name: Compilar o psd-engine
+        shell: bash
+        run: npx tsc -p ../../Cursor/visantlabs-os/packages/psd-engine/tsconfig.json
 
       - name: Typecheck
         run: npx tsc --noEmit
@@ -68,8 +86,19 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Mesmo motivo do job `verify`: o lockfile aponta o psd-engine para um caminho da
+      # máquina do autor. Aqui o efeito era outro e pior de diagnosticar — o `npm run build`
+      # do Next quebrando nos três sistemas operacionais.
+      - name: psd-engine (o link local que o lockfile espera)
+        shell: bash
+        run: git clone --depth 1 https://github.com/pedrojaques99/visantlabs-os.git ../../Cursor/visantlabs-os
+
       - name: Install
         run: npm ci
+
+      - name: Compilar o psd-engine
+        shell: bash
+        run: npx tsc -p ../../Cursor/visantlabs-os/packages/psd-engine/tsconfig.json
 
       # Sem nenhuma variável de ambiente — é exatamente o caso do dev novo.
       - name: Setup
