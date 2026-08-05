@@ -8,6 +8,12 @@ const nextConfig: NextConfig = {
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
   images: {
+    // Next 16 exige declarar as rotas locais que servem imagem com query string —
+    // sem isto, todo card do grid (`/api/local-image?path=…`) vira warn no console.
+    localPatterns: [
+      { pathname: "/api/**" }, // rotas próprias: query livre (o path do arquivo vai nela)
+      { pathname: "/**", search: "" }, // estáticos (public/): sem query
+    ],
     remotePatterns: [
       {
         protocol: "https",
