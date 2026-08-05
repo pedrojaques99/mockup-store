@@ -7,11 +7,19 @@
  *   npx tsx --env-file=.env.local scripts/brand-kit.ts \
  *     --brand <visantId> --layouts "<dir criativos>" --out "<dir>" --count 10
  *
+ *   # renderiza a coleção curada na home (ordem e escolha são do usuário):
+ *   npx tsx --env-file=.env.local scripts/brand-kit.ts \
+ *     --brand <visantId> --collection --layouts "<dir criativos>" --out "<dir>"
+ *
  * Flags:
  *   --brand <id>      brand id da Visant (obrigatório; veja `agent-cli brands`)
  *   --layouts <dir>   criativos de campanha do cliente (metade "layouts")
  *   --out <dir>       saída (cria <out>/layouts e <out>/logo)
  *   --count <n>       mockups por metade (default 10)
+ *   --collection      renderiza EXATAMENTE os mockups da coleção da marca, na
+ *                     ordem curada (data/brand-collections.json). Um lote só:
+ *                     com --layouts a arte é o criativo, senão é o logo/símbolo.
+ *                     Incompatível com --count (quem conta é a curadoria).
  *   --symbol <p|url>  símbolo/ícone alta-res p/ a metade "logo" (override do logo
  *                     do Visant, que costuma ser lockup horizontal baixa-res)
  *   --mono            o símbolo é silhueta → recolore nas cores da marca (lime/dark)
@@ -19,6 +27,7 @@
  *   --max-crop <f>    0-1: descarta cenas cuja face force o `cover` a cortar mais
  *                     que isso da arte (0.12 recomendado p/ layout tipográfico)
  *   --preview         JPEG rápido   --fresh   ignora _summary e recomeça
+ *   --help            esta ajuda
  *
  * Não reinventa: o render/curadoria é o brand-mockup-batch.ts; este orquestrador
  * só pluga a marca do Visant + prepara as artes 1:1 e chama o motor 2×.
@@ -32,20 +41,98 @@ const flag = (k: string, def?: string) => { const i = A.indexOf(`--${k}`); retur
 const has = (k: string) => A.includes(`--${k}`);
 function die(m: string): never { console.error(`✗ ${m}`); process.exit(1); }
 
-const brandId = flag("brand") || die("--brand <visantId> obrigatório (veja `agent-cli brands`)");
-const layoutsArg = flag("layouts");
-const outDir = flag("out") || die("--out <dir> obrigatório");
-const count = parseInt(flag("count", "10")!);
-const only = flag("only");
-const symbolArg = flag("symbol");
-const maxCropArg = flag("max-crop");
-const mono = has("mono");
+const HELP = `
+brand-kit — kit de mockups de UMA marca do Visant Labs
+
+  npx tsx --env-file=.env.local scripts/brand-kit.ts --brand <id> --out <dir> [flags]
+
+  --brand <id>       brand id da Visant (obrigatório; veja \`agent-cli brands\`)
+  --out <dir>        saída (cria <out>/layouts e <out>/logo)
+  --layouts <dir>    criativos de campanha do cliente (metade "layouts")
+  --count <n>        mockups por metade (default 10)
+  --collection       usa SÓ os mockups da coleção da marca, na ordem curada
+                     (data/brand-collections.json). Um lote só; incompatível
+                     com --count / --refs / --search.
+  --symbol <p|url>   símbolo alta-res p/ a metade "logo" (override do Visant)
+  --mono             símbolo é silhueta → recolore nas cores da marca
+  --only layouts|logo  roda só uma metade
+  --max-crop <f>     0-1: descarta cenas que cortem mais que isso da arte
+  --preview          JPEG rápido
+  --fresh            ignora _summary.json e recomeça a numeração
+  --help             esta ajuda
+
+Coleção: curada na home — selecione a marca no seletor e use o marcador no card
+de cada mockup. O que você marcar (e a ordem) é o que sai aqui.
+`.trim();
 
 // ── helpers de cor ───────────────────────────────────────────────────────────
 type RGB = { r: number; g: number; b: number };
 const hexToRgb = (h: string): RGB => { const x = h.replace("#", ""); return { r: parseInt(x.slice(0, 2), 16), g: parseInt(x.slice(2, 4), 16), b: parseInt(x.slice(4, 6), 16) }; };
 const lum = (c: RGB) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
 const chroma = (c: RGB) => Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b);
+
+// ── coleção → lista de PSDs ──────────────────────────────────────────────────
+
+/** O mínimo do `SearchDoc` que o plano precisa — evita arrastar o índice inteiro. */
+export type CollectionRefDoc = {
+  id: string;
+  name?: string;
+  psdPath?: string;
+  psdFileName?: string;
+  type?: string;
+  photoSceneId?: string;
+};
+
+export type CollectionPlan = {
+  psdPaths: string[];
+  skipped: Array<{ id: string; name?: string; reason: string }>;
+};
+
+/**
+ * Traduz a coleção curada em caminhos de PSD renderizáveis.
+ *
+ * A ordem dos `ids` é a curadoria do usuário e sobrevive intacta: quem hidrata
+ * (`refsByIds`) já preserva, e aqui a iteração é sobre `ids`, não sobre `docs`.
+ *
+ * Nada some calado. Todo item que não vira render sai com motivo — um kit com
+ * 18 PNGs de uma coleção de 20 tem que dizer quais dois faltaram, senão o
+ * usuário só descobre contando arquivo.
+ *
+ * `psdExists` é injetado porque o teste não tem os 4 mil PSDs no disco.
+ */
+export function planCollectionRender(
+  ids: string[],
+  docs: CollectionRefDoc[],
+  psdExists: (p: string) => boolean,
+): CollectionPlan {
+  const byId = new Map(docs.map((d) => [d.id, d]));
+  const psdPaths: string[] = [];
+  const skipped: CollectionPlan["skipped"] = [];
+  const seen = new Set<string>();
+
+  for (const id of ids) {
+    if (seen.has(id)) { skipped.push({ id, reason: "id repetido na coleção" }); continue; }
+    seen.add(id);
+    const doc = byId.get(id);
+    if (!doc) { skipped.push({ id, reason: "não está mais no catálogo (id sumiu do índice)" }); continue; }
+    const label = doc.name || doc.psdFileName;
+    if (!doc.psdPath) {
+      // Cena de foto não tem PSD: o render dela é outro pipeline, e mandar pro
+      // motor de PSD daria "arquivo não encontrado" sem explicar o porquê.
+      const reason = doc.type === "photo" || doc.photoSceneId
+        ? "cena de foto (sem PSD) — renderize com `photo-agent render --scenes <id>`"
+        : "registro sem PSD no catálogo (só thumbnail)";
+      skipped.push({ id, name: label, reason });
+      continue;
+    }
+    if (!psdExists(doc.psdPath)) {
+      skipped.push({ id, name: label, reason: `PSD fora do disco: ${doc.psdPath}` });
+      continue;
+    }
+    psdPaths.push(doc.psdPath);
+  }
+  return { psdPaths, skipped };
+}
 
 async function fetchToBuffer(src: string): Promise<Buffer> {
   if (/^https?:\/\//.test(src)) { const r = await fetch(src); if (!r.ok) die(`falha baixando ${src}: HTTP ${r.status}`); return Buffer.from(await r.arrayBuffer()); }
@@ -66,6 +153,59 @@ function runBatch(args: string[], label: string): number {
 }
 
 async function main() {
+  if (has("help") || has("h")) { console.log(HELP); return; }
+
+  const brandId = flag("brand") || die("--brand <visantId> obrigatório (veja `agent-cli brands`)");
+  const layoutsArg = flag("layouts");
+  const outDir = flag("out") || die("--out <dir> obrigatório");
+  const count = parseInt(flag("count", "10")!);
+  const only = flag("only");
+  const symbolArg = flag("symbol");
+  const maxCropArg = flag("max-crop");
+  const mono = has("mono");
+  const collection = has("collection");
+
+  // Flags que escolhem mockup sozinhas brigam com a coleção. Aceitar as duas
+  // renderizaria outra coisa e o usuário só descobriria olhando 20 PNGs.
+  if (collection) {
+    const conflitos = ["count", "refs", "search"].filter((k) => A.includes(`--${k}`));
+    if (conflitos.length) {
+      die(`--collection escolhe os mockups pela curadoria; ${conflitos.map((c) => `--${c}`).join(", ")} escolhe(m) por conta própria. Use um OU outro.`);
+    }
+  }
+
+  // ── coleção: resolve ANTES de falar com o Visant (falha em 1s, não em 10) ──
+  let collectionList: string | null = null;
+  let collectionSkipped: CollectionPlan["skipped"] = [];
+  if (collection) {
+    const { getCollection } = await import("../src/lib/collection-store");
+    const { refsByIds } = await import("../src/lib/search-index");
+    const col = await getCollection(brandId);
+    if (!col || !col.items.length) {
+      die(
+        `a marca ${brandId} não tem coleção curada (data/brand-collections.json).\n` +
+        `  Como curar: abra a home, selecione essa marca no seletor e clique no marcador\n` +
+        `  (ícone de bookmark) no card de cada mockup que deve entrar no kit. A ordem em\n` +
+        `  que você marcar é a ordem em que eles saem daqui.\n` +
+        `  Sem --collection, o script escolhe os mockups sozinho por categoria.`,
+      );
+    }
+    const ids = col.items.map((i) => i.id);
+    const docs = await refsByIds(ids);
+    const plan = planCollectionRender(ids, docs, (p) => existsSync(p));
+    collectionSkipped = plan.skipped;
+    if (!plan.psdPaths.length) {
+      for (const s of plan.skipped) console.error(`  · ${s.name || s.id}: ${s.reason}`);
+      die(`nenhum dos ${ids.length} itens da coleção "${col.name}" vira render de PSD (motivos acima).`);
+    }
+    console.log(`Coleção "${col.name}": ${plan.psdPaths.length}/${ids.length} itens renderizáveis, na ordem curada`);
+    // Lista em arquivo, não em CSV de argv: caminho de PSD tem espaço e acento.
+    const listDir = resolve(".tmp/brand-kit-collection");
+    mkdirSync(listDir, { recursive: true });
+    collectionList = join(listDir, `${brandId}.json`);
+    writeFileSync(collectionList, JSON.stringify(plan.psdPaths, null, 2));
+  }
+
   const sharp = (await import("sharp")).default;
   const { getBrandGuideline, pickLogo } = await import("../src/lib/visant");
 
@@ -83,18 +223,8 @@ async function main() {
 
   mkdirSync(outDir, { recursive: true });
 
-  // ── metade LAYOUTS ───────────────────────────────────────────────────────
-  if (only !== "logo") {
-    if (!layoutsArg) die("--layouts <dir> obrigatório pra metade layouts (ou use --only logo)");
-    const a = ["--layouts", layoutsArg, "--out", join(outDir, "layouts"), "--count", String(count)];
-    if (maxCropArg) a.push("--max-crop", maxCropArg);
-    if (has("preview")) a.push("--preview");
-    if (has("fresh")) a.push("--fresh");
-    runBatch(a, "layouts");
-  }
-
-  // ── metade LOGO (faces ~1:1) ──────────────────────────────────────────────
-  if (only !== "layouts") {
+  /** Prepara as artes 1:1 do símbolo (logo do Visant ou --symbol) e devolve o dir. */
+  const prepareSymbolArt = async (): Promise<string> => {
     // resolve o símbolo: override --symbol, senão logo do Visant (icon→primary)
     let symBuf: Buffer;
     if (symbolArg) { symBuf = await fetchToBuffer(symbolArg); console.log(`Símbolo: ${symbolArg}`); }
@@ -140,11 +270,41 @@ async function main() {
       await place(null, dark, 0.7, "logo-on-dark.png");
       await place(null, accent, 0.7, "logo-on-accent.png");
     }
+    return artDir;
+  };
 
-    const a = ["--layouts", artDir, "--square", "--out", join(outDir, "logo"), "--count", String(count)];
+  if (collectionList) {
+    // ── lote ÚNICO sobre a coleção ────────────────────────────────────────────
+    // Rodar as duas metades aqui repetiria os MESMOS mockups com duas artes —
+    // o usuário curou uma lista, não duas. A arte é que escolhe a metade.
+    const useLogo = only === "logo" || !layoutsArg;
+    const half = useLogo ? "logo" : "layouts";
+    const artDir = useLogo ? await prepareSymbolArt() : layoutsArg!;
+    console.log(`Arte do lote: ${useLogo ? "logo/símbolo da marca" : layoutsArg}`);
+    const a = ["--layouts", artDir, "--psds", collectionList, "--out", join(outDir, half)];
+    if (maxCropArg) a.push("--max-crop", maxCropArg);
     if (has("preview")) a.push("--preview");
     if (has("fresh")) a.push("--fresh");
-    runBatch(a, "logo");
+    runBatch(a, `coleção→${half}`);
+  } else {
+    // ── metade LAYOUTS ───────────────────────────────────────────────────────
+    if (only !== "logo") {
+      if (!layoutsArg) die("--layouts <dir> obrigatório pra metade layouts (ou use --only logo)");
+      const a = ["--layouts", layoutsArg, "--out", join(outDir, "layouts"), "--count", String(count)];
+      if (maxCropArg) a.push("--max-crop", maxCropArg);
+      if (has("preview")) a.push("--preview");
+      if (has("fresh")) a.push("--fresh");
+      runBatch(a, "layouts");
+    }
+
+    // ── metade LOGO (faces ~1:1) ──────────────────────────────────────────────
+    if (only !== "layouts") {
+      const artDir = await prepareSymbolArt();
+      const a = ["--layouts", artDir, "--square", "--out", join(outDir, "logo"), "--count", String(count)];
+      if (has("preview")) a.push("--preview");
+      if (has("fresh")) a.push("--fresh");
+      runBatch(a, "logo");
+    }
   }
 
   // ── kit-summary ───────────────────────────────────────────────────────────
@@ -154,11 +314,23 @@ async function main() {
     layouts: read(join(outDir, "layouts", "_summary.json")),
     logo: read(join(outDir, "logo", "_summary.json")),
     generatedFor: layoutsArg || null,
+    ...(collection ? { collection: { skipped: collectionSkipped } } : {}),
   };
   writeFileSync(join(outDir, "kit-summary.json"), JSON.stringify(summary, null, 2));
   const okL = (summary.layouts as Array<{ file?: string }>).filter((r) => r.file).length;
   const okG = (summary.logo as Array<{ file?: string }>).filter((r) => r.file).length;
   console.log(`\n★ Kit ${brandName}: ${okL} layouts + ${okG} logo → ${outDir}`);
+
+  // Fica por último de propósito: é o que sobra na tela quando o lote termina.
+  if (collectionSkipped.length) {
+    console.log(`\n! ${collectionSkipped.length} item(ns) da coleção ficaram de fora:`);
+    for (const s of collectionSkipped) console.log(`  · ${s.name || s.id}: ${s.reason}`);
+  }
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+// Só roda como CLI: o teste importa `planCollectionRender` sem disparar o kit.
+// Comparação por argv (e não por `import.meta.url`) porque o pacote é CJS —
+// sob tsx/vitest o `import.meta` do arquivo nem sempre existe.
+if (/brand-kit\.[cm]?ts$/.test(process.argv[1] ?? "")) {
+  main().catch((e) => { console.error(e); process.exit(1); });
+}

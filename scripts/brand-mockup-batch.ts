@@ -20,6 +20,11 @@
  *   --max-crop <f>       0-1: descarta cenas cuja face force o `cover` a cortar mais
  *                        que isso da arte (0.12 = 12%). Default 0 = desligado.
  *                        Essencial pra layout tipográfico: crop come o headline.
+ *   --psds <json|csv>    lista EXPLÍCITA de PSDs (arquivo .json com array de
+ *                        caminhos, ou csv). Desliga a curadoria por categoria e
+ *                        o --count: a ordem da lista é a ordem de saída. É por
+ *                        aqui que o `brand-kit --collection` entrega a coleção
+ *                        curada na home.
  *
  * Aprendizados embutidos (mantêm consistência entre lotes):
  *  - device = face com aspect de TELA (retrato ~0.40-0.65), não a maior →
@@ -34,6 +39,7 @@ import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, statSy
 import { join, resolve, isAbsolute } from "path";
 import { computeFaces } from "@visant/psd-engine";
 import { frameArt } from "../src/lib/server-frame";
+import { scanPsd } from "../src/lib/psd-scan";
 
 const RENDER_PORT = parseInt(process.env.RENDER_PORT || "4200");
 const MAX_FACES = 8;
@@ -52,6 +58,21 @@ const fresh = has("fresh");
 const minKb = parseInt(flag("min-kb", "0")!);
 const includeCats = (flag("include") || "").split(",").map((s) => s.trim()).filter(Boolean);
 const maxCrop = parseFloat(flag("max-crop", "0")!);
+const psdsArg = flag("psds");
+
+/**
+ * Lista explícita de PSDs. Arquivo `.json` é o caminho preferido: caminho de PSD
+ * tem espaço e vírgula, e csv em argv perde os dois.
+ */
+function loadPsdList(arg: string): string[] {
+  const raw: unknown = /\.json$/i.test(arg)
+    ? JSON.parse(readFileSync(isAbsolute(arg) ? arg : resolve(arg), "utf-8"))
+    : arg.split(",");
+  if (!Array.isArray(raw)) die(`--psds ${arg}: esperava um array de caminhos`);
+  const list = raw.filter((x): x is string => typeof x === "string" && !!x.trim()).map((s) => s.trim());
+  if (!list.length) die(`--psds ${arg}: lista vazia`);
+  return list;
+}
 
 /** Fração do lado maior que o `cover` descarta ao encaixar `artAspect` em `faceAspect`. */
 const cropOf = (artAspect: number, faceAspect: number) => {
@@ -179,7 +200,40 @@ async function main() {
   interface Target { fileName: string; filePath: string; smartObjects: FaceMeta[]; label: string; faceMode: FaceMode }
   const targets: Target[] = [];
 
-  if (has("square")) {
+  if (psdsArg) {
+    // Curadoria explícita: sem $sample, sem cota por categoria, sem --count. A
+    // ordem da lista É a entrega — quem escolheu foi o usuário, no marcador da
+    // home, e reordenar aqui desfaria o trabalho dele.
+    const wanted = loadPsdList(psdsArg);
+    // Sem a extensão: é assim que o `fileName` vive no Mongo (`scanPsd`) e é a
+    // mesma chave que o resume do `_summary.json` usa nos outros modos.
+    const base = (p: string) => p.split(/[\\/]/).pop()!.replace(/\.psd$/i, "");
+    const docs = await col.find(
+      { fileName: { $in: wanted.map(base) } },
+      { projection: { fileName: 1, filePath: 1, smartObjects: 1 } },
+    ).toArray();
+    const byName = new Map(docs.map((d) => [d.fileName as string, d]));
+    for (const p of wanted) {
+      const name = base(p);
+      const d = byName.get(name);
+      // O caminho da lista vale como fallback: o doc pode estar velho no Mongo.
+      const fp = ((d?.filePath as string) || p).replace(/\//g, "\\");
+      if (!existsSync(fp)) { console.log(`! PSD fora do disco: ${fp}`); continue; }
+      if (used.has(name)) continue; // já feito (resume)
+      // Metade do catálogo é filesystem puro, sem doc no Mongo — a curadoria não
+      // pode morrer por isso: lê os smart objects do próprio arquivo.
+      const sos = (d?.smartObjects as FaceMeta[] | undefined) ?? scanPsd(fp)?.smartObjects;
+      if (!sos?.length) { console.log(`! sem smart object legível: ${name}`); continue; }
+      const faces = computeFaces(sos as never);
+      if (!faces.length) { console.log(`! sem face editável: ${name}`); continue; }
+      // O faceMode vem da categoria adivinhada pelo nome: um device curado ainda
+      // precisa cair na face de TELA, senão pinta o cenário e deixa watermark.
+      const cat = ALL_PLAN.find((c) => new RegExp(c.rx, "i").test(name));
+      used.add(name);
+      targets.push({ fileName: name, filePath: fp, smartObjects: sos as never, label: cat?.label ?? "curado", faceMode: cat?.faceMode ?? "all" });
+    }
+    console.log(`  curados: ${targets.length}/${wanted.length}`);
+  } else if (has("square")) {
     // Mockups com face ~1:1 — onde um logo/ícone brilha
     const LOGO_RX = "coaster|badge|sticker|stamp|\\bseal\\b|\\bpin\\b|button|label|\\bsign\\b|logo|patch|\\bcap\\b|\\bmug\\b|\\btag\\b|\\bcard\\b|emboss|deboss|tile|\\bcan\\b|\\bjar\\b|candle|soap|vinyl|coin|medal|\\bwax\\b|sleeve|\\bcd\\b|plate|disc|sphere|\\bball\\b|\\bcup\\b|napkin|keychain|sphere";
     // $sample = sorteio real sobre TODO o acervo (varia a cada run, não a mesma ordem)

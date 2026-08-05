@@ -56,6 +56,30 @@ npx tsx --env-file=.env.local scripts/brand-mockup-batch.ts \
 - Flags: `--preview` (JPEG rápido), `--fresh` (ignora summary, recomeça do 1), `--include billboard,poster` (filtra categorias), `--min-kb N` (descarta layouts pequenos), `--square` (só logo/ícone: pega PSDs com face ~1:1 — coaster, badge, sticker, selo, tag, mug, app icon, patch…).
 - **Logo/ícone em mockups 1:1**: rode `scripts/prep-logo-squares.ts` (trim + recompõe o ícone centrado num quadrado com respiro, gera variações navy/amarelo/app-icon em `.tmp/soccer248-logo-art`) e depois `brand-mockup-batch --layouts .tmp/soccer248-logo-art --square`.
 - **Retomável**: sem `--fresh`, pula o que já está no `_summary.json` e continua a numeração — dá pra ir disparando lotes na mesma pasta.
+- **Lista explícita**: `--psds <lista.json|csv>` desliga a curadoria por categoria e o `--count` — renderiza exatamente esses PSDs, **na ordem da lista**. PSD sem doc no Mongo cai no `scanPsd` do arquivo (metade do catálogo é filesystem puro). É o canal que o `brand-kit --collection` usa.
+
+### Renderizar a coleção curada na home — `brand-kit --collection`
+
+A coleção por marca (marcador no card → `data/brand-collections.json`) vira entrega
+num comando, sem redigitar a marca nem clicar 20 vezes:
+
+```
+npx tsx --env-file=.env.local scripts/brand-kit.ts \
+  --brand <visantId> --collection --layouts "<dir criativos>" --out "<dir>"
+```
+
+- Renderiza **exatamente** os itens da coleção daquele brand id, **na ordem curada**
+  (a ordem é trabalho humano — nada aqui reordena).
+- **Um lote só**: com `--layouts`, a arte é o criativo (sai em `<out>/layouts`); sem
+  ele (ou com `--only logo`), a arte é o logo/símbolo da marca (`<out>/logo`). Rodar
+  as duas metades repetiria os mesmos mockups com duas artes.
+- Incompatível com `--count`/`--refs`/`--search` — quem escolhe é a curadoria; aceitar
+  as duas renderizaria outra coisa e o usuário só descobriria olhando os PNGs.
+- Coleção vazia/inexistente: **falha** com o passo a passo de como curar. Não cai
+  calado na sugestão automática.
+- Item que não vira PSD renderizável (cena de foto, registro sem PSD, arquivo fora do
+  disco) é pulado e listado com o motivo no fim, e também em `kit-summary.json`.
+- Resume/`_summary.json` do motor continuam valendo.
 
 Regras embutidas (mantêm consistência, vieram de erros reais):
 - **device = face com aspect de tela** (retrato ~0.40–0.65), não a maior — senão pinta o cenário de fundo e deixa a tela com watermark.
