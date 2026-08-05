@@ -553,7 +553,7 @@ export default function IngestDialog({
             onClick={onClose}
             disabled={phase === "ingesting"}
             title={phase === "ingesting" ? "Aguarde o ingest terminar" : "Fechar (Esc)"}
-            className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-600 hover:text-white transition-[color,background-color] active:scale-90 disabled:opacity-30 shrink-0"
+            className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-600 hover:text-white transition-[color,background-color] active:scale-[0.97] disabled:opacity-30 shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
@@ -675,7 +675,7 @@ export default function IngestDialog({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={recomecar}
-                    className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                    className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
                   >
                     Adicionar outra pasta
                   </button>
@@ -744,7 +744,7 @@ export default function IngestDialog({
                       setFilter("all");
                       setVerTudo(true);
                     }}
-                    className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                    className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
                   >
                     Ver mesmo assim
                   </button>
@@ -782,7 +782,7 @@ export default function IngestDialog({
                   <button
                     onClick={() => setFilter("all")}
                     aria-pressed={filter === "all"}
-                    className={`h-8 px-3 rounded-full border text-[10px] font-black uppercase tracking-widest transition-[color,background-color,border-color] active:scale-95 ${
+                    className={`h-8 px-3 rounded-full border text-[10px] font-black uppercase tracking-widest transition-[color,background-color,border-color] active:scale-[0.97] ${
                       filter === "all"
                         ? "bg-white text-black border-white"
                         : "bg-neutral-900 border-neutral-800 text-neutral-500 hover:text-neutral-300"
@@ -798,7 +798,7 @@ export default function IngestDialog({
                         key={v}
                         onClick={() => setFilter(on ? "all" : v)}
                         aria-pressed={on}
-                        className={`h-8 px-3 rounded-full border text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-[color,background-color,border-color] active:scale-95 ${
+                        className={`h-8 px-3 rounded-full border text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-[color,background-color,border-color] active:scale-[0.97] ${
                           on ? "bg-white text-black border-white" : `${m.bg} ${m.text}`
                         }`}
                       >
@@ -845,7 +845,7 @@ export default function IngestDialog({
                           ? `Marca só os ${marcaveis.length} novos. ${foraDaMarcacao} ficam de fora; filtre por veredito para marcá-los.`
                           : "Marca tudo que está à vista"
                     }
-                    className="shrink-0 h-9 px-3 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                    className="shrink-0 h-9 px-3 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
                   >
                     {allVisibleSelected
                       ? "Desmarcar à vista"
@@ -1023,7 +1023,7 @@ export default function IngestDialog({
             <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={onClose}
-                className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
               >
                 Cancelar
               </button>

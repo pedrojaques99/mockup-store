@@ -71,7 +71,7 @@ export function decideFraming(
       kind: "logo",
       mode: "contain",
       bg: brandColor ?? null,
-      reason: "vetor — encaixado inteiro para não cortar a marca",
+      reason: "a arte é vetor, então foi encaixada inteira para não cortar a marca",
     };
   }
 
@@ -81,7 +81,7 @@ export function decideFraming(
       kind: "logo",
       mode: "contain",
       bg: brandColor ?? null,
-      reason: "fundo transparente — encaixado inteiro, sem corte",
+      reason: "o fundo é transparente, então foi encaixada inteira, sem corte",
     };
   }
 
@@ -94,7 +94,7 @@ export function decideFraming(
       kind: "layout",
       mode: "cover",
       bg: null,
-      reason: "proporção casa com a superfície — preenche sem cortar",
+      reason: "a proporção casa com a superfície, então preencher não corta nada",
     };
   }
 
@@ -106,8 +106,8 @@ export function decideFraming(
       mode: "contain",
       bg: brandColor ?? stats.edgeColorHex,
       reason: brandColor
-        ? "marca sobre fundo chapado — encaixada na cor da marca"
-        : "marca sobre fundo chapado — encaixada na cor do próprio fundo",
+        ? "marca sobre fundo chapado, encaixada na cor da marca"
+        : "marca sobre fundo chapado, encaixada na cor do próprio fundo",
     };
   }
 
@@ -116,7 +116,7 @@ export function decideFraming(
     kind: "layout",
     mode: "cover",
     bg: null,
-    reason: "composição — preenche a superfície inteira",
+    reason: "é uma composição, então preenche a superfície inteira",
   };
 }
 

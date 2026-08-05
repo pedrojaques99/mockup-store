@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { TooltipProvider } from "@/components/ui/Tooltip";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -24,11 +25,22 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    /* `lang` estava em `en` num produto inteiramente em português: leitor de tela
+       pronuncia "Preencher a superfície" com fonemas ingleses, e o navegador oferece
+       traduzir a própria língua. É uma palavra, e ela muda como o app soa. */
     <html
-      lang="en"
+      lang="pt-BR"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      {/* O provider do Tooltip só existia dentro do rail do editor de foto — e o
+          `page.tsx` carregava um comentário dizendo que por isso não dava para usar os
+          primitivos com tooltip na home. Um provider na raiz destrava `Tooltip` e
+          `IconSegmented` em todo lugar, que é o ponto de existir primitivo. */}
+      <body className="min-h-full flex flex-col">
+        <TooltipProvider delayDuration={250} skipDelayDuration={100}>
+          {children}
+        </TooltipProvider>
+      </body>
     </html>
   );
 }

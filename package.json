@@ -31,7 +31,9 @@
     "perf:memory": "tsx scripts/mem-report.ts",
     "psd:repoint": "tsx --env-file-if-exists=.env.local scripts/psd-repoint.ts",
     "pack:publish": "tsx --env-file-if-exists=.env.local scripts/publish-pack.ts",
-    "pack:fidelity": "bun scripts/scene-fidelity.ts"
+    "pack:fidelity": "bun scripts/scene-fidelity.ts",
+    "visual:drawer": "tsx scripts/drawer-visual-check.ts",
+    "check:render-failure": "tsx scripts/render-failure-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",

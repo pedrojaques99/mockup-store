@@ -16,7 +16,7 @@ import { Tooltip } from "@/components/ui/Tooltip";
 
 export type IconButtonVariant = "ghost" | "primary" | "accent" | "danger" | "violet";
 
-const BASE = "rounded-lg border transition-[color,background-color,border-color,box-shadow,opacity,transform] [transition-duration:var(--dur-fast)] active:scale-90 disabled:opacity-40 disabled:pointer-events-none disabled:active:scale-100";
+const BASE = "rounded-lg border transition-ui [transition-duration:var(--dur-fast)] active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none disabled:active:scale-100";
 
 const VARIANT: Record<IconButtonVariant, string> = {
   ghost:   "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60 hover:text-zinc-200",

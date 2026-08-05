@@ -60,6 +60,17 @@
   will-change: transform;
 }
 
+/* Transição padrão de controle. A string
+ * `transition-[color,background-color,border-color,box-shadow,opacity,transform]` estava
+ * copiada 10 vezes só no painel de render — escopo explícito (nunca `transition-all`),
+ * mas sem dono: mudar a curva do app pedia 10 edições, e cada cópia era uma chance de
+ * divergir. Aqui o escopo, a duração e a curva vêm do SSoT de motion. */
+@utility transition-ui {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: var(--dur-base);
+  transition-timing-function: var(--ease-out);
+}
+
 /* Também nunca existiu — 7 lugares pediam para esconder a barra de rolagem e
  * todos continuavam mostrando. */
 @utility no-scrollbar {
@@ -152,15 +163,19 @@ body {
   background: rgba(255 255 255 / 0.2);
 }
 
-/* Scene Maker — anel de foco ÚNICO (acessibilidade por teclado). Escopado na página
- * (.scene-maker) → consistente em todo controle (botões, pills, sliders, inputs) sem
- * tocar cada um. Só em :focus-visible → não aparece no clique de mouse. O outline
- * segue o border-radius do elemento automaticamente. */
-.scene-maker :is(button, [role="button"], a[href], input, textarea, summary):focus-visible {
+/* Anel de foco ÚNICO do app (acessibilidade por teclado). Consistente em todo controle
+ * (botões, pills, sliders, inputs) sem tocar cada um. Só em :focus-visible → não aparece
+ * no clique de mouse. O outline segue o border-radius do elemento automaticamente.
+ *
+ * ⚠️ Isto já esteve escopado em `.scene-maker`, e a classe não existia em mais nenhuma
+ * rota: a home e o painel de render — onde mora a ação que produz o entregável —
+ * navegavam no teclado SEM anel nenhum, alcançáveis e invisíveis. Escopo de anel de foco
+ * é opt-in por omissão, e o default de um opt-in de acessibilidade tem que ser "tem". */
+:is(button, [role="button"], a[href], input, textarea, summary):focus-visible {
   outline: 2px solid var(--color-acc2);
   outline-offset: 2px;
 }
-.scene-maker :is(button, [role="button"]):focus-visible {
+:is(button, [role="button"]):focus-visible {
   outline-offset: 1px;
 }
 

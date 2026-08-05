@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import ArtFramePanel from "@/components/ArtFramePanel";
+import ArtFramePanel, { ArtCropSurface } from "@/components/ArtFramePanel";
+import { dec } from "@/lib/utils";
 import {
   Panel,
   Group as PanelGroup,
@@ -233,7 +234,7 @@ function MockupCardImpl({
             onClick={(e) => e.stopPropagation()}
             className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[11px] font-semibold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl">
+            <span className="bg-white text-black text-[11px] font-semibold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-ui active:scale-[0.97] shadow-2xl">
               Abrir
             </span>
           </a>
@@ -246,7 +247,7 @@ function MockupCardImpl({
             title="Aplicar arte neste mockup"
             className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[11px] font-semibold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl">
+            <span className="bg-white text-black text-[11px] font-semibold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-ui active:scale-[0.97] shadow-2xl">
               Aplicar
             </span>
           </button>
@@ -274,7 +275,7 @@ function MockupCardImpl({
                   }}
                   title="Abrir no Photoshop"
                   aria-label="Abrir no Photoshop"
-                  className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm flex items-center justify-center hover:bg-[#001E36] transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl`}
+                  className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm flex items-center justify-center hover:bg-[#001E36] transition-ui active:scale-[0.97] shadow-xl`}
                 >
                   <span className="text-[10px] font-semibold leading-none tracking-tighter text-[#31A8FF]">Ps</span>
                 </button>
@@ -286,7 +287,7 @@ function MockupCardImpl({
                   }}
                   title="Mostrar na pasta"
                   aria-label="Mostrar na pasta"
-                  className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl`}
+                  className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-ui active:scale-[0.97] shadow-xl`}
                 >
                   <Folder className="w-3.5 h-3.5" />
                 </button>
@@ -302,7 +303,7 @@ function MockupCardImpl({
                 onClick={(e) => { e.stopPropagation(); onToggleCollection(mockup); }}
                 title={inCollection ? `Tirar de ${collectionLabel}  (B)` : `Guardar em ${collectionLabel}  (B)`}
                 aria-pressed={!!inCollection}
-                className={`w-7 h-7 rounded-lg backdrop-blur-sm flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 ${
+                className={`w-7 h-7 rounded-lg backdrop-blur-sm flex items-center justify-center transition-ui active:scale-[0.97] ${
                   inCollection
                     // Ligado, ele é ESTADO, não ação: um bloco branco chapado em cada
                     // card curado gritava mais que a própria thumbnail. Marca discreta
@@ -323,7 +324,7 @@ function MockupCardImpl({
                 onClick={(e) => { e.stopPropagation(); onSimilar(mockup); }}
                 title="Ver mockups parecidos com este  (S)"
                 aria-label="Ver mockups parecidos com este"
-                className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl`}
+                className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-ui active:scale-[0.97] shadow-xl`}
               >
                 <ScanSearch className="w-3.5 h-3.5" />
               </button>
@@ -332,7 +333,7 @@ function MockupCardImpl({
               type="button"
               onClick={(e) => { e.stopPropagation(); onHide(mockup); }}
               title="Esconder este mockup"
-              className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl`}
+              className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-ui active:scale-[0.97] shadow-xl`}
             >
               <EyeOff className="w-3.5 h-3.5" />
             </button>
@@ -457,7 +458,7 @@ function SuggestionCard({
             title="Aplicar arte neste mockup"
             className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[10px] font-semibold px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-2xl">
+            <span className="bg-white text-black text-[10px] font-semibold px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition-ui active:scale-[0.97] shadow-2xl">
               Aplicar
             </span>
           </button>
@@ -828,7 +829,7 @@ export default function Home() {
             } else if (ev.type === "group") {
               setDupesGroups((p) => [...p, ev.group]);
               const name = ev.group.keepPath.split(/[/\\]/).pop() || "";
-              addLog(`Duplicata: ${name} × ${ev.group.removePaths.length + 1} cópias, ${(ev.group.wastedBytes / 1e6).toFixed(1)} MB desperdiçados`);
+              addLog(`Duplicata: ${name} × ${ev.group.removePaths.length + 1} cópias, ${dec(ev.group.wastedBytes / 1e6)} MB desperdiçados`);
             } else if (ev.type === "complete") {
               setDupesSummary({ filesScanned: ev.filesScanned, totalWastedBytes: ev.totalWastedBytes });
               addLog(`✓ Concluído: ${ev.groups} grupos encontrados em ${ev.filesScanned.toLocaleString()} arquivos`);
@@ -863,6 +864,9 @@ export default function Home() {
 
   // UI Section States
   const [artSectionCollapsed, setArtSectionCollapsed] = useState(false);
+  /* O recorte é um MODO da superfície de resultado, não um painel à parte — por isso o
+   * estado mora aqui, com quem é dono da superfície, e não dentro do `ArtFramePanel`. */
+  const [cropOpen, setCropOpen] = useState(false);
   const [showSmartObjects, setShowSmartObjects] = useState(true);
   const [showAdjustments, setShowAdjustments] = useState(false);
   const [expandSoList, setExpandSoList] = useState(false);
@@ -1589,9 +1593,14 @@ export default function Home() {
         return;
       }
 
+      /* Cascata do Escape: fecha UMA camada por vez, da mais interna para a mais
+         externa. O recorte entra aqui, e não num listener próprio — dois listeners de
+         Escape em `window` disparam os dois, e o Esc fechava o recorte E o painel
+         inteiro na mesma tecla. Visto acontecendo antes de virar linha. */
       if (e.key === "Escape") {
         if (fullscreen) { setFullscreen(false); return; }
         if (typing && el === searchInputRef.current) { el.blur(); return; }
+        if (cropOpen) { setCropOpen(false); return; }
         if (selected) { setSelected(null); return; }
       }
 
@@ -1653,8 +1662,13 @@ export default function Home() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+    /* `cropOpen` PRECISA estar aqui. O handler fecha sobre o valor do render em que
+       foi registrado, e sem esta dependência ele enxergava `cropOpen` sempre falso:
+       a cascata do Escape pulava o recorte e fechava o painel inteiro, com o recorte
+       aberto na tela. O `eslint-disable` abaixo é o que deixa esse tipo de erro
+       entrar calado — toda variável nova usada aqui dentro entra nesta lista à mão. */
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, refs, fullscreen, view, collectionRefs, brandId, applyOrder]);
+  }, [selected, refs, fullscreen, view, collectionRefs, brandId, applyOrder, cropOpen]);
 
   // useCallback (não função solta): precisa de identidade ESTÁVEL — é passada
   // direto como prop `onSelect` pro MockupCard memoizado (React.memo só evita
@@ -2054,7 +2068,16 @@ export default function Home() {
         arts.push({ smartObject: f.smartObject, artBase64: payload });
       });
     } else {
-      const slot = artSlots[0];
+      /* O slot ATIVO, não o slot 0.
+       *
+       * Sem faces detectadas, `filledCount` habilita o botão com QUALQUER slot
+       * preenchido (`anyArt`), e esta linha lia só o `[0]`. As duas contas precisam
+       * concordar: enquanto discordarem, existe um estado em que o botão fica verde e
+       * a lista sai vazia. O caminho antigo continua valendo quando o slot ativo está
+       * vazio, então nada que funcionava passa a não funcionar. */
+      const slot = artSlots[activeSlotRef.current]?.preview
+        ? artSlots[activeSlotRef.current]
+        : Object.values(artSlots).find((s) => s?.preview) ?? artSlots[0];
       if (slot?.preview) {
         let payload = slot.preview;
         if (slot.img && soWidth && soHeight) {
@@ -2080,13 +2103,19 @@ export default function Home() {
     setRendering(true);
     setPreviewRendering(true);
     setRenderingRefId(sel.id);
-    setCurrentStep("compositing…");
+    setCurrentStep("Compondo…");
 
     return new Promise<void>((resolve) => {
       const cleanup = (err?: string) => {
         worker.removeEventListener("message", onMessage);
         worker.removeEventListener("error", onError);
-        if (err) setRenderLogs([{ step: "error", detail: err }]);
+        // A prévia dispara SOZINHA no hover-apply: sem toast, o worker morria e a tela
+        // simplesmente não mudava — o único sinal era o botão de logs aparecendo no
+        // rodapé. O caminho do render final já avisava; este não avisava.
+        if (err) {
+          setRenderLogs([{ step: "error", detail: err }]);
+          toast.error("A prévia falhou", { description: err });
+        }
         setRendering(false);
         setPreviewRendering(false);
         setRenderingRefId(null);
@@ -2129,10 +2158,31 @@ export default function Home() {
   };
 
   const handleRender = async (preview = false) => {
-    if (!selected?.psdPath) return;
+    /* Os dois `return` silenciosos da ação primária.
+     *
+     * Nenhum dos dois foi visto disparando: são defesa, não conserto de bug observado.
+     * Existem porque um `return` sem aviso na ação que produz o entregável é
+     * indistinguível de ter clicado errado — a mesma mentira do stream sem `complete`,
+     * uma camada antes. Se um dia dispararem, o usuário fica sabendo.
+     *
+     * O que É real e está no código é a assimetria que o segundo cobre: `filledCount`
+     * (quem habilita o botão) aceita QUALQUER slot preenchido quando não há faces
+     * detectadas, e `buildArts` lia só o slot 0. Habilitar por uma conta e executar por
+     * outra é como um botão passa a mentir, tenha ou não acontecido ainda. */
+    if (!selected?.psdPath) {
+      toast.error("Este mockup não tem PSD", {
+        description: "Sem arquivo no disco não há o que renderizar. Reindexe o acervo ou escolha outro mockup.",
+      });
+      return;
+    }
 
     const arts = buildArts(selected);
-    if (arts.length === 0) return;
+    if (arts.length === 0) {
+      toast.error("Nenhuma arte chegou ao render", {
+        description: "A arte não está no destino que este mockup usa. Clique na face desejada em Smart Objects e mande a arte de novo.",
+      });
+      return;
+    }
 
     // Preview → client-side Worker (fast, no TCP)
     if (preview) {
@@ -2222,6 +2272,14 @@ export default function Home() {
         // final com a mesma cara, então "Baixar todos" misturava JPEG de prévia
         // com PNG de entrega e ninguém via a diferença até abrir os arquivos.
         setRenderCache((c) => ({ ...c, [selected.id]: { url, name: selected.name } }));
+      } else {
+        // O stream terminou sem evento `complete`: servidor fechou a conexão, worker
+        // morreu depois do 200, rede caiu no meio. O `finally` desliga o `rendering` e a
+        // tela volta EXATAMENTE ao estado anterior — sem resultado, sem erro, sem toast.
+        // Quem esperou 40s não conseguia distinguir isso de ter clicado errado.
+        const detail = "O render terminou sem produzir arquivo. O render-server pode ter caído no meio.";
+        setRenderLogs((prev) => [...prev, { step: "error", detail }]);
+        toast.error("O render falhou", { description: detail });
       }
     } catch (err) {
       setRenderLogs((prev) => [...prev, { step: "error", detail: String(err) }]);
@@ -2511,39 +2569,55 @@ export default function Home() {
     (faces.length === 0 && psdInfo != null && psdInfo.smartObjects.length > 1 && !selectedSo);
 
   /**
-   * Já existe algum resultado na tela? É o que decide QUEM é a ação primária.
+   * Existe um PNG final pronto para baixar? É o que decide O QUE a ação primária É.
    *
-   * Só UM botão verde por vez: verde é a única cor de ação da BOXY, e dois
-   * verdes ao mesmo tempo mandam o usuário escolher entre dois "clique aqui".
-   * Sem resultado, a ação é renderizar. Com preview, a ação é o botão explícito
-   * de gerar o PNG final (que chama exatamente o mesmo `handleRender(false)` —
-   * medido na tela: os dois ficavam verdes e faziam a mesma coisa). Com o final
-   * pronto, a ação é baixar. Em todos esses casos RENDER FINAL vira contorno.
-   */
-  const hasResult = Boolean(renderResult) && !rendering;
-
-  /**
-   * Aviso de baixa resolução.
+   * Só UM primário por vez, e ele é sempre o próximo passo: sem arquivo final, o
+   * próximo passo é gerar; com arquivo final, é baixar. Prévia não conta — ela é JPEG
+   * de conferência, não entregável, então enquanto o resultado na tela for prévia o
+   * primário continua sendo "gerar".
    *
-   * As duas pontas já eram conhecidas — as dimensões internas do Smart Object
-   * (`soWidth/soHeight`) e as da arte (`artDims`) — e ninguém as comparava: o
-   * render saía borrado e o usuário só descobria abrindo o PNG final. Acima de
-   * 1.5× de ampliação o artefato fica visível a olho nu no mockup.
+   * Esta constante já existiu como `hasResult` e servia só para DEMOVER um dos dois
+   * botões que chamavam `handleRender(false)`. Os dois continuavam na tela.
    */
-  const upscale =
-    artDims && soWidth && soHeight
-      ? Math.max(soWidth / artDims.width, soHeight / artDims.height)
-      : 0;
-  const lowRes = upscale > 1.5;
+  const finalReady = Boolean(renderResult) && !rendering && !isPreviewResult;
 
-  // Auto-preview: dispara handleRender(true) 600ms após crop/zoom parar
+  /* A ampliação da arte era calculada AQUI, a partir de `artDims` — a arte inteira —
+   * enquanto o que alimenta o render em `cover` é o RECORTE. Recorte apertado fazia o
+   * aviso subestimar a própria ampliação, e o `ArtFramePanel` calculava certo ao lado,
+   * com o mesmo nome. Sobrou uma conta só, em `art-frame.ts` (`upscaleFactor` sobre
+   * `effectiveSource`), consumida por quem desenha a linha. */
+
+  /* Auto-preview: dispara handleRender(true) logo depois que o crop/zoom para.
+   *
+   * NÃO enquanto o recorte está aberto. Agora que o recorte ocupa a superfície de
+   * resultado, cada arrastada disparava uma prévia cujo overlay de carregando cobria
+   * a própria imagem que estava sendo recortada — a tela piscando por cima do gesto.
+   * O recorte é um ajuste modal: a prévia é o que acontece quando ele termina, e o
+   * efeito de fechamento abaixo cuida disso. */
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (renderDisabled || !artPreview) return;
+    if (renderDisabled || !artPreview || cropOpen) return;
     if (autoPreviewTimer.current) clearTimeout(autoPreviewTimer.current);
     autoPreviewTimer.current = setTimeout(() => { handleRender(true); }, 250);
     return () => { if (autoPreviewTimer.current) clearTimeout(autoPreviewTimer.current); };
-  }, [frame.cropPixels, frame.mode]);
+  }, [frame.cropPixels, frame.mode, cropOpen]);
+
+  /**
+   * O recorte é um modo, e todo modo precisa de saída garantida.
+   *
+   * Só existe em `cover` (é o único que recorta) e só com arte na mão. Trocar a arte,
+   * trocar de face ou sair do `cover` fecha sozinho — senão a superfície ficaria
+   * recortando um arquivo que não está mais lá.
+   */
+  const cropping = cropOpen && Boolean(artPreview) && frame.mode === "cover";
+
+  useEffect(() => {
+    if (!cropping && cropOpen) setCropOpen(false);
+  }, [cropping, cropOpen]);
+
+  useEffect(() => {
+    setCropOpen(false);
+  }, [artPreview, activeSlot]);
 
   const toggleLayer = (name: string) => {
     setHiddenLayers((prev) => {
@@ -2564,7 +2638,7 @@ export default function Home() {
               const panel = leftPanelRef.current;
               if (panel) panel.isCollapsed() ? panel.expand() : panel.collapse();
             }}
-            className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+            className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-ui active:scale-[0.97]"
             title="Toggle Sidebar"
           >
             <PanelLeft className="w-5 h-5" />
@@ -2623,7 +2697,7 @@ export default function Home() {
               <button
                 onClick={clearImageSearch}
                 title="Voltar ao catálogo"
-                className="ml-auto w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-acc/70 hover:text-white hover:bg-acc/20 transition-colors active:scale-90"
+                className="ml-auto w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-acc/70 hover:text-white hover:bg-acc/20 transition-colors active:scale-[0.97]"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -2638,7 +2712,7 @@ export default function Home() {
                   placeholder="Buscar mockups…    /"
                   defaultValue={search}
                   onChange={(e) => handleSearchInput(e.target.value)}
-                  className="w-full h-9 rounded-full bg-neutral-900/50 border border-neutral-800 pl-10 pr-9 text-xs placeholder:text-neutral-500 focus:outline-none focus:border-neutral-600 focus:bg-neutral-900 transition-colors"
+                  className="w-full h-9 rounded-full bg-neutral-900/50 border border-neutral-800 pl-10 pr-9 text-xs placeholder:text-neutral-500 focus:border-neutral-600 focus:bg-neutral-900 transition-colors"
                 />
                 {/* A busca é debounced: sem isto, digitar dá 300ms de tela parada
                     sem nenhum sinal de que algo está sendo procurado. */}
@@ -2650,7 +2724,7 @@ export default function Home() {
                 onClick={() => imageInputRef.current?.click()}
                 disabled={imageSearching}
                 title="Buscar mockups parecidos com uma imagem"
-                className="shrink-0 w-9 h-9 rounded-full bg-neutral-900/50 border border-neutral-800 flex items-center justify-center text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-90 disabled:opacity-40"
+                className="shrink-0 w-9 h-9 rounded-full bg-neutral-900/50 border border-neutral-800 flex items-center justify-center text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97] disabled:opacity-40"
               >
                 {imageSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
               </button>
@@ -2694,7 +2768,7 @@ export default function Home() {
           {Object.keys(renderCache).length > 0 && (
             <button
               onClick={() => { setShowSession(true); setSessionSelected(new Set()); }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300 transition-ui active:scale-[0.97]"
               title="Renders desta sessão"
             >
               <Download className="w-3.5 h-3.5" />
@@ -2707,7 +2781,7 @@ export default function Home() {
               com controles do dia a dia por algo que se faz uma vez por sessão. */}
           <button
             onClick={openIngest}
-            className={`p-2 rounded-lg hover:bg-white/5 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 ${
+            className={`p-2 rounded-lg hover:bg-white/5 transition-ui active:scale-[0.97] ${
               ingestOpen ? "text-white bg-white/5" : "text-neutral-500 hover:text-white"
             }`}
             title="Adicionar pasta ao acervo"
@@ -2719,7 +2793,7 @@ export default function Home() {
 
           <button
             onClick={() => setShowSettings(true)}
-            className="p-2 rounded-lg hover:bg-white/5 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+            className="p-2 rounded-lg hover:bg-white/5 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]"
             title="Configurações avançadas"
           >
             <Settings2 className="w-4.5 h-4.5" />
@@ -2734,7 +2808,7 @@ export default function Home() {
                 const panel = rightPanelRef.current;
                 if (panel) panel.isCollapsed() ? panel.expand() : panel.collapse();
               }}
-              className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-colors active:scale-95"
+              className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-colors active:scale-[0.97]"
               title="Alternar painel de detalhes"
             >
               <PanelRight className="w-5 h-5" />
@@ -2780,7 +2854,7 @@ export default function Home() {
                   key={chip.k}
                   onClick={chip.clear}
                   title="Remover este filtro"
-                  className="group inline-flex items-center gap-1.5 h-7 pl-3 pr-2 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-bold text-neutral-300 hover:border-neutral-600 hover:text-white transition-colors active:scale-95"
+                  className="group inline-flex items-center gap-1.5 h-7 pl-3 pr-2 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-bold text-neutral-300 hover:border-neutral-600 hover:text-white transition-colors active:scale-[0.97]"
                 >
                   <span className="max-w-[14rem] truncate">{chip.label}</span>
                   <X className="w-3 h-3 text-neutral-500 group-hover:text-white transition-colors" />
@@ -2846,7 +2920,7 @@ export default function Home() {
                 <button
                   onClick={connectVisant}
                   disabled={visantConnecting}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white text-black text-[11px] font-semibold px-3 py-2.5 hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] disabled:opacity-50 active:scale-[0.98]"
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white text-black text-[11px] font-semibold px-3 py-2.5 hover:bg-neutral-200 transition-ui disabled:opacity-50 active:scale-[0.98]"
                 >
                   {visantConnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5 fill-current" />}
                   {visantConnecting ? "Aguardando..." : "Conectar Visant"}
@@ -3093,7 +3167,7 @@ export default function Home() {
             {brandId && !suggestionsOpen && (
               <button
                 onClick={() => setSuggestionsOpen(true)}
-                className="mb-6 flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[11px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+                className="mb-6 flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[11px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-ui active:scale-[0.97]"
               >
                 <Zap className="w-3.5 h-3.5" />
                 Ver sugeridos para {brands.find((b) => b.id === brandId)?.name}
@@ -3126,7 +3200,7 @@ export default function Home() {
                       onClick={() => loadSuggestions({ force: true })}
                       disabled={loadingSuggestions}
                       title="Recalcular as sugestões desta marca"
-                      className="flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[11px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 disabled:opacity-40"
+                      className="flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[11px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-ui active:scale-[0.97] disabled:opacity-40"
                     >
                       {/* Rótulo FIXO. Trocar para "Analisando" era a terceira
                           cópia do mesmo estado (ícone girando + botão desabilitado
@@ -3136,7 +3210,7 @@ export default function Home() {
                     </button>
                     {/* Fecha o PAINEL — a marca continua conectada (coleção, aba
                         Coleção e logo dependem dela). Desconectar é no seletor. */}
-                    <button onClick={() => setSuggestionsOpen(false)} title="Fechar as recomendações (a marca continua conectada)" className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"><X className="w-4 h-4" /></button>
+                    <button onClick={() => setSuggestionsOpen(false)} title="Fechar as recomendações (a marca continua conectada)" className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui active:scale-[0.97]"><X className="w-4 h-4" /></button>
                   </div>
                 </div>
                 {suggestError ? (
@@ -3170,7 +3244,7 @@ export default function Home() {
                           loadSuggestions({ limit: next });
                         }}
                         disabled={loadingSuggestions}
-                        className="shrink-0 w-32 rounded-2xl border border-dashed border-neutral-800 flex flex-col items-center justify-center gap-2 text-neutral-500 hover:text-neutral-300 hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 disabled:opacity-40"
+                        className="shrink-0 w-32 rounded-2xl border border-dashed border-neutral-800 flex flex-col items-center justify-center gap-2 text-neutral-500 hover:text-neutral-300 hover:border-neutral-600 transition-ui active:scale-[0.97] disabled:opacity-40"
                       >
                         {loadingSuggestions ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5" />}
                         <span className="text-[10px] font-semibold">Ver mais</span>
@@ -3238,7 +3312,7 @@ export default function Home() {
                   onClick={() => setNameDialog({ mode: "create", value: "" })}
                   title="Nova coleção (não precisa de marca)"
                   aria-label="Nova coleção"
-                  className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+                  className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui active:scale-[0.97]"
                 >
                   <FolderPlus className="w-3.5 h-3.5" />
                 </button>
@@ -3249,7 +3323,7 @@ export default function Home() {
                       onClick={() => setNameDialog({ mode: "rename", value: collectionName === "Coleção" ? "" : collectionName })}
                       title="Renomear esta coleção"
                       aria-label="Renomear coleção"
-                      className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+                      className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui active:scale-[0.97]"
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
@@ -3260,7 +3334,7 @@ export default function Home() {
                         onClick={() => void removeCollection()}
                         title="Apagar esta coleção"
                         aria-label="Apagar coleção"
-                        className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-red-400 hover:border-red-500/40 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+                        className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-red-400 hover:border-red-500/40 transition-ui active:scale-[0.97]"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -3384,7 +3458,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => fetchPage(1, false)}
-                  className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white text-black text-[11px] font-semibold hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
+                  className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white text-black text-[11px] font-semibold hover:bg-neutral-200 transition-ui active:scale-[0.98]"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   Tentar de novo
@@ -3425,7 +3499,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={clearAllFilters}
-                  className="flex items-center gap-2 h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                  className="flex items-center gap-2 h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   Limpar filtros
@@ -3450,7 +3524,7 @@ export default function Home() {
                   {hideDuplicates && hiddenDupes > 0 && (
                     <button
                       onClick={() => setHideDuplicates(false)}
-                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
                     >
                       Mostrar duplicados
                     </button>
@@ -3458,7 +3532,7 @@ export default function Home() {
                   {hiddenIds.size > 0 && (
                     <button
                       onClick={restoreAllHidden}
-                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-95"
+                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
                     >
                       Restaurar ocultos
                     </button>
@@ -3652,7 +3726,7 @@ export default function Home() {
                       <span>Falha ao carregar mais mockups: {fetchError}</span>
                       <button
                         onClick={() => fetchPage(page + 1, true)}
-                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
+                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-ui active:scale-[0.98]"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         Tentar de novo
@@ -3667,7 +3741,7 @@ export default function Home() {
                           setTailError(null);
                           void loadTail();
                         }}
-                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
+                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-ui active:scale-[0.98]"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         Tentar de novo
@@ -3698,7 +3772,7 @@ export default function Home() {
               </span>
               <button
                 onClick={() => unhideMockup(lastHidden.id)}
-                className="flex items-center gap-2 bg-white text-black text-[10px] font-semibold px-3.5 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+                className="flex items-center gap-2 bg-white text-black text-[10px] font-semibold px-3.5 py-2 rounded-xl hover:bg-neutral-200 transition-ui active:scale-[0.97]"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Desfazer
@@ -3726,7 +3800,7 @@ export default function Home() {
                 <h2 className="font-bold text-sm truncate pr-2">{selected.name}</h2>
                 <p className="text-[10px] font-bold text-neutral-500">{selected.studio}</p>
               </div>
-              <button onClick={() => setSelected(null)} className="p-1.5 rounded-lg hover:bg-neutral-900 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
+              <button onClick={() => setSelected(null)} className="p-1.5 rounded-lg hover:bg-neutral-900 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -3748,15 +3822,42 @@ export default function Home() {
             <div className="flex-1 overflow-y-auto no-scrollbar">
               <div
                 className="relative aspect-[4/3] bg-neutral-900 group/preview overflow-hidden ring-1 ring-white/5 mx-4 mt-4 rounded-2xl"
-                onClick={!renderResult ? () => fileInputRef.current?.click() : undefined}
-                style={!renderResult ? { cursor: "pointer" } : undefined}
+                onClick={!renderResult && !cropping ? () => fileInputRef.current?.click() : undefined}
+                style={!renderResult && !cropping ? { cursor: "pointer" } : undefined}
               >
-                {renderResult ? (
+                {/* O recorte ASSUME esta superfície. Ele já morou num painel próprio
+                    logo abaixo, e o resultado era o defeito que o `ArtFramePanel`
+                    documenta: a arte sem a cena aqui, a cena sem a arte ali, e o
+                    enquadramento sendo ajustado num lugar e conferido no outro. Uma
+                    superfície grande por vez — o que está sendo decidido AGORA é o que
+                    ocupa ela. */}
+                {cropping ? (
+                  <>
+                    <ArtCropSurface
+                      fill
+                      artPreview={artPreview!}
+                      aspect={soWidth && soHeight ? soWidth / soHeight : 4 / 3}
+                      onCropPixels={(px) => setFrame((f) => ({ ...f, cropPixels: px }))}
+                    />
+                    {/* A saída do modo fica NA superfície, junto do trabalho. O botão que
+                        entrou no recorte está 300px abaixo, e sair por onde se entrou
+                        obriga a procurar. Esc faz o mesmo. */}
+                    <button
+                      onClick={() => setCropOpen(false)}
+                      className="absolute top-3 right-3 z-10 h-8 px-3 rounded-xl bg-white text-black text-[11px] font-semibold shadow-lg hover:bg-neutral-200 transition-ui active:scale-[0.97]"
+                    >
+                      Concluir recorte
+                    </button>
+                  </>
+                ) : renderResult ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={renderResult} alt="Render" className="absolute inset-0 w-full h-full object-contain cursor-pointer transition-transform [transition-duration:var(--dur-slow)] group-hover/preview:scale-[1.03]" onClick={() => setFullscreen(true)} />
                 ) : selected.referenceImageUrl ? (
                   <>
-                    <Image src={selected.referenceImageUrl} alt={selected.name} fill className="object-contain" priority />
+                    {/* `priority` saiu: esta imagem só existe com o drawer aberto, ou
+                        seja nunca é o LCP — e `priority` fora do LCP tira banda de quem
+                        é. */}
+                    <Image src={selected.referenceImageUrl} alt={selected.name} fill className="object-contain" />
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 opacity-0 group-hover/preview:opacity-100 transition-opacity [transition-duration:var(--dur-base)] bg-black/50">
                       <Upload className="w-6 h-6 text-white" />
                       <span className="text-[11px] font-bold text-white">Adicionar arte</span>
@@ -3768,14 +3869,23 @@ export default function Home() {
                     <span className="text-[11px] font-bold">Adicionar arte</span>
                   </div>
                 )}
-                {/* Render loading overlay — shown over the thumb for both preview (Worker) and final render */}
-                {rendering && (
+                {/* Render loading overlay — shown over the thumb for both preview (Worker) and final render.
+                    Nunca durante o recorte: ali esta caixa É a área de trabalho, e um
+                    overlay escurecendo o que a pessoa está arrastando é a tela brigando
+                    com o gesto. */}
+                {rendering && !cropping && (
                   <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] flex items-center justify-center px-6">
-                    <div className="flex flex-col items-center gap-2 w-full max-w-[220px]">
+                    {/* Três sinais de movimento para UMA espera: o Lottie, o texto
+                        pulsando e a barra varrendo, simultâneos, numa caixa de 220px.
+                        Ficou o Lottie (identidade) e a barra (indeterminação honesta);
+                        o `animate-pulse` do texto saiu, porque o passo já muda de
+                        palavra sozinho — piscar um texto que muda é ruído em cima de
+                        sinal. E "compositing…" era a única palavra em inglês da tela. */}
+                    <div className="flex flex-col items-center gap-2 w-full max-w-[220px]" aria-live="polite">
                       <Lottie animationData={boxLoaderData} loop className={previewRendering ? "w-10 h-10" : "w-16 h-16"} />
                       <div className="flex items-center gap-2 text-[10px] font-bold text-white/70">
-                        <span className="animate-pulse">{currentStep || (previewRendering ? "compositing…" : "Processando…")}</span>
-                        {!previewRendering && <span className="text-white/40">{renderElapsed}s</span>}
+                        <span>{currentStep || (previewRendering ? "Compondo…" : "Processando…")}</span>
+                        {!previewRendering && <span className="text-white/40 tabular-nums">{renderElapsed}s</span>}
                       </div>
                       {!previewRendering && (
                         <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
@@ -3786,16 +3896,23 @@ export default function Home() {
                   </div>
                 )}
                 
-                <div className="absolute top-3 left-3 flex gap-2 opacity-0 group-hover/preview:opacity-100 transition-colors translate-y-2 group-hover/preview:translate-y-0 [transition-duration:var(--dur-slow)]">
+                {/* Ações da superfície. Revelam no hover E no foco: eram o ÚNICO caminho
+                    para tela cheia, copiar PNG e abrir a pasta, e quem navega no teclado
+                    não tem hover — a ação existia e era inalcançável. `translate-y` fica
+                    porque flutua sobre a imagem: revelar nunca muda layout.
+                    Somem no recorte, que é outro modo e tem a saída dele. */}
+                {!cropping && (
+                <div className="absolute top-3 left-3 flex gap-2 opacity-0 group-hover/preview:opacity-100 group-focus-within/preview:opacity-100 translate-y-2 group-hover/preview:translate-y-0 group-focus-within/preview:translate-y-0 transition-ui [transition-duration:var(--dur-slow)]">
                   {renderResult && (
                     <>
-                      <button onClick={() => setFullscreen(true)} className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
+                      <button onClick={() => setFullscreen(true)} title="Ver em tela cheia" aria-label="Ver em tela cheia" className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-ui active:scale-[0.97]">
                         <Maximize2 className="w-4 h-4" />
                       </button>
                       <button
                         onClick={copyRenderAsPng}
                         title="Copiar como PNG"
-                        className={`backdrop-blur shadow-xl w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 ${copiedPng ? "bg-acc2 text-neutral-950" : "bg-black/80 hover:bg-white hover:text-black text-white"}`}
+                        aria-label="Copiar como PNG"
+                        className={`backdrop-blur shadow-xl w-9 h-9 rounded-xl flex items-center justify-center transition-ui active:scale-[0.97] ${copiedPng ? "bg-acc2 text-neutral-950" : "bg-black/80 hover:bg-white hover:text-black text-white"}`}
                       >
                         {copiedPng ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                       </button>
@@ -3804,18 +3921,24 @@ export default function Home() {
                   {selected.psdPath && (
                     <button
                       onClick={() => fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: selected.psdPath }) })}
-                      className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+                      title="Abrir a pasta do PSD"
+                      aria-label="Abrir a pasta do PSD"
+                      className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-ui active:scale-[0.97]"
                     >
                       <Folder className="w-4 h-4" />
                     </button>
                   )}
                 </div>
-
-                {renderResult && isPreviewResult && (
-                  <div className="absolute top-3 right-3 bg-amber-500 text-black text-[10px] font-semibold px-2 py-0.5 rounded-lg shadow-lg shadow-amber-500/20">PREVIEW</div>
                 )}
-                {renderTime != null && renderTime > 0 && (
-                  <div className="absolute bottom-3 right-3 bg-black/80 backdrop-blur text-[10px] font-bold text-neutral-400 px-2 py-1 rounded-lg">{(renderTime / 1000).toFixed(1)}s</div>
+
+                {/* Marca que o que está na tela NÃO é o entregável. Com o aviso de
+                    resolução fora daqui, âmbar voltou a ter um sentido só nesta tela, e
+                    o selo pôde parar de gritar: era sólido, em caps, com brilho. */}
+                {renderResult && isPreviewResult && !cropping && (
+                  <div className="absolute top-3 right-3 bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-semibold px-2 py-0.5 rounded-lg backdrop-blur">Prévia</div>
+                )}
+                {renderTime != null && renderTime > 0 && !cropping && (
+                  <div className="absolute bottom-3 right-3 bg-black/80 backdrop-blur text-[10px] font-bold text-neutral-400 px-2 py-1 rounded-lg tabular-nums">{dec(renderTime / 1000)}s</div>
                 )}
               </div>
 
@@ -3899,29 +4022,6 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Section: Adjustments */}
-                  {psdInfo && psdInfo.adjustments.filter(a => !a.hidden).length > 0 && (
-                    <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden transition-colors [transition-duration:var(--dur-slow)]">
-                      <button 
-                        onClick={() => setShowAdjustments(!showAdjustments)}
-                        className="w-full flex items-center justify-between p-4 text-[10px] font-medium text-neutral-500 hover:bg-white/5 transition-colors"
-                      >
-                        <div className="flex items-center gap-2 text-neutral-300"><Settings2 className="w-3.5 h-3.5 text-neutral-500" /> Camadas de ajuste</div>
-                        <ChevronDown className={`w-4 h-4 transition-transform [transition-duration:var(--dur-slow)] ${showAdjustments ? "" : "-rotate-90"}`} />
-                      </button>
-                      <div className={`overflow-hidden transition-colors [transition-duration:var(--dur-slow)] ${showAdjustments ? "max-h-[500px] border-t border-neutral-800" : "max-h-0"}`}>
-                        <div className="p-2 space-y-0.5">
-                          {psdInfo.adjustments.filter(a => !a.hidden).map((a, i) => (
-                            <label key={i} className={`flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer transition-colors ${hiddenLayers.has(a.path || a.name) ? "opacity-40" : "hover:bg-white/5"}`}>
-                              <input type="checkbox" checked={!hiddenLayers.has(a.path || a.name)} onChange={() => toggleLayer(a.path || a.name)} className="accent-white w-3.5 h-3.5" />
-                              <span className={`text-[11px] font-bold truncate flex-1 ${hiddenLayers.has(a.path || a.name) ? "line-through" : "text-neutral-300"}`}>{a.name}</span>
-                              <span className="text-[9px] font-bold text-neutral-500 uppercase">{a.type}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 {selected.description && (
@@ -3929,29 +4029,68 @@ export default function Home() {
                     <p className="text-[11px] text-neutral-500 leading-relaxed italic line-clamp-4">&ldquo;{selected.description}&rdquo;</p>
                   </div>
                 )}
-                
-                {/* Rótulo fora, dado dentro: "Info do arquivo" não desambiguava
-                    nada — nome de arquivo, MB e px se anunciam sozinhos. */}
-                <p className="text-[10px] text-neutral-500 text-center leading-relaxed pt-2 pb-6 border-b border-neutral-900">
-                  {selected.psdPath?.split(/[/\\]/).pop()}
-                  {selected.psdSizeBytes ? ` · ${(selected.psdSizeBytes / 1e6).toFixed(1)} MB` : ""}
-                  {psdInfo ? ` · ${psdInfo.width}×${psdInfo.height} px` : ""}
-                </p>
+
+                {/* Detalhes do PSD — inspeção, não produção.
+                    Eram DOIS blocos permanentes acima do que decide: um acordeão
+                    "Camadas de ajuste" e uma linha de arquivo/MB/px, ~92px que ninguém
+                    consulta para enquadrar uma arte. Existiam porque o dado estava à mão,
+                    que é o vício clássico de painel. Viraram um bloco só, fechado por
+                    padrão: alcançável para os 3% que precisam, sumido para os 97%.
+                    Também matou o box-dentro-de-box (moldura tingida dentro de moldura
+                    tingida) que o acordeão interno criava. */}
+                <div className="border-t border-neutral-900 pt-3 pb-6">
+                  <button
+                    onClick={() => setShowAdjustments(!showAdjustments)}
+                    aria-expanded={showAdjustments}
+                    className="w-full flex items-center justify-between gap-2 px-1 py-1.5 text-[10px] font-medium text-neutral-500 hover:text-neutral-300 transition-colors rounded-lg"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Settings2 className="w-3.5 h-3.5" />
+                      Detalhes do PSD
+                    </span>
+                    <ChevronDown className={`w-4 h-4 transition-transform [transition-duration:var(--dur-base)] ${showAdjustments ? "" : "-rotate-90"}`} />
+                  </button>
+
+                  {showAdjustments && (
+                    <div className="pt-2 space-y-2">
+                      <p className="text-[10px] text-neutral-500 leading-relaxed px-1">
+                        {selected.psdPath?.split(/[/\\]/).pop()}
+                        {selected.psdSizeBytes ? ` · ${dec(selected.psdSizeBytes / 1e6)} MB` : ""}
+                        {psdInfo ? ` · ${psdInfo.width}×${psdInfo.height} px` : ""}
+                      </p>
+                      {psdInfo && psdInfo.adjustments.filter(a => !a.hidden).length > 0 && (
+                        <div className="space-y-0.5">
+                          {psdInfo.adjustments.filter(a => !a.hidden).map((a, i) => (
+                            <label key={i} className={`flex items-center gap-3 py-2 px-1 rounded-xl cursor-pointer transition-colors ${hiddenLayers.has(a.path || a.name) ? "opacity-40" : "hover:bg-white/5"}`}>
+                              <input type="checkbox" checked={!hiddenLayers.has(a.path || a.name)} onChange={() => toggleLayer(a.path || a.name)} className="accent-white w-3.5 h-3.5" />
+                              <span className={`text-[11px] font-bold truncate flex-1 ${hiddenLayers.has(a.path || a.name) ? "line-through" : "text-neutral-300"}`}>{a.name}</span>
+                              <span className="text-[9px] font-bold text-neutral-500">{a.type}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* Art Input — colapsável. Hidden quando não há faces editáveis. */}
             {faces.length > 0 && (
               <div className="shrink-0 flex flex-col border-t border-neutral-900 bg-neutral-950">
-              {/* Header — clica para colapsar */}
+              {/* Header — clica para colapsar.
+                  Era `h-8` com texto de 9px: o único caminho de volta para a seção da
+                  arte depois de colapsada, e quase invisível. Alvo de 36px e texto de
+                  10px — continua discreto, mas agora é um alvo. */}
               <button
                 onClick={() => setArtSectionCollapsed((v) => !v)}
-                className="h-8 flex items-center justify-between px-4 w-full group select-none"
+                aria-expanded={!artSectionCollapsed}
+                className="h-9 flex items-center justify-between px-4 w-full group select-none hover:bg-white/5 transition-colors"
               >
-                <p className="text-[9px] font-medium text-neutral-500 group-hover:text-neutral-400 transition-colors">
-                  {faces.length > 1 && activeFace ? `Arte: ${activeFace.name}` : "Sua Arte"}
+                <p className="text-[10px] font-medium text-neutral-400 group-hover:text-neutral-200 transition-colors">
+                  {faces.length > 1 && activeFace ? `Arte: ${activeFace.name}` : "Sua arte"}
                 </p>
-                <ChevronDown className={`w-3.5 h-3.5 text-neutral-500 group-hover:text-neutral-500 transition-colors [transition-duration:var(--dur-base)] ${artSectionCollapsed ? "" : "rotate-180"}`} />
+                <ChevronDown className={`w-3.5 h-3.5 text-neutral-500 group-hover:text-neutral-300 transition-colors [transition-duration:var(--dur-base)] ${artSectionCollapsed ? "" : "rotate-180"}`} />
               </button>
 
               {/* Conteúdo colapsável */}
@@ -3982,7 +4121,9 @@ export default function Home() {
                             soWidth={soWidth}
                             soHeight={soHeight}
                             fileName={artFile?.name || "Área de transferência"}
-                            onClear={() => { clearSlot(activeSlot); setRenderResult(null); }}
+                            cropOpen={cropOpen}
+                            onCropOpenChange={setCropOpen}
+                            onClear={() => { clearSlot(activeSlot); setRenderResult(null); setCropOpen(false); }}
                           />
                         </div>
                       ) : (
@@ -4003,8 +4144,8 @@ export default function Home() {
                     {/* Brand shortcuts — só quando sem arte */}
                     {brandId && !artPreview && (
                       <div className="flex flex-col gap-2 shrink-0 w-[4.5rem]">
-                        <button onClick={(e) => { e.stopPropagation(); loadBrandLogoAsArt(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 py-1"><Zap className="w-4 h-4" /><span>Logo</span></button>
-                        <button onClick={(e) => { e.stopPropagation(); openLibrary(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 py-1"><Library className="w-4 h-4" /><span>Library</span></button>
+                        <button onClick={(e) => { e.stopPropagation(); loadBrandLogoAsArt(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-ui active:scale-[0.97] py-1"><Zap className="w-4 h-4" /><span>Logo</span></button>
+                        <button onClick={(e) => { e.stopPropagation(); openLibrary(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-ui active:scale-[0.97] py-1"><Library className="w-4 h-4" /><span>Library</span></button>
                       </div>
                     )}
                   </div>
@@ -4019,17 +4160,13 @@ export default function Home() {
                   desfazer ao lado. Automatismo silencioso numa etapa que produz
                   o entregável final vira surpresa no PNG. */}
               {framingHint && artPreview && (
-                // Três orações, um ícone de raio e uma moldura tingida para dizer
-                // uma coisa só. O que o usuário precisa saber é o ESTADO ("a arte
-                // está preenchendo") e a saída ("encaixar"). O porquê da decisão
-                // (`reason`) vira `title` — quem quiser auditar passa o mouse.
-                <div
-                  className="flex items-center gap-2 text-[10px] text-neutral-500"
-                  title={framingHint.reason}
-                >
-                  <span className="truncate">
-                    {framingHint.mode === "cover" ? "Preenchendo a superfície" : "Encaixada inteira"}
-                  </span>
+                /* O default é uma decisão tomada no lugar do usuário, e a REGRA dele
+                   tem que ser legível onde ele escolhe. O porquê (`reason`) estava só
+                   no `title`: invisível no teclado, invisível no toque, e visível no
+                   mouse apenas para quem já desconfiava. Agora é a frase, e o desfazer
+                   virou um alvo com cara de alvo em vez de texto solto. */
+                <div className="flex items-center gap-3 text-[10px] text-neutral-500">
+                  <span className="min-w-0 flex-1 leading-relaxed">{framingHint.reason}</span>
                   <button
                     onClick={() => {
                       setFrame((f) => ({
@@ -4039,82 +4176,72 @@ export default function Home() {
                       }));
                       setFramingHint(null);
                     }}
-                    className="ml-auto shrink-0 font-bold text-neutral-400 hover:text-white transition-colors"
+                    className="shrink-0 h-7 px-2.5 rounded-lg border border-neutral-800 font-bold text-neutral-300 hover:bg-neutral-900 hover:text-white transition-ui active:scale-[0.97]"
                   >
                     {framingHint.mode === "cover" ? "Encaixar" : "Preencher"}
                   </button>
                 </div>
               )}
 
-              {lowRes && artDims && (
-                <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                  <p className="text-[10px] font-bold text-amber-300 leading-relaxed">
-                    Arte com {artDims.width}×{artDims.height} para uma superfície de {soWidth}×{soHeight},
-                    ampliação de {upscale.toFixed(1)}×. O render vai sair borrado.
-                  </p>
-                </div>
-              )}
-              {/* Dois primários desabilitados a 30% não são "ações indisponíveis":
-                  são ruído no exato instante em que a única ação certa (soltar a
-                  arte) está logo acima. Sem face preenchida, a linha não existe. */}
+              {/* A ampliação da arte era uma caixa âmbar de 56px aqui, com fundo, borda,
+                  ícone de alerta e três orações em negrito, encostada no botão que
+                  produz o entregável. Sete sinais para um fato que não é erro — nada
+                  quebrou, não há o que reconhecer, não há botão para clicar. O fato
+                  virou um termo na linha de dimensões da arte (`ArtFramePanel`), ao lado
+                  dos números de que ele fala, e o conselho foi junto. */}
+
+              {/* UMA ação primária, e ela é sempre o próximo passo.
+                  Antes esta região desenhava DOIS botões que chamavam
+                  `handleRender(false)` — `RENDER FINAL` em contorno e
+                  `GERAR PNG FINAL PARA BAIXAR` em verde, a 12px um do outro. A
+                  duplicação já tinha sido vista (o comentário de `hasResult` a
+                  descreve) e o conserto na época foi demover um dos dois em vez de
+                  apagá-lo: sobraram duas ações na tela para uma no código. Pior, o
+                  verde levava ícone de download e NÃO baixava nada — disparava 40s de
+                  render.
+
+                  Agora o primário percorre os estados: sem arquivo final ele gera,
+                  com arquivo final ele baixa. Mexer na arte ou no enquadramento
+                  redispara a prévia, o `isPreviewResult` volta a ser true e o primário
+                  volta sozinho para "Gerar PNG" — não existe estado onde renderizar de
+                  novo seja preciso e não esteja à mão. */}
               {filledCount > 0 && (
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <button
                   onClick={() => handleRender(true)}
                   disabled={renderDisabled}
-                  className="flex-1 py-3 rounded-xl border border-neutral-800 text-xs font-bold text-neutral-300 disabled:opacity-30 hover:bg-neutral-900 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.97]"
+                  className="flex-1 py-3 rounded-xl border border-neutral-800 text-xs font-bold text-neutral-300 disabled:opacity-30 hover:bg-neutral-900 hover:text-white transition-ui active:scale-[0.97]"
                 >
-                  Preview Rápido
+                  Prévia
                 </button>
-                {/* Exatamente UM botão verde por vez, e ele é sempre o PRÓXIMO
-                    passo. Antes havia dois primários fortes competindo (branco
-                    sólido aqui, verde sólido no download) e o verde nem era o da
-                    marca. Feito o render final, este demote para contorno: quem
-                    passa a ser a ação é baixar o arquivo. */}
-                <button
-                  onClick={() => handleRender(false)}
-                  disabled={renderDisabled}
-                  className={`flex-1 py-3 rounded-xl font-semibold text-xs disabled:opacity-30 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.97] ${
-                    hasResult
-                      ? "border border-neutral-800 text-neutral-300 hover:bg-neutral-900 hover:text-white"
-                      : "bg-acc2 text-neutral-950 hover:bg-acc2/90 shadow-xl shadow-acc2/10"
-                  }`}
-                >
-                  RENDER FINAL{faces.length > 1 ? ` · ${filledCount}/${faces.length}` : ""}
-                </button>
+                {finalReady ? (
+                  <a
+                    href={renderResult!}
+                    download={`${selected.name.replace(/\s+/g, "_")}_mockup.png`}
+                    className="flex-[1.4] flex items-center justify-center gap-2 py-3 rounded-xl bg-acc2 text-neutral-950 text-xs font-semibold hover:bg-acc2/90 transition-ui active:scale-[0.97] shadow-lg shadow-acc2/10"
+                  >
+                    <Download className="w-4 h-4" /> Baixar PNG
+                  </a>
+                ) : (
+                  <button
+                    onClick={() => handleRender(false)}
+                    disabled={renderDisabled}
+                    className="flex-[1.4] py-3 rounded-xl text-xs font-semibold bg-acc2 text-neutral-950 disabled:opacity-30 hover:bg-acc2/90 shadow-lg shadow-acc2/10 transition-ui active:scale-[0.97]"
+                  >
+                    Gerar PNG{faces.length > 1 ? ` · ${filledCount}/${faces.length}` : ""}
+                  </button>
+                )}
                 {renderLogs.length > 0 && (
                   <button
                     onClick={() => setShowLogs(true)}
                     title="Ver logs do render"
-                    className={`px-3 py-3 rounded-xl border text-xs font-bold transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.97] ${renderLogs.some(l => l.step === "error") ? "border-red-500/40 text-red-400 hover:bg-red-500/10" : "border-neutral-800 text-neutral-500 hover:bg-neutral-900 hover:text-white"}`}
+                    aria-label="Ver logs do render"
+                    className={`px-3 py-3 rounded-xl border text-xs font-bold transition-ui active:scale-[0.97] ${renderLogs.some(l => l.step === "error") ? "border-red-500/40 text-red-400 hover:bg-red-500/10" : "border-neutral-800 text-neutral-500 hover:bg-neutral-900 hover:text-white"}`}
                   >
                     <Terminal className="w-4 h-4" />
                   </button>
                 )}
               </div>
-              )}
-
-              {renderResult && !rendering && !isPreviewResult && (
-                <a
-                  href={renderResult}
-                  download={`${selected.name.replace(/\s+/g, "_")}_mockup.png`}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-acc2 text-neutral-950 text-xs font-semibold hover:bg-acc2/90 transition-[color,background-color,transform] active:scale-[0.97] shadow-lg shadow-acc2/10"
-                >
-                  <Download className="w-4 h-4" /> DOWNLOAD PNG
-                </a>
-              )}
-
-              {/* Depois de um preview não havia caminho até o arquivo: o botão de
-                  download só existe no render final e nada dizia isso. O beco sem
-                  saída vira a próxima ação. */}
-              {renderResult && !rendering && isPreviewResult && (
-                <button
-                  onClick={() => handleRender(false)}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-acc2 text-neutral-950 text-xs font-semibold hover:bg-acc2/90 transition-[color,background-color,border-color] active:scale-[0.97] shadow-lg shadow-acc2/10"
-                >
-                  <Download className="w-4 h-4" /> GERAR PNG FINAL PARA BAIXAR
-                </button>
               )}
 
               {renderLogs.some((l) => l.step === "error") && (
@@ -4206,7 +4333,7 @@ export default function Home() {
                   )}
                   <button
                     onClick={() => triggerDownloads(downloadTargets)}
-                    className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+                    className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-ui active:scale-[0.97]"
                   >
                     <Download className="w-3.5 h-3.5" />
                     {sessionSelected.size > 0 ? `Baixar selecionados (${sessionSelected.size})` : "Baixar todos"}
@@ -4277,7 +4404,7 @@ export default function Home() {
             <div className="flex gap-2">
               <button
                 onClick={(e) => { e.stopPropagation(); copyRenderAsPng(); }}
-                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 ${copiedPng ? "bg-acc2 text-neutral-950" : "bg-neutral-800 hover:bg-neutral-700 text-white"}`}
+                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl transition-ui active:scale-[0.97] ${copiedPng ? "bg-acc2 text-neutral-950" : "bg-neutral-800 hover:bg-neutral-700 text-white"}`}
               >
                 {copiedPng ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copiedPng ? "Copiado!" : "Copiar PNG"}
               </button>
@@ -4285,13 +4412,13 @@ export default function Home() {
                 href={renderResult}
                 download={`${selected?.name || "render"}-render.${isPreviewResult ? "jpg" : "png"}`}
                 onClick={(e) => e.stopPropagation()}
-                className="flex items-center gap-2 bg-white text-black text-xs font-bold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+                className="flex items-center gap-2 bg-white text-black text-xs font-bold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-ui active:scale-[0.97]"
               >
                 <Download className="w-3.5 h-3.5" /> Download
               </a>
               <button
                 onClick={() => setFullscreen(false)}
-                className="bg-neutral-800 hover:bg-neutral-700 text-white w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+                className="bg-neutral-800 hover:bg-neutral-700 text-white w-9 h-9 rounded-xl flex items-center justify-center transition-ui active:scale-[0.97]"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -4308,7 +4435,7 @@ export default function Home() {
           </div>
 
           <div className="p-4 text-center text-[10px] font-bold text-neutral-500 bg-neutral-950/50">
-            {renderTime != null && renderTime > 0 && `Processado em ${(renderTime / 1000).toFixed(1)}s`}
+            {renderTime != null && renderTime > 0 && `Processado em ${dec(renderTime / 1000)}s`}
             {renderResult && ` · ${isPreviewResult ? "JPEG Preview" : "PNG Lossless"}`}
           </div>
         </DialogContent>
@@ -4336,7 +4463,7 @@ export default function Home() {
                 {nameDialog?.mode === "rename" ? "Renomear coleção" : "Nova coleção"}
               </p>
             </div>
-            <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
+            <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]">
               <X className="w-4 h-4" />
             </DialogClose>
           </div>
@@ -4347,14 +4474,14 @@ export default function Home() {
               onChange={(e) => setNameDialog((d) => (d ? { ...d, value: e.target.value } : d))}
               onKeyDown={(e) => { if (e.key === "Enter") void submitCollectionName(); }}
               placeholder="Referências de tipografia"
-              className="w-full h-10 px-3 rounded-xl bg-neutral-900 border border-neutral-800 text-sm text-white placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600"
+              className="w-full h-10 px-3 rounded-xl bg-neutral-900 border border-neutral-800 text-sm text-white placeholder:text-neutral-600 focus:border-neutral-600"
             />
             <p className="text-[10px] text-neutral-500">
-              Coleção avulsa não precisa de marca — vira o destino do marcador enquanto estiver ativa.
+              Coleção avulsa não precisa de marca. Enquanto estiver ativa, ela é o destino do marcador.
             </p>
             <button
               onClick={() => void submitCollectionName()}
-              className="h-10 rounded-xl bg-white text-black text-[11px] font-bold hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
+              className="h-10 rounded-xl bg-white text-black text-[11px] font-bold hover:bg-neutral-200 transition-ui active:scale-[0.98]"
             >
               {nameDialog?.mode === "rename" ? "Salvar nome" : "Criar coleção"}
             </button>
@@ -4372,14 +4499,14 @@ export default function Home() {
               </div>
               <p className="text-sm font-semibold text-white">Configurações avançadas</p>
             </div>
-            <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
+            <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]">
               <X className="w-4 h-4" />
             </DialogClose>
           </div>
           <div className="p-5 flex flex-col gap-3">
             <button
               onClick={() => { setShowSettings(false); setShowDupes(true); if (!dupesGroups.length && !dupesScanning) scanDuplicates(); }}
-              className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 hover:bg-amber-500/15 hover:border-amber-500/30 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98] group text-left"
+              className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 hover:bg-amber-500/15 hover:border-amber-500/30 transition-ui active:scale-[0.98] group text-left"
             >
               <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0 group-hover:bg-amber-500/25 transition-colors">
                 <Copy className="w-4.5 h-4.5 text-amber-400" />
@@ -4414,7 +4541,7 @@ export default function Home() {
               {hiddenIds.size > 0 && (
                 <button
                   onClick={restoreAllHidden}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-ui active:scale-[0.97]"
                 >
                   <RotateCcw className="w-3 h-3" />
                   Restaurar todos
@@ -4425,7 +4552,7 @@ export default function Home() {
               <button
                 onClick={() => setShowHidden(false)}
                 title="Fechar"
-                className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90"
+                className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -4470,7 +4597,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => restoreHidden(ref)}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-ui active:scale-[0.97]"
                 >
                   <Eye className="w-3 h-3" />
                   Reexibir
@@ -4526,12 +4653,12 @@ export default function Home() {
                 <button
                   onClick={() => scanDuplicates(true)}
                   disabled={dupesScanning}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-ui active:scale-[0.97] disabled:opacity-40"
                 >
                   <RefreshCw className={`w-3 h-3 ${dupesScanning ? "animate-spin" : ""}`} />
                   {dupesScanning ? "Escaneando..." : "Re-escanear"}
                 </button>
-                <button onClick={() => setShowDupes(false)} className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
+                <button onClick={() => setShowDupes(false)} className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -4565,7 +4692,7 @@ export default function Home() {
                     value={dupesFilter}
                     onChange={(e) => setDupesFilter(e.target.value)}
                     placeholder="Filtrar por nome ou caminho..."
-                    className="w-full h-8 rounded-xl bg-neutral-900 border border-neutral-800 pl-9 pr-4 text-xs focus:outline-none focus:border-neutral-600 transition-colors placeholder:text-neutral-500"
+                    className="w-full h-8 rounded-xl bg-neutral-900 border border-neutral-800 pl-9 pr-4 text-xs focus:border-neutral-600 transition-colors placeholder:text-neutral-500"
                   />
                   {dupesFilter && (
                     <button onClick={() => setDupesFilter("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white">
@@ -4612,7 +4739,7 @@ export default function Home() {
                 <div className="flex flex-col items-center justify-center py-16 gap-4">
                   <div className="p-4 rounded-full bg-red-500/10 text-red-500"><AlertTriangle className="w-7 h-7" /></div>
                   <p className="text-red-400 text-xs font-bold text-center px-8">{dupesError}</p>
-                  <button onClick={() => scanDuplicates()} className="text-[10px] font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95">
+                  <button onClick={() => scanDuplicates()} className="text-[10px] font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-ui active:scale-[0.97]">
                     Tentar novamente
                   </button>
                 </div>
@@ -4698,9 +4825,9 @@ export default function Home() {
                         <span className="text-[11px] font-bold text-neutral-200 truncate">{fileName}</span>
                         <span className="shrink-0 text-[8px] font-semibold text-neutral-500 bg-neutral-800/80 px-1.5 py-0.5 rounded">{ext}</span>
                       </div>
-                      <span className="text-[11px] font-bold text-neutral-500 text-right">{(group.sizeBytes / 1e6).toFixed(1)} MB</span>
+                      <span className="text-[11px] font-bold text-neutral-500 text-right">{dec(group.sizeBytes / 1e6)} MB</span>
                       <span className="text-[11px] font-bold text-neutral-500 text-right">{allPaths.length}×</span>
-                      <span className="text-[11px] font-semibold text-amber-400 text-right">{(group.wastedBytes / 1e6).toFixed(1)} MB</span>
+                      <span className="text-[11px] font-semibold text-amber-400 text-right">{dec(group.wastedBytes / 1e6)} MB</span>
                       <span />
                     </button>
 
@@ -4833,7 +4960,7 @@ export default function Home() {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setShowLibrary(false)} className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90">
+              <button onClick={() => setShowLibrary(false)} className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -4850,7 +4977,7 @@ export default function Home() {
                   <p className="text-red-400 text-sm font-bold text-center px-10">{assetError}</p>
                   <button 
                     onClick={openLibrary}
-                    className="flex items-center gap-2 text-[10px] font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95"
+                    className="flex items-center gap-2 text-[10px] font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-ui active:scale-[0.97]"
                   >
                     Tentar novamente
                   </button>
@@ -4868,7 +4995,7 @@ export default function Home() {
                       onClick={() => loadAssetAsArt(asset)}
                       className="group flex flex-col gap-3 text-left animate-in fade-in slide-in-from-bottom-2"
                     >
-                      <div className="aspect-square relative bg-white/5 border border-white/5 rounded-2xl overflow-hidden group-hover:border-white/20 group-hover:bg-white/10 transition-[color,background-color,border-color,box-shadow,opacity,transform] p-6 shadow-sm group-hover:shadow-2xl group-hover:-translate-y-1 [transition-duration:var(--dur-slow)]">
+                      <div className="aspect-square relative bg-white/5 border border-white/5 rounded-2xl overflow-hidden group-hover:border-white/20 group-hover:bg-white/10 transition-ui p-6 shadow-sm group-hover:shadow-2xl group-hover:-translate-y-1 [transition-duration:var(--dur-slow)]">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img 
                           src={asset.thumbnail} 

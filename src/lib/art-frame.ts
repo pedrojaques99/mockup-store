@@ -47,12 +47,43 @@ export function containRect(artW: number, artH: number, frameW: number, frameH: 
 }
 
 /**
+ * The pixels that will actually feed the render.
+ *
+ * Em `cover` a fonte é o RECORTE, não a arte inteira — e essa diferença já mentiu na
+ * tela: o painel anunciava a dimensão do arquivo original enquanto o render consumia um
+ * pedaço bem menor, então quanto mais apertado o recorte, mais o aviso SUBESTIMAVA a
+ * ampliação. Quem responde "qual é a fonte" tem que ser um lugar só.
+ */
+export function effectiveSource(
+  artW: number,
+  artH: number,
+  soW: number,
+  soH: number,
+  frame: Pick<FrameConfig, "mode" | "cropPixels">,
+): { width: number; height: number } {
+  if (frame.mode !== "cover") return { width: artW, height: artH };
+  return frame.cropPixels ?? coverCrop(artW, artH, soW, soH);
+}
+
+/**
+ * Quanto a fonte precisa ser ampliada para preencher a superfície. 1 = sem ampliação;
+ * abaixo de 1 sobra resolução (a arte é maior que o destino, o que é o caso bom).
+ */
+export function upscaleFactor(srcW: number, srcH: number, soW: number, soH: number): number {
+  if (!srcW || !srcH || !soW || !soH) return 0;
+  return Math.max(soW / srcW, soH / srcH);
+}
+
+/** Acima disto a ampliação vira artefato visível a olho nu no mockup. */
+export const LOW_RES_FACTOR = 1.5;
+
+/**
  * True when the source region is small enough relative to the SO inner size
  * that the upscale will be visible (> 1.5x).
  */
-export function isLowRes(srcW: number, srcH: number, soW: number, soH: number, factor = 1.5): boolean {
+export function isLowRes(srcW: number, srcH: number, soW: number, soH: number, factor = LOW_RES_FACTOR): boolean {
   if (!srcW || !srcH) return false;
-  return soW / srcW > factor || soH / srcH > factor;
+  return upscaleFactor(srcW, srcH, soW, soH) > factor;
 }
 
 /**

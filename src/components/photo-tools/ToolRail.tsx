@@ -85,7 +85,7 @@ export function ToolRail<T extends string>({
                       // Só-ícone: o rótulo de 7,5px que morava aqui era ilegível e
                       // redundante três vezes (tooltip com atalho, título do painel,
                       // chip do canvas). O nome sobrevive onde dá pra ler.
-                      "grid place-items-center w-10 h-10 rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] [transition-duration:var(--dur-fast)] active:scale-90",
+                      "grid place-items-center w-10 h-10 rounded-xl transition-ui [transition-duration:var(--dur-fast)] active:scale-[0.97]",
                       isActive ? "bg-acc2 text-zinc-950 shadow-md shadow-acc2/20" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
                     )}
                   >
