@@ -32,20 +32,24 @@ jobs:
       # `implicitly any` porque o módulo tipado tinha sumido. CI vermelho em 5 runs
       # seguidas, o que é o mesmo que não ter CI.
       #
-      # O repo do pacote é público, ele não tem dependência de runtime e o `dist` é
-      # gitignored: basta clonar no caminho que o lockfile espera e compilar com o tsc
-      # deste repo. Nada aqui muda como alguém instala na própria máquina.
+      # O repo do pacote é público e ele não tem dependência de runtime: basta clonar no
+      # caminho que o lockfile já espera, e o próprio `npm ci` compila o `dist` (que é
+      # gitignored) pelo script de build do pacote. Nada aqui muda como alguém instala na
+      # própria máquina.
       - name: psd-engine (o link local que o lockfile espera)
         shell: bash
-        run: git clone --depth 1 https://github.com/pedrojaques99/visantlabs-os.git ../../Cursor/visantlabs-os
+        run: |
+          git clone --depth 1 https://github.com/pedrojaques99/visantlabs-os.git ../../Cursor/visantlabs-os
+          # O `npm ci` daqui a pouco vai rodar o `build` do pacote linkado, e esse build
+          # importa `canvas` (que traz os proprios tipos) e precisa do `typescript`. Os dois
+          # entram no clone, e so eles: instalar o monorepo inteiro custaria minutos por um
+          # pacote que nao tem dependencia de runtime. `--ignore-scripts` porque o `canvas`
+          # e nativo e aqui so os tipos importam.
+          npm install --prefix ../../Cursor/visantlabs-os --ignore-scripts --no-audit --no-fund --no-save --legacy-peer-deps canvas typescript
 
       # .npmrc já tem legacy-peer-deps=true (conflito ag-psd 30 vs peer ^28, aceito de propósito).
       - name: Install
         run: npm ci
-
-      - name: Compilar o psd-engine
-        shell: bash
-        run: npx tsc -p ../../Cursor/visantlabs-os/packages/psd-engine/tsconfig.json
 
       - name: Typecheck
         run: npx tsc --noEmit
@@ -91,14 +95,17 @@ jobs:
       # do Next quebrando nos três sistemas operacionais.
       - name: psd-engine (o link local que o lockfile espera)
         shell: bash
-        run: git clone --depth 1 https://github.com/pedrojaques99/visantlabs-os.git ../../Cursor/visantlabs-os
+        run: |
+          git clone --depth 1 https://github.com/pedrojaques99/visantlabs-os.git ../../Cursor/visantlabs-os
+          # O `npm ci` daqui a pouco vai rodar o `build` do pacote linkado, e esse build
+          # importa `canvas` (que traz os proprios tipos) e precisa do `typescript`. Os dois
+          # entram no clone, e so eles: instalar o monorepo inteiro custaria minutos por um
+          # pacote que nao tem dependencia de runtime. `--ignore-scripts` porque o `canvas`
+          # e nativo e aqui so os tipos importam.
+          npm install --prefix ../../Cursor/visantlabs-os --ignore-scripts --no-audit --no-fund --no-save --legacy-peer-deps canvas typescript
 
       - name: Install
         run: npm ci
-
-      - name: Compilar o psd-engine
-        shell: bash
-        run: npx tsc -p ../../Cursor/visantlabs-os/packages/psd-engine/tsconfig.json
 
       # Sem nenhuma variável de ambiente — é exatamente o caso do dev novo.
       - name: Setup
