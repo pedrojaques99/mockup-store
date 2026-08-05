@@ -3592,7 +3592,7 @@ export default function Home() {
                       <button
                         onClick={copyRenderAsPng}
                         title="Copiar como PNG"
-                        className={`backdrop-blur shadow-xl w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 ${copiedPng ? "bg-acc2 text-zinc-950" : "bg-black/80 hover:bg-white hover:text-black text-white"}`}
+                        className={`backdrop-blur shadow-xl w-9 h-9 rounded-xl flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 ${copiedPng ? "bg-acc2 text-neutral-950" : "bg-black/80 hover:bg-white hover:text-black text-white"}`}
                       >
                         {copiedPng ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                       </button>
@@ -3875,7 +3875,7 @@ export default function Home() {
                   className={`flex-1 py-3 rounded-xl font-semibold text-xs disabled:opacity-30 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.97] ${
                     hasResult
                       ? "border border-neutral-800 text-neutral-300 hover:bg-neutral-900 hover:text-white"
-                      : "bg-acc2 text-zinc-950 hover:bg-acc2/90 shadow-xl shadow-acc2/10"
+                      : "bg-acc2 text-neutral-950 hover:bg-acc2/90 shadow-xl shadow-acc2/10"
                   }`}
                 >
                   RENDER FINAL{faces.length > 1 ? ` · ${filledCount}/${faces.length}` : ""}
@@ -3896,7 +3896,7 @@ export default function Home() {
                 <a
                   href={renderResult}
                   download={`${selected.name.replace(/\s+/g, "_")}_mockup.png`}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-acc2 text-zinc-950 text-xs font-semibold hover:bg-acc2/90 transition-[color,background-color,transform] active:scale-[0.97] shadow-lg shadow-acc2/10"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-acc2 text-neutral-950 text-xs font-semibold hover:bg-acc2/90 transition-[color,background-color,transform] active:scale-[0.97] shadow-lg shadow-acc2/10"
                 >
                   <Download className="w-4 h-4" /> DOWNLOAD PNG
                 </a>
@@ -3908,7 +3908,7 @@ export default function Home() {
               {renderResult && !rendering && isPreviewResult && (
                 <button
                   onClick={() => handleRender(false)}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-acc2 text-zinc-950 text-xs font-semibold hover:bg-acc2/90 transition-[color,background-color,border-color] active:scale-[0.97] shadow-lg shadow-acc2/10"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-acc2 text-neutral-950 text-xs font-semibold hover:bg-acc2/90 transition-[color,background-color,border-color] active:scale-[0.97] shadow-lg shadow-acc2/10"
                 >
                   <Download className="w-4 h-4" /> GERAR PNG FINAL PARA BAIXAR
                 </button>
@@ -4074,7 +4074,7 @@ export default function Home() {
             <div className="flex gap-2">
               <button
                 onClick={(e) => { e.stopPropagation(); copyRenderAsPng(); }}
-                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 ${copiedPng ? "bg-acc2 text-zinc-950" : "bg-neutral-800 hover:bg-neutral-700 text-white"}`}
+                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-95 ${copiedPng ? "bg-acc2 text-neutral-950" : "bg-neutral-800 hover:bg-neutral-700 text-white"}`}
               >
                 {copiedPng ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copiedPng ? "Copiado!" : "Copiar PNG"}
               </button>
