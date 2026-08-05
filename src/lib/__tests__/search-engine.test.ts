@@ -127,6 +127,16 @@ describe("facetas", () => {
     expect(matchesFacets(DOCS[0], { tags: ["Mockups Maison"] })).toBe(true);
   });
 
+  it("sem tagMode o padrão é OR: tag a mais AMPLIA o recorte", () => {
+    // Era AND, e por isso o segundo clique na taxonomia quase sempre esvaziava
+    // o grid. Se este teste voltar a falhar, o padrão foi revertido — e o
+    // sintoma na tela é o acervo encolhendo a cada faceta ligada.
+    expect(matchesFacets(DOCS[0], { tags: ["billboard", "inexistente"] })).toBe(true);
+    const um = search({ tags: ["billboard"] }).total;
+    const dois = search({ tags: ["billboard", "poster"] }).total;
+    expect(dois).toBeGreaterThanOrEqual(um);
+  });
+
   it("conta facetas sem deixar um chip zerar os outros", () => {
     // Contando COM studio aplicado, os outros estúdios ainda precisam aparecer — senão
     // o usuário entra num filtro e não consegue mais trocar de estúdio.

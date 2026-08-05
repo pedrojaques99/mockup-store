@@ -27,13 +27,14 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(parseInt(searchParams.get("limit") || "60"), 200);
   const search = searchParams.get("search") || "";
   const studio = searchParams.get("studio") || "";
-  // Multi-tag: `tags` (CSV, até 5) com modo AND/OR. Mantém compat com `tag`.
+  // Multi-tag: `tags` (CSV, até 5). O modo é OR por padrão — tag a mais amplia o
+  // recorte —, e só `tagMode=AND` pede a interseção. Mantém compat com `tag`.
   const tags = (searchParams.get("tags") || searchParams.get("tag") || "")
     .split(",")
     .map((t) => t.trim())
     .filter(Boolean)
     .slice(0, 5);
-  const tagMode = searchParams.get("tagMode") === "OR" ? "OR" : "AND";
+  const tagMode = searchParams.get("tagMode") === "AND" ? "AND" : "OR";
   const aspectRaw = (searchParams.get("aspect") || "") as AspectBucket;
   const aspect = ASPECTS.has(aspectRaw) ? aspectRaw : undefined;
   const hasPsd = searchParams.get("has_psd") === "true";

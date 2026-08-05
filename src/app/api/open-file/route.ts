@@ -35,7 +35,17 @@ export async function POST(req: NextRequest) {
     // clássico que faz o botão parecer quebrado sem erro nenhum.
     execFile("cmd", ["/c", "start", "", normalized], () => {});
   } else {
-    execFile("explorer", [`/select,${normalized}`], () => {});
+    // `windowsVerbatimArguments` NÃO é firula: o `explorer.exe` tem parser de
+    // linha de comando próprio (não usa CommandLineToArgvW). O Node, vendo um
+    // argumento com espaço — e TODO caminho do Google Drive tem, "Meu Drive" —,
+    // envolve o argumento inteiro em aspas: `"/select,H:\Meu Drive\...\x.psd"`.
+    // O explorer então não reconhece o switch e abre a pasta padrão (Documentos)
+    // sem erro nenhum: o botão "abre sem rota". A forma que ele entende é
+    // `/select,"<caminho>"` — aspas só em volta do caminho —, e para emitir
+    // exatamente isso é preciso desligar o escape automático do Node.
+    // Continua sem shell: verbatim só afeta a montagem da linha, não invoca cmd
+    // (e a validação acima já barrou aspas e metacaracteres no caminho).
+    execFile("explorer", [`/select,"${normalized}"`], { windowsVerbatimArguments: true }, () => {});
   }
 
   return NextResponse.json({ ok: true });

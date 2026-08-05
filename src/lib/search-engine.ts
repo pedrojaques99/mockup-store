@@ -56,6 +56,12 @@ export interface SearchQuery {
   search?: string;
   studio?: string;
   tags?: string[];
+  /**
+   * Default `OR`: tag a mais AMPLIA o recorte. Selecionar duas facetas é "quero
+   * ver bilboard e também outdoor", não "quero o que é as duas coisas" — com
+   * AND por padrão o segundo clique quase sempre zerava a lista. `AND` continua
+   * disponível para quem realmente quer a interseção.
+   */
   tagMode?: "AND" | "OR";
   aspect?: AspectBucket;
   requirePsd?: boolean;
@@ -79,7 +85,7 @@ export function matchesFacets(d: SearchDoc, q: SearchQuery) {
   if (q.tags?.length) {
     const pool = new Set([...d.tags.map(foldTerm), foldTerm(d.studio), ...d.mockupType.map(foldTerm)]);
     const has = (t: string) => pool.has(foldTerm(t));
-    return q.tagMode === "OR" ? q.tags.some(has) : q.tags.every(has);
+    return q.tagMode === "AND" ? q.tags.every(has) : q.tags.some(has);
   }
   return true;
 }
