@@ -303,9 +303,25 @@ export function shuffleOrder(
 /** Sinal de popularidade por doc (0..1) — ver `search-signals.ts`. */
 export type BoostFn = (docId: string) => number;
 
+/**
+ * Chave do mockup como COISA, não como registro.
+ *
+ * O catálogo tem mais linhas do que mockups: duas refs do Mongo resolvem para o mesmo
+ * `.psd` no disco (bundle com variação de tamanho, reingest do mesmo acervo). Medido:
+ * 4.480 registros com PSD ⇒ 3.520 arquivos distintos. Contar linha e chamar de "acervo"
+ * inflava o número em 18% na cara do usuário.
+ */
+export function mockupKey(d: SearchDoc): string {
+  if (d.psdPath) return `psd:${d.psdPath.replace(/\\/g, "/").toLowerCase()}`;
+  if (d.photoSceneId) return `scene:${d.photoSceneId}`;
+  return `id:${d.id}`;
+}
+
 export interface RankedResult {
   references: SearchDoc[];
   total: number;
+  /** Mockups distintos no recorte (arquivo, não registro). É o número que a UI mostra. */
+  totalDistinct: number;
   page: number;
   pages: number;
   /**
@@ -405,6 +421,7 @@ export function runSearch(
   return {
     references: hits.slice(start, start + limit),
     total: hits.length,
+    totalDistinct: new Set(hits.map(mockupKey)).size,
     page,
     pages: Math.max(1, Math.ceil(hits.length / limit)),
     pass,

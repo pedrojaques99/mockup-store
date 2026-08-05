@@ -22,7 +22,9 @@
     "visual:console": "tsx scripts/console-check.ts",
     "fixture:virt": "tsx scripts/make-virt-fixture.ts",
     "search:embed": "npx tsx --env-file=.env.local scripts/embed-catalog.ts",
-    "search:eval": "npx tsx --env-file=.env.local scripts/search-eval.ts"
+    "search:eval": "npx tsx --env-file=.env.local scripts/search-eval.ts",
+    "audit:design": "tsx scripts/ui-audit.ts",
+    "visual:touch": "tsx scripts/touch-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",

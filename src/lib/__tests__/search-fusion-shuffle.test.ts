@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  buildIndex, runSearch, fuseRRF, shuffleOrder,
+  buildIndex, runSearch, fuseRRF, shuffleOrder, mockupKey,
   type SearchDoc,
 } from "../search-engine";
 
@@ -145,5 +145,39 @@ describe("shuffleOrder", () => {
   it("runSearch expõe o shuffle pelo sort, respeitando facetas", () => {
     const r = runSearch(DOCS, MINI, { sort: "shuffle", seed: 11, studio: "Boxy Mockups" });
     expect(r.references.map((d) => d.id).sort()).toEqual(["bb2", "obra"]);
+  });
+});
+
+describe("contagem do acervo", () => {
+  // Medido no acervo real: 4.480 registros com PSD eram 3.520 arquivos distintos. O badge
+  // contava linha e chamava de "no acervo" — 18% a mais do que existe no disco.
+  const MESMO = "/lib/Billboard.psd";
+  const POOL: SearchDoc[] = [
+    doc({ id: "a", name: "Billboard", psdPath: MESMO }),
+    doc({ id: "b", name: "Billboard Pequena", psdPath: MESMO }),
+    doc({ id: "c", name: "Billboard Media", psdPath: MESMO.toUpperCase().replace("/LIB", "/lib") }),
+    doc({ id: "d", name: "Outro", psdPath: "/lib/Poster.psd" }),
+  ];
+  const IDX = buildIndex(POOL);
+
+  it("dois registros do mesmo arquivo são UM mockup", () => {
+    const r = runSearch(POOL, IDX, { limit: 50 });
+    expect(r.total).toBe(4);
+    expect(r.totalDistinct).toBe(2);
+  });
+
+  it("a chave ignora barra e caixa do caminho — o mesmo arquivo em Windows e POSIX", () => {
+    expect(mockupKey(doc({ id: "x", name: "n", psdPath: "C:\\Lib\\A.psd" })))
+      .toBe(mockupKey(doc({ id: "y", name: "n", psdPath: "c:/lib/a.psd" })));
+  });
+
+  it("cena-foto conta pela cena, e item sem arquivo conta por si", () => {
+    const cena = doc({ id: "s1", name: "Cena", psdPath: undefined, photoSceneId: "sc", type: "photo" });
+    const cena2 = doc({ id: "s2", name: "Cena de novo", psdPath: undefined, photoSceneId: "sc", type: "photo" });
+    const solto = doc({ id: "z", name: "Solto", psdPath: undefined });
+    const pool = [cena, cena2, solto];
+    const r = runSearch(pool, buildIndex(pool), { limit: 50 });
+    expect(r.total).toBe(3);
+    expect(r.totalDistinct).toBe(2);
   });
 });

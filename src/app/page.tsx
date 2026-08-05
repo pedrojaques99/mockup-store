@@ -298,7 +298,7 @@ function MockupCardImpl({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onToggleCollection(mockup); }}
-                title={inCollection ? `Tirar de ${collectionLabel}` : `Guardar em ${collectionLabel}`}
+                title={inCollection ? `Tirar de ${collectionLabel}  (B)` : `Guardar em ${collectionLabel}  (B)`}
                 aria-pressed={!!inCollection}
                 className={`w-7 h-7 rounded-lg backdrop-blur-sm flex items-center justify-center transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl ${
                   inCollection
@@ -316,7 +316,7 @@ function MockupCardImpl({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onSimilar(mockup); }}
-                title="Ver mockups parecidos com este"
+                title="Ver mockups parecidos com este  (S)"
                 aria-label="Ver mockups parecidos com este"
                 className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-90 shadow-xl`}
               >
@@ -624,6 +624,12 @@ export default function Home() {
   const [aspects, setAspects] = useState<{ name: string; count: number }[]>([]);
   const [allTags, setAllTags] = useState<Record<string, TagEntry[]>>({});
   const [total, setTotal] = useState(0);
+  /**
+   * Mockups DISTINTOS no recorte, e não linhas do catálogo. Duas refs podem apontar para
+   * o mesmo `.psd`: medido, 4.480 registros eram 3.520 arquivos. O badge dizia 4.480 e
+   * inflava o acervo em 18% — número que a tela afirmava e o disco não sustentava.
+   */
+  const [totalDistinct, setTotalDistinct] = useState(0);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   // Erro do fetchPage (Mongo offline, 500 etc.) — distinto do empty-state real:
@@ -791,17 +797,17 @@ export default function Home() {
           try {
             const ev = JSON.parse(line.slice(6));
             if (ev.type === "scan") {
-              addLog(`Listados ${ev.filesFound.toLocaleString()} arquivos — ${ev.candidates} candidatos com tamanho duplicado`);
+              addLog(`Listados ${ev.filesFound.toLocaleString()} arquivos. ${ev.candidates} candidatos com tamanho duplicado`);
             } else if (ev.type === "progress") {
               setDupesProgress({ hashed: ev.hashed, total: ev.total, pct: ev.pct });
-              if (ev.currentFile) addLog(`Hashing ${ev.hashed}/${ev.total} — ${ev.currentFile}`);
+              if (ev.currentFile) addLog(`Hashing ${ev.hashed}/${ev.total}: ${ev.currentFile}`);
             } else if (ev.type === "group") {
               setDupesGroups((p) => [...p, ev.group]);
               const name = ev.group.keepPath.split(/[/\\]/).pop() || "";
-              addLog(`Duplicata: ${name} × ${ev.group.removePaths.length + 1} cópias — ${(ev.group.wastedBytes / 1e6).toFixed(1)} MB desperdiçados`);
+              addLog(`Duplicata: ${name} × ${ev.group.removePaths.length + 1} cópias, ${(ev.group.wastedBytes / 1e6).toFixed(1)} MB desperdiçados`);
             } else if (ev.type === "complete") {
               setDupesSummary({ filesScanned: ev.filesScanned, totalWastedBytes: ev.totalWastedBytes });
-              addLog(`✓ Concluído — ${ev.groups} grupos encontrados em ${ev.filesScanned.toLocaleString()} arquivos`);
+              addLog(`✓ Concluído: ${ev.groups} grupos encontrados em ${ev.filesScanned.toLocaleString()} arquivos`);
             } else if (ev.type === "error") {
               throw new Error(ev.message);
             }
@@ -942,6 +948,7 @@ export default function Home() {
           setTailMode(null);
         }
         setTotal(data.total);
+        setTotalDistinct(data.totalDistinct ?? data.total);
         setHasMore(pageNum < data.pages);
         setPage(pageNum);
       } catch (err) {
@@ -955,7 +962,7 @@ export default function Home() {
         // o total (só em fetch não-incremental) evita o badge contradizer o grid.
         setFetchError(String((err as Error).message || err));
         setHasMore(false);
-        if (!append) setTotal(0);
+        if (!append) { setTotal(0); setTotalDistinct(0); }
       } finally {
         setLoading(false);
         setInitialLoad(false);
@@ -1075,7 +1082,7 @@ export default function Home() {
         }
         if (poll.status === "error") throw new Error(poll.message);
       }
-      throw new Error("Login expirou — tente novamente");
+      throw new Error("Login expirou. Tente de novo");
     } catch (err) {
       setVisantAuthError(String((err as Error).message || err));
       setVisantLoginUrl(null);
@@ -1180,6 +1187,18 @@ export default function Home() {
           body: JSON.stringify({ brandId, ids: [mockup.id], member }),
         });
         if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
+        // Desfazer em vez de confirmar. Tirar da coleção é reversível, então pedir
+        // confirmação antes cobraria um clique de todo mundo para proteger o engano de
+        // poucos; o caminho barato é agir na hora e deixar a volta à mão. Só o REMOVER
+        // ganha o aviso: guardar por engano não custa nada, perder curadoria custa.
+        if (!member) {
+          toast(`Fora da coleção: ${mockup.name}`, {
+            action: {
+              label: "Desfazer",
+              onClick: () => void toggleCollectionRef.current?.(mockup),
+            },
+          });
+        }
       } catch (err) {
         toast.error(`Não salvou na coleção: ${String((err as Error).message || err)}`);
         void loadCollection();
@@ -1187,6 +1206,10 @@ export default function Home() {
     },
     [brandId, collectionIds, loadCollection],
   );
+  // O desfazer chama a própria callback, que ainda não existe quando ela é criada.
+  // O ref quebra o ciclo sem custar a identidade estável de que o card memoizado depende.
+  const toggleCollectionRef = useRef<typeof toggleCollection | null>(null);
+  toggleCollectionRef.current = toggleCollection;
 
   /** Curar em lote o que já está selecionado no grid. */
   const addSelectionToCollection = useCallback(
@@ -1237,17 +1260,16 @@ export default function Home() {
     if (view === "collection" && brandId) void loadCompletions();
   }, [view, brandId, collectionIds.size, loadCompletions]);
 
-  /** Reordenar arrastando: a ordem da coleção é curadoria, então ela é persistida. */
-  const dropOn = useCallback(
-    async (targetId: string) => {
-      if (!dragId || dragId === targetId || !brandId) return;
-      const ids = collectionRefs.map((r) => r.id);
-      const from = ids.indexOf(dragId);
-      const to = ids.indexOf(targetId);
-      if (from < 0 || to < 0) return;
-      ids.splice(to, 0, ...ids.splice(from, 1));
-      setCollectionRefs(ids.map((id) => collectionRefs.find((r) => r.id === id)!).filter(Boolean));
-      setDragId(null);
+  /**
+   * Persiste uma ordem nova da coleção. A ordem é curadoria, então ela vale tanto quanto
+   * o conteúdo. Mora separada do arrasto porque o teclado (alt+seta) reordena pelo mesmo
+   * caminho — duas UIs para o mesmo gesto não podem virar duas implementações que
+   * divergem no primeiro conserto.
+   */
+  const applyOrder = useCallback(
+    async (ids: string[]) => {
+      if (!brandId) return;
+      setCollectionRefs((prev) => ids.map((id) => prev.find((r) => r.id === id)!).filter(Boolean));
       try {
         const r = await fetch("/api/collections", {
           method: "PATCH",
@@ -1260,7 +1282,22 @@ export default function Home() {
         void loadCollection();
       }
     },
-    [dragId, brandId, collectionRefs, loadCollection],
+    [brandId, loadCollection],
+  );
+
+  /** Reordenar arrastando. */
+  const dropOn = useCallback(
+    async (targetId: string) => {
+      if (!dragId || dragId === targetId || !brandId) return;
+      const ids = collectionRefs.map((r) => r.id);
+      const from = ids.indexOf(dragId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0) return;
+      ids.splice(to, 0, ...ids.splice(from, 1));
+      setDragId(null);
+      await applyOrder(ids);
+    },
+    [dragId, brandId, collectionRefs, applyOrder],
   );
 
   const [assetError, setAssetError] = useState<string | null>(null);
@@ -1430,6 +1467,44 @@ export default function Home() {
         if (selected) { setSelected(null); return; }
       }
 
+      // Reordenar a coleção pelo teclado. Arrastar era a ÚNICA forma de mudar a
+      // ordem, e ordem é curadoria: quem não usa mouse simplesmente não curava.
+      // Alt+seta move o card selecionado uma posição, que é o gesto que todo
+      // gerenciador de lista já colocou no dedo do usuário.
+      if (!typing && e.altKey && view === "collection" && selected &&
+          (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        e.preventDefault();
+        const ids = collectionRefs.map((r) => r.id);
+        const from = ids.indexOf(selected.id);
+        const to = from + (e.key === "ArrowRight" ? 1 : -1);
+        if (from >= 0 && to >= 0 && to < ids.length) {
+          const next = [...ids];
+          next.splice(to, 0, ...next.splice(from, 1));
+          void applyOrder(next);
+        }
+        return;
+      }
+
+      // As duas ações novas do card, no dedo: guardar na coleção e ver parecidos.
+      // Elas agem sobre o card SELECIONADO, que é o mesmo alvo das setas — assim o
+      // teclado tem um alvo só, e não um para navegar e outro para agir.
+      if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && selected) {
+        if (e.key === "b" || e.key === "B") {
+          if (!brandId) {
+            toast("Selecione uma marca para usar a coleção");
+          } else {
+            e.preventDefault();
+            void toggleCollectionRef.current?.(selected);
+          }
+          return;
+        }
+        if (e.key === "s" || e.key === "S") {
+          e.preventDefault();
+          void showSimilarRef.current?.(selected);
+          return;
+        }
+      }
+
       // Setas navegam o grid — mas não enquanto se digita (senão a seta que
       // deveria mover o cursor no campo troca o mockup selecionado) e não com
       // modificador (⌥→ é "pular palavra" do sistema, não "próximo card").
@@ -1451,7 +1526,7 @@ export default function Home() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, refs, fullscreen]);
+  }, [selected, refs, fullscreen, view, collectionRefs, brandId, applyOrder]);
 
   // useCallback (não função solta): precisa de identidade ESTÁVEL — é passada
   // direto como prop `onSelect` pro MockupCard memoizado (React.memo só evita
@@ -1540,6 +1615,8 @@ export default function Home() {
    */
   const [similarTo, setSimilarTo] = useState<{ id: string; name: string; mode: string; count: number } | null>(null);
   const [similarLoading, setSimilarLoading] = useState(false);
+  /** Onde o usuário estava quando pediu "parecidos" — para devolvê-lo ali ao voltar. */
+  const similarFrom = useRef<number | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   /**
@@ -1605,6 +1682,7 @@ export default function Home() {
 
       setRefs(found);
       setTotal(found.length);
+      setTotalDistinct(found.length);
       setHasMore(false);
       setFetchError(null);
       setInitialLoad(false);
@@ -1632,6 +1710,7 @@ export default function Home() {
    * normal com duas UIs diferentes seria a tela se contradizendo.
    */
   const showSimilar = useCallback(async (mockup: Reference) => {
+    similarFrom.current = gridScrollRef.current?.scrollTop ?? 0;
     setSimilarLoading(true);
     try {
       const r = await fetch(`/api/references/similar?id=${encodeURIComponent(mockup.id)}&limit=60`);
@@ -1646,6 +1725,7 @@ export default function Home() {
       }
       setRefs(found);
       setTotal(found.length);
+      setTotalDistinct(found.length);
       setHasMore(false);
       setFetchError(null);
       setInitialLoad(false);
@@ -1659,10 +1739,21 @@ export default function Home() {
     }
   }, []);
 
+  // Mesma razão do `toggleCollectionRef`: o atalho de teclado é montado antes desta
+  // callback existir, e o ref evita reordenar 300 linhas de arquivo por causa disso.
+  const showSimilarRef = useRef<typeof showSimilar | null>(null);
+  showSimilarRef.current = showSimilar;
+
   const clearSimilar = useCallback(() => {
     setSimilarTo(null);
     setHasMore(true);
-    fetchPage(1, false);
+    // Voltar tem de devolver o usuário ao lugar de onde ele saiu. Sem isto, olhar
+    // parecidos e desistir custava rolar o catálogo inteiro de novo — a ação punia
+    // quem a experimentou, que é a forma mais rápida de ninguém mais experimentar.
+    const back = similarFrom.current;
+    void fetchPage(1, false).then(() => {
+      if (back != null) requestAnimationFrame(() => gridScrollRef.current?.scrollTo({ top: back }));
+    });
   }, [fetchPage]);
 
   // Copia o render pro clipboard como PNG (preview vem em JPEG → converte)
@@ -1701,7 +1792,7 @@ export default function Home() {
     // serve ou se o app travou. Falha silenciosa é a pior das mentiras de estado.
     if (!file.type.startsWith("image/")) {
       toast.error("Esse arquivo não é uma imagem", {
-        description: `${file.name} — use PNG, JPG, WEBP ou SVG.`,
+        description: `${file.name}: use PNG, JPG, WEBP ou SVG.`,
       });
       return;
     }
@@ -2156,7 +2247,7 @@ export default function Home() {
         toast("Esse arquivo não está no catálogo", { description: "Nada a esconder — o grid nunca mostrou ele." });
       } else {
         toast.success(`Escondido do catálogo${matched > 1 ? ` (${matched} cards)` : ""}`, {
-          description: `${name} — o arquivo continua no disco.`,
+          description: `${name}. O arquivo continua no disco.`,
         });
       }
     } catch {
@@ -2370,7 +2461,7 @@ export default function Home() {
                 step="10"
                 value={thumbSize}
                 onChange={(e) => setThumbSize(parseInt(e.target.value))}
-                title={`Tamanho do card · ${thumbSize}px`}
+                title={`Tamanho do card: ${thumbSize}px`}
                 className="w-32 accent-white h-1 bg-neutral-800 rounded-full appearance-none cursor-pointer"
               />
               {/* O readout "230px" saiu: o feedback deste controle é o grid inteiro
@@ -2388,7 +2479,7 @@ export default function Home() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={imageSearch.thumb} alt="" className="w-6 h-6 rounded-full object-cover border border-acc/30 shrink-0" />
               <span className="text-[10px] font-semibold text-acc truncate">
-                Parecidos com a imagem · {imageSearch.count}
+                Parecidos com a imagem ({imageSearch.count})
               </span>
               <button
                 onClick={clearImageSearch}
@@ -2452,15 +2543,12 @@ export default function Home() {
               // buscar é a ação de todo dia — some primeiro o contexto.
               className="hidden lg:block px-3 py-1 rounded-full bg-white/5 border border-white/5 text-[10px] font-bold text-neutral-400"
               title={
-                displayRefs.length !== refs.length
-                  ? `${displayRefs.length} à vista de ${refs.length} carregados · ${total.toLocaleString()} no recorte`
-                  : `${total.toLocaleString()} no recorte atual`
+                total !== totalDistinct
+                  ? `${totalDistinct.toLocaleString()} mockups em ${total.toLocaleString()} registros: o mesmo arquivo aparece mais de uma vez no catálogo`
+                  : `${totalDistinct.toLocaleString()} no recorte atual`
               }
             >
-              {displayRefs.length !== refs.length && (
-                <span className="text-white">{displayRefs.length} à vista · </span>
-              )}
-              {total.toLocaleString()} {hasActiveFilters ? "no filtro" : "no acervo"}
+              {totalDistinct.toLocaleString()} {hasActiveFilters ? "no filtro" : "no acervo"}
             </div>
           )}
 
@@ -2949,7 +3037,7 @@ export default function Home() {
             {brandId && (
               <div className="flex items-center gap-2 mb-4">
                 {([
-                  { k: "all", label: "Acervo", count: total },
+                  { k: "all", label: "Acervo", count: totalDistinct },
                   { k: "collection", label: collectionName || "Coleção", count: collectionIds.size },
                 ] as const).map(({ k, label, count }) => (
                   <button
@@ -2967,7 +3055,7 @@ export default function Home() {
                 ))}
                 {view === "collection" && collectionIds.size > 0 && (
                   <span className="text-[10px] text-neutral-500">
-                    arraste para reordenar, a ordem é sua
+                    arraste ou use alt+seta para reordenar, a ordem é sua
                   </span>
                 )}
               </div>
@@ -2991,7 +3079,7 @@ export default function Home() {
                       ? "galeria nova a cada abertura, puxando o que combina com a marca selecionada"
                       : "galeria nova a cada abertura, com o acervo inteiro em outra ordem",
                   },
-                  { k: "popular", label: "Mais usados", rule: "os que você mais abre e renderiza primeiro — empate resolve no alfabético" },
+                  { k: "popular", label: "Mais usados", rule: "os que você mais abre e renderiza primeiro, com empate resolvido no alfabético" },
                   { k: "name", label: "A–Z", rule: "ordem alfabética pelo nome do arquivo" },
                 ] as const).map(({ k, label, rule }) => (
                   <button
@@ -3013,7 +3101,22 @@ export default function Home() {
               </div>
             )}
 
-            {view === "collection" && !collectionLoading && collectionRefs.length === 0 ? (
+            {view === "collection" && collectionLoading && collectionRefs.length === 0 ? (
+              // Mesma forma do skeleton do acervo. A aba Coleção não mostrava NADA
+              // enquanto carregava, então trocar de aba dava um branco e depois um
+              // salto — e branco é indistinguível de "esta coleção está vazia".
+              <div className="grid" style={{ gap: GRID_GAP, gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}>
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="rounded-2xl overflow-hidden border border-neutral-800/50 bg-neutral-900/30 animate-pulse">
+                    <div className="bg-neutral-800/40" style={{ aspectRatio: "4/3" }} />
+                    <div className="p-3 space-y-2">
+                      <div className="h-2.5 bg-neutral-800/60 rounded w-3/4" />
+                      <div className="h-2 bg-neutral-800/40 rounded w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : view === "collection" && !collectionLoading && collectionRefs.length === 0 ? (
               // Coleção vazia é o estado NORMAL de uma marca nova, não uma falha. Então ele
               // ensina o gesto (o marcador no card) em vez de só constatar o vazio — e já
               // oferece o atalho de encher com o que a marca sugere.
@@ -3124,7 +3227,7 @@ export default function Home() {
                 <div className="text-center">
                   <p className="text-base font-semibold text-neutral-400">Tudo oculto nesta página</p>
                   <p className="text-xs font-bold text-neutral-500 mt-2">
-                    {refs.length} carregados · {hiddenDupes > 0 && `${hiddenDupes} duplicados · `}
+                    {refs.length} carregados, {hiddenDupes > 0 && `${hiddenDupes} duplicados, `}
                     {hiddenIds.size > 0 && `${hiddenIds.size} escondidos`}
                   </p>
                 </div>
@@ -3331,7 +3434,7 @@ export default function Home() {
                     // não mostra "Fim da Biblioteca" (mentira: não foi fim, foi falha)
                     // nem refaz fetch sozinho (hasMore já foi pra false no fetchPage).
                     <div className="flex flex-col items-center gap-3 text-red-400 text-[10px] font-medium">
-                      <span>Falha ao carregar mais mockups — {fetchError}</span>
+                      <span>Falha ao carregar mais mockups: {fetchError}</span>
                       <button
                         onClick={() => fetchPage(page + 1, true)}
                         className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-[color,background-color,border-color,box-shadow,opacity,transform] active:scale-[0.98]"
@@ -3631,7 +3734,7 @@ export default function Home() {
                 className="h-8 flex items-center justify-between px-4 w-full group select-none"
               >
                 <p className="text-[9px] font-medium text-neutral-500 group-hover:text-neutral-400 transition-colors">
-                  {faces.length > 1 && activeFace ? `Arte · ${activeFace.name}` : "Sua Arte"}
+                  {faces.length > 1 && activeFace ? `Arte: ${activeFace.name}` : "Sua Arte"}
                 </p>
                 <ChevronDown className={`w-3.5 h-3.5 text-neutral-500 group-hover:text-neutral-500 transition-colors [transition-duration:var(--dur-base)] ${artSectionCollapsed ? "" : "rotate-180"}`} />
               </button>
@@ -3728,7 +3831,7 @@ export default function Home() {
                 <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                   <p className="text-[10px] font-bold text-amber-300 leading-relaxed">
-                    Arte com {artDims.width}×{artDims.height} para uma superfície de {soWidth}×{soHeight} —
+                    Arte com {artDims.width}×{artDims.height} para uma superfície de {soWidth}×{soHeight},
                     ampliação de {upscale.toFixed(1)}×. O render vai sair borrado.
                   </p>
                 </div>
@@ -4133,7 +4236,7 @@ export default function Home() {
                           ? `${dupesGroups.length} grupo${dupesGroups.length > 1 ? "s" : ""} encontrado${dupesGroups.length > 1 ? "s" : ""}...`
                           : "Iniciando scan..."
                         : dupesSummary
-                        ? `${dupesGroups.length} grupos · ${dupesSummary.filesScanned.toLocaleString()} arquivos · `
+                        ? `${dupesGroups.length} grupos, ${dupesSummary.filesScanned.toLocaleString()} arquivos, `
                         : "Pronto para escanear"}
                       {dupesSummary && (
                         <span className="text-amber-400">{(dupesSummary.totalWastedBytes / 1e6).toFixed(0)} MB desperdiçados</span>
@@ -4292,7 +4395,7 @@ export default function Home() {
                   <div className="text-center">
                     <p className="text-sm font-semibold text-white">Nenhuma duplicata</p>
                     <p className="text-[10px] font-bold text-neutral-500 mt-2">
-                      {dupesSummary.filesScanned.toLocaleString()} arquivos verificados — tudo limpo!
+                      {dupesSummary.filesScanned.toLocaleString()} arquivos verificados, tudo limpo
                     </p>
                   </div>
                 </div>
@@ -4369,7 +4472,7 @@ export default function Home() {
                                   <p className={`text-[10px] font-bold truncate ${isKeep ? "text-emerald-300" : "text-neutral-400"}`}>{name}</p>
                                   <p className="text-[8px] text-neutral-500 font-mono truncate mt-0.5">
                                     <span
-                                      title={origin.safeToDelete ? undefined : "Fora da sua conta — apagar aqui apaga na origem, para todo mundo"}
+                                      title={origin.safeToDelete ? undefined : "Fora da sua conta. Apagar aqui apaga na origem, para todo mundo"}
                                       className={`mr-1.5 px-1 py-px rounded not-italic ${
                                         origin.safeToDelete
                                           ? "bg-neutral-800 text-neutral-500"
@@ -4431,7 +4534,7 @@ export default function Home() {
                 <div className="flex items-center gap-3">
                   <HardDrive className="w-3.5 h-3.5 text-neutral-500" />
                   <p className="text-[10px] font-bold text-neutral-500">
-                    {dupesGroups.reduce((acc, g) => acc + g.removePaths.length, 0)} arquivos removíveis ·{" "}
+                    {dupesGroups.reduce((acc, g) => acc + g.removePaths.length, 0)} arquivos removíveis,{" "}
                     <span className="text-amber-400">{(dupesSummary.totalWastedBytes / 1e6).toFixed(0)} MB</span> recuperáveis
                   </p>
                 </div>

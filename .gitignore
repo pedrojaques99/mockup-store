@@ -62,3 +62,6 @@ bun.lock
 
 # Modelos do tesseract.js — baixados em runtime pelo layout-ocr, 7,4MB de artefato.
 *.traineddata
+
+# Build de produção isolado (NEXT_DIST_DIR) — medir perf sem brigar pelo .next do dev
+.next-prod/
