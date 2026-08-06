@@ -8,6 +8,67 @@ This version has breaking changes — APIs, conventions, and file structure may 
 > && npm run dev`, e o quadro do que cada peça ausente desliga). Este arquivo é o manual
 > de operação: assume a máquina já de pé.
 
+## O app é offline-first — nada aqui exige banco
+
+Medido em 06/08/2026: subindo **sem** `MONGODB_URI`, com `PSD_DIRS` apontando 112 PSDs,
+o catálogo devolvia **134 itens e ZERO PSD**. A metade PSD vinha inteira do Mongo — um
+app público exigia um cluster só para listar arquivos que já estão no disco de quem
+baixou. Depois do seed, no mesmo cenário: **5.869 itens**.
+
+- **Catálogo local**: `src/lib/store-sqlite.ts`, sobre o `node:sqlite` (biblioteca
+  PADRÃO do Node 22 — nada para compilar, nenhum módulo nativo no caminho do "clone e
+  roda"). `getDb()` escolhe: SQLite por padrão, Mongo quando as duas variáveis existem.
+  ⚠️ **Não é um driver de Mongo.** É adaptador das 5 operações que o app usa (medidas:
+  `find`, `findOne`, `insertOne`, `updateOne`, e a contagem de dimensões). Filtro fora do
+  subconjunto **estoura com nome** — ignorar devolveria a coleção inteira onde o chamador
+  queria um recorte, e ninguém veria pela tela.
+- **Caminho portátil**: `src/lib/psd-roots.ts` guarda `{acervo}/rel`. O absoluto com
+  letra de drive prendia o registro a uma máquina, e prendia **calado**: quem monta em
+  `Y:` não vê erro, vê o acervo encolhido (o `psd-presence` esconde o que não acha). A
+  leitura aceita os três formatos — portátil, absoluto local, e absoluto de outra máquina
+  (este reencontrado por nome, a mesma rede do `psd:repoint`).
+- **Levar o acervo indexado para outra máquina**: `npm run seed:export` de um lado,
+  `npm run seed:import` do outro (`seed:status` confere). Reindexar não é copiar linha, é
+  **abrir cada PSD** para extrair faces; o seed carrega esse trabalho pronto. Provado com
+  junção do Windows: 189 PSDs resolvem identicamente em `Z:/BOXY/Produtos` e em
+  `C:/Temp/…/acervo`, sem reindexar nada.
+
+### Configuração e chaves: `data/config.json`, e a UI conta a origem
+
+`src/lib/app-config.ts` + engrenagem na home. **Uma config, um lugar** — sem cópia
+espelhada em `userData` (a cópia diverge nos dois sentidos e ninguém descobre qual vale).
+
+- **Precedência: `process.env` vence**, e a tela **diz isso**. O risco dessa escolha é o
+  silêncio (digitar, salvar, nada mudar), então toda leitura devolve `origem` e o campo
+  travado aparece desabilitado com "definido no .env.local".
+- ⚠️ **`aplicarConfigNoProcesso` injeta a chave no `process.env`** — é a única forma de os
+  SDKs (OpenAI/Anthropic/Replicate leem a variável sozinhos, na construção do cliente)
+  enxergarem o BYOK. Roda em `src/instrumentation.ts`, no boot. **O que nós injetamos é
+  rastreado** (`injetadas`): sem isso a chave do painel vira indistinguível de variável
+  real, a origem volta `env`, e a UI trava o campo dizendo "definido no .env.local" para
+  o que a pessoa acabou de digitar ali.
+- ⚠️ **No `instrumentation.ts`, o `if (=== "nodejs")` com o import DENTRO dele não é
+  estilo — é o que faz o build passar.** O arquivo também é compilado para o Edge, e o
+  webpack resolve o import estaticamente. Na forma `if (!== "nodejs") return`, o build
+  quebra com "Can't resolve 'fs'".
+- A chave em claro **nunca** volta para o cliente: a API devolve presença, máscara e
+  origem. Teste de conexão (`/api/config/test`) roda no servidor, em endpoint de leitura,
+  sem gastar crédito.
+
+### `npm run check:offline` — o portão que prova que dá para distribuir
+
+Sobe o app **sem configuração nenhuma** e confere: catálogo local, grid/busca/facetas
+respondendo, e a config gravável pela API sem editar arquivo nem reiniciar. Provado nos
+dois sentidos (vazar a chave ⇒ `exit 1`). Roda no CI sobre o job de clone limpo
+(`-- --url`). Três armadilhas que já o deixaram **verde mentindo**:
+
+1. **O Next carrega `.env.local` sozinho** — env mínima no processo filho não basta; o
+   portão media o app CONFIGURADO e passava. O arquivo sai do caminho durante o teste.
+2. **`kill` no shell não mata `next start` no Windows** — a rodada seguinte batia no
+   ZUMBI da anterior, respondendo com a config velha. `taskkill /T`.
+3. **No modo `--url` ele escreve na config DE VERDADE** — deixou `sk-teste-…` gravado em
+   `data/config.json` na primeira execução. Agora desfaz o que escreveu.
+
 # Operação headless (agente via CLI)
 
 Pedidos tipo "renderiza N mockups com a marca X" são atendidos pelo `scripts/agent-cli.ts` — fala direto com Mongo + Visant + render-server, sem precisar do Next:

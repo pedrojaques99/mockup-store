@@ -140,3 +140,9 @@ jobs:
           # virtualização real em vez de pulada.
           npm run fixture:virt
           npm run visual:ingest -- --url http://localhost:3123
+          # O app é distribuível? Este runner É a máquina de quem baixou: sem
+          # .env.local, sem Mongo, sem acervo. O portão confere que o catálogo
+          # sobe local, que dá para configurar acervo e chave PELA API (sem
+          # editar arquivo, sem reiniciar) e que a chave nunca volta em claro.
+          # Provado nos dois sentidos: vazar a chave derruba o passo.
+          npm run check:offline -- --url http://localhost:3123
