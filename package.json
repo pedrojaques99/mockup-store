@@ -38,7 +38,8 @@
     "visual:scene": "tsx scripts/scene-visual-check.ts",
     "seed:export": "tsx --env-file-if-exists=.env.local scripts/catalog-seed.ts export",
     "seed:import": "tsx --env-file-if-exists=.env.local scripts/catalog-seed.ts import",
-    "seed:status": "tsx --env-file-if-exists=.env.local scripts/catalog-seed.ts status"
+    "seed:status": "tsx --env-file-if-exists=.env.local scripts/catalog-seed.ts status",
+    "check:offline": "node scripts/offline-gate.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",

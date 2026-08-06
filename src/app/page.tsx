@@ -70,6 +70,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { SmartObjectList } from "@/components/mockup/SmartObjectList";
 import { PsdDetails } from "@/components/mockup/PsdDetails";
 import { ComoUsar } from "@/components/ComoUsar";
+import { ConfigPanel } from "@/components/ConfigPanel";
 import type { Face, PsdInfo, ArtSlot } from "@/components/mockup/types";
 import { Switch } from "@/components/ui/Switch";
 import { useContainerColumns } from "@/hooks/use-container-columns";
@@ -2773,7 +2774,8 @@ export default function Home() {
           <button
             onClick={() => setShowSettings(true)}
             className="p-2 rounded-lg hover:bg-white/5 text-neutral-500 hover:text-white transition-ui press"
-            title="Configurações avançadas"
+            title="Configurações"
+            aria-label="Configurações"
           >
             <Settings2 className="w-4.5 h-4.5" />
           </button>
@@ -4432,20 +4434,31 @@ export default function Home() {
       </Dialog>
 
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent title="Configurações avançadas" skin="neutral" showClose={false}
-          className="w-[min(24rem,92vw)] rounded-2xl overflow-hidden">
+        <DialogContent title="Configurações" skin="neutral" showClose={false}
+          className="w-[min(34rem,92vw)] max-h-[85vh] rounded-2xl overflow-hidden">
           <div className="px-5 py-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/30 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-xl bg-neutral-800 flex items-center justify-center">
                 <Settings2 className="w-4 h-4 text-neutral-300" />
               </div>
-              <p className="text-sm font-semibold text-white">Configurações avançadas</p>
+              <p className="text-sm font-semibold text-white">Configurações</p>
             </div>
             <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui press">
               <X className="w-4 h-4" />
             </DialogClose>
           </div>
-          <div className="p-5 flex flex-col gap-3">
+
+          {/* Acervo, chaves e render-server. Só é montado com o diálogo aberto,
+              para o GET de configuração não custar nada em quem nunca abre.
+              `min-h-0` é o que faz o filho rolar: sem ele o flex item adota a
+              altura do conteúdo e o rodapé sai por cima do painel. */}
+          {showSettings && (
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <ConfigPanel />
+            </div>
+          )}
+
+          <div className="p-5 border-t border-neutral-800 shrink-0 flex flex-col gap-3">
             <button
               onClick={() => { setShowSettings(false); setShowDupes(true); if (!dupesGroups.length && !dupesScanning) scanDuplicates(); }}
               className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 hover:bg-amber-500/15 hover:border-amber-500/30 transition-ui press group text-left"

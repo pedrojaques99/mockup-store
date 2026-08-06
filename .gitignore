@@ -69,3 +69,4 @@ bun.lock
 # catalogo local e seed (cada maquina tem o seu)
 data/catalog.sqlite*
 data/catalog-seed.json.gz
+.next-shipgate/

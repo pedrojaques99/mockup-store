@@ -37,7 +37,7 @@ superfície anunciante na foto e coloca a arte por cima — sem Photoshop e sem 
 
 ```bash
 npm ci          # o .npmrc já cuida do legacy-peer-deps
-npm run setup   # cria .env.local, semeia a cena de demonstração, mede o ambiente
+npm run setup   # pergunta onde estão seus PSDs e quais chaves você tem
 npm run dev     # http://localhost:3000
 ```
 
@@ -45,6 +45,23 @@ Precisa de **Node >= 22**. Mais nada é obrigatório: o app sobe, o grid lista, 
 filtra e a busca acha sem banco, sem chave de API e sem serviço externo nenhum. O
 `npm run setup` imprime o que está ligado na sua máquina e o que cada peça ausente
 desliga — ele mede, não promete.
+
+**Instalando para usar (não para desenvolver)?** O passo a passo mastigado, incluindo
+como importar um acervo já indexado, está em [`SETUP-TIME.md`](SETUP-TIME.md).
+
+### Nada aqui exige banco de dados
+
+O catálogo mora num arquivo local (`data/catalog.sqlite`, via `node:sqlite` — biblioteca
+padrão do Node, nada para compilar). Pastas do acervo e chaves de API se configuram na
+**engrenagem dentro do app**, sem editar arquivo e sem reiniciar.
+
+`MONGODB_URI` continua funcionando e continua vencendo — é o modo de quem opera o acervo
+central. Quando uma variável de ambiente está fixando um valor, o painel mostra o campo
+travado dizendo de onde ele vem, em vez de aceitar uma edição que não teria efeito.
+
+**Levar o acervo já indexado para outra máquina:** `npm run seed:export` de um lado,
+`npm run seed:import` do outro. Os caminhos viajam como `{acervo}/…` e reatam com a pasta
+local, então cada pessoa monta o drive na letra que quiser.
 
 Se algo parecer errado, `npm run doctor` audita as cenas e
 `npm run smoke -- --url http://localhost:3000` percorre o caminho que o usuário
