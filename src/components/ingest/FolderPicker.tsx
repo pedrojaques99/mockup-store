@@ -184,7 +184,7 @@ export function FolderPicker({ onEscolher }: { onEscolher: (path: string) => voi
               <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-neutral-600" aria-hidden />
             )}
             {estado.tipo === "ok" && (
-              <Check className="w-3.5 h-3.5 shrink-0 text-emerald-500" aria-hidden />
+              <Check className="w-3.5 h-3.5 shrink-0 text-acc2" aria-hidden />
             )}
             {estado.tipo === "erro" && (
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-500" aria-hidden />

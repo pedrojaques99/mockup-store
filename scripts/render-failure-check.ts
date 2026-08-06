@@ -23,6 +23,16 @@
  * Casos:
  *   A  a requisição morre           -> `catch`
  *   B  200 com stream sem `complete` -> o `else` que antes não existia
+ *   C  resposta de ERRO sem corpo    -> o `res.json()` seco que engolia o motivo
+ *
+ * O caso C é o mesmo defeito uma camada acima: `if (!res.ok) { await res.json() }`
+ * estoura quando o corpo vem vazio (é o 500 que o Next devolve quando o handler
+ * morre antes de responder — foi o que acontecia com arte acima de 10 MB, truncada
+ * pelo clone de corpo do middleware). O `catch` de fora então mostrava
+ * "SyntaxError: Unexpected end of JSON input": a mensagem do PARSER no lugar da
+ * mensagem do problema. Avisar errado é quase tão caro quanto não avisar, porque
+ * manda o usuário caçar o bug no lugar errado. Aqui o portão exige que o aviso
+ * NÃO seja o do parser.
  */
 /* Prova das DUAS falhas do render final, sem depender de derrubar o render-server.
  *
@@ -40,7 +50,7 @@ const urlArg = process.argv.indexOf("--url");
 const BASE = (urlArg >= 0 ? process.argv[urlArg + 1] : "") || "http://localhost:4100";
 const ART = join(process.cwd(), "Render", "Art", "Frame 4089.png");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const CASO = (process.argv.find((a) => a === "A" || a === "B") || "A") as "A" | "B";
+const CASO = (process.argv.find((a) => a === "A" || a === "B" || a === "C") || "A") as "A" | "B" | "C";
 
 (async () => {
   const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
@@ -53,6 +63,9 @@ const CASO = (process.argv.find((a) => a === "A" || a === "B") || "A") as "A" | 
     if (!alvo) return void r.continue();
     postSaiu = true;
     if (CASO === "A") return void r.abort("failed");
+    // Erro SEM corpo — exatamente o que o Next devolve quando o handler morre
+    // antes de responder. É o que fazia o `res.json()` do cliente estourar.
+    if (CASO === "C") return void r.respond({ status: 500, body: "" });
     // 200 com stream que termina sem evento `complete`: o servidor morreu no meio.
     return void r.respond({
       status: 200,
@@ -174,5 +187,10 @@ const CASO = (process.argv.find((a) => a === "A" || a === "B") || "A") as "A" | 
   console.log(`caso ${CASO} — POST saiu: ${postSaiu} | aviso: ${JSON.stringify(aviso)} | ainda girando: ${travado}`);
   await page.screenshot({ path: join(process.cwd(), ".tmp", "drawer-visual", `falha-${CASO}.png`) as `${string}.png` });
   await browser.close();
-  process.exit(aviso.length ? 0 : 1);
+  /* Avisar não basta: o aviso tem que ser sobre o RENDER. Vazar o nome do erro do
+     parser ("SyntaxError", "JSON input") é o modo de falha do caso C, e ele passa
+     por qualquer checagem que só conte se houve toast. */
+  const vazouParser = aviso.some((t) => /SyntaxError|JSON input|JSON\.parse/i.test(t));
+  if (vazouParser) console.log("FALHOU: o aviso mostrou o erro do parser em vez do motivo do render.");
+  process.exit(aviso.length && !vazouParser ? 0 : 1);
 })();

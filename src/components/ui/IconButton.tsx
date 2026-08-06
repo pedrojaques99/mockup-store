@@ -16,21 +16,25 @@ import { Tooltip } from "@/components/ui/Tooltip";
 
 export type IconButtonVariant = "ghost" | "primary" | "accent" | "danger" | "violet";
 
-const BASE = "rounded-lg border transition-ui [transition-duration:var(--dur-fast)] active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none disabled:active:scale-100";
+/* `press` em vez de `active:scale-[…]`: o valor mora no `globals.css`, espelhando
+ * o `pressable` do `lib/motion.ts`. E o `[transition-duration:var(--dur-fast)]`
+ * saiu porque o `transition-ui` já dá a cada propriedade a sua duração — o
+ * override chapava as seis de volta num valor só, inclusive a do press. */
+const BASE = "rounded-lg border transition-ui press disabled:opacity-40 disabled:pointer-events-none disabled:active:scale-100";
 
 const VARIANT: Record<IconButtonVariant, string> = {
-  ghost:   "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60 hover:text-zinc-200",
-  primary: "bg-zinc-100 text-zinc-950 border-zinc-100 hover:bg-white",
-  accent:  "bg-acc2 text-zinc-950 border-acc2 hover:bg-acc2/90",
+  ghost:   "bg-neutral-800/60 text-neutral-400 border-neutral-700/50 hover:bg-neutral-700/60 hover:text-neutral-200",
+  primary: "bg-neutral-100 text-neutral-950 border-neutral-100 hover:bg-white",
+  accent:  "bg-acc2 text-neutral-950 border-acc2 hover:bg-acc2/90",
   danger:  "bg-rose-500 text-white border-rose-500 hover:bg-rose-500/90",
   violet:  "bg-violet-500 text-white border-violet-500 hover:bg-violet-500/90",
 };
 
 // Quando `selected`, a variante pinta o estado ativo (segmented controls).
 const SELECTED: Record<IconButtonVariant, string> = {
-  ghost:   "bg-zinc-100 text-zinc-950 border-zinc-100",
-  primary: "bg-zinc-100 text-zinc-950 border-zinc-100",
-  accent:  "bg-acc2 text-zinc-950 border-acc2",
+  ghost:   "bg-neutral-100 text-neutral-950 border-neutral-100",
+  primary: "bg-neutral-100 text-neutral-950 border-neutral-100",
+  accent:  "bg-acc2 text-neutral-950 border-acc2",
   danger:  "bg-rose-500 text-white border-rose-500",
   violet:  "bg-violet-500 text-white border-violet-500",
 };

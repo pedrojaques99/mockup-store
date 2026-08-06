@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import ArtFramePanel, { ArtCropSurface } from "@/components/ArtFramePanel";
 import { dec } from "@/lib/utils";
+import { readError } from "@/lib/http-error";
 import {
   Panel,
   Group as PanelGroup,
@@ -65,6 +66,10 @@ import { DropOverlay } from "@/components/ui/DropOverlay";
 import { MasonryGallery } from "@/components/ui/masonry-gallery";
 import { Select } from "@/components/ui/Select";
 import { Dialog, DialogContent, DialogClose } from "@/components/ui/Dialog";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { SmartObjectList } from "@/components/mockup/SmartObjectList";
+import { PsdDetails } from "@/components/mockup/PsdDetails";
+import type { Face, PsdInfo, ArtSlot } from "@/components/mockup/types";
 import { Switch } from "@/components/ui/Switch";
 import { useContainerColumns } from "@/hooks/use-container-columns";
 import { Toaster, toast } from "sonner";
@@ -234,7 +239,7 @@ function MockupCardImpl({
             onClick={(e) => e.stopPropagation()}
             className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[11px] font-semibold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-ui active:scale-[0.97] shadow-2xl">
+            <span className="bg-white text-black text-[11px] font-semibold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-ui press shadow-2xl">
               Abrir
             </span>
           </a>
@@ -247,7 +252,7 @@ function MockupCardImpl({
             title="Aplicar arte neste mockup"
             className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[11px] font-semibold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-ui active:scale-[0.97] shadow-2xl">
+            <span className="bg-white text-black text-[11px] font-semibold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-ui press shadow-2xl">
               Aplicar
             </span>
           </button>
@@ -275,7 +280,7 @@ function MockupCardImpl({
                   }}
                   title="Abrir no Photoshop"
                   aria-label="Abrir no Photoshop"
-                  className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm flex items-center justify-center hover:bg-[#001E36] transition-ui active:scale-[0.97] shadow-xl`}
+                  className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm flex items-center justify-center hover:bg-[#001E36] transition-ui press shadow-xl`}
                 >
                   <span className="text-[10px] font-semibold leading-none tracking-tighter text-[#31A8FF]">Ps</span>
                 </button>
@@ -287,7 +292,7 @@ function MockupCardImpl({
                   }}
                   title="Mostrar na pasta"
                   aria-label="Mostrar na pasta"
-                  className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-ui active:scale-[0.97] shadow-xl`}
+                  className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-ui press shadow-xl`}
                 >
                   <Folder className="w-3.5 h-3.5" />
                 </button>
@@ -303,7 +308,7 @@ function MockupCardImpl({
                 onClick={(e) => { e.stopPropagation(); onToggleCollection(mockup); }}
                 title={inCollection ? `Tirar de ${collectionLabel}  (B)` : `Guardar em ${collectionLabel}  (B)`}
                 aria-pressed={!!inCollection}
-                className={`w-7 h-7 rounded-lg backdrop-blur-sm flex items-center justify-center transition-ui active:scale-[0.97] ${
+                className={`w-7 h-7 rounded-lg backdrop-blur-sm flex items-center justify-center transition-ui press ${
                   inCollection
                     // Ligado, ele é ESTADO, não ação: um bloco branco chapado em cada
                     // card curado gritava mais que a própria thumbnail. Marca discreta
@@ -324,7 +329,7 @@ function MockupCardImpl({
                 onClick={(e) => { e.stopPropagation(); onSimilar(mockup); }}
                 title="Ver mockups parecidos com este  (S)"
                 aria-label="Ver mockups parecidos com este"
-                className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-ui active:scale-[0.97] shadow-xl`}
+                className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-ui press shadow-xl`}
               >
                 <ScanSearch className="w-3.5 h-3.5" />
               </button>
@@ -333,7 +338,7 @@ function MockupCardImpl({
               type="button"
               onClick={(e) => { e.stopPropagation(); onHide(mockup); }}
               title="Esconder este mockup"
-              className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-ui active:scale-[0.97] shadow-xl`}
+              className={`${REVEAL_CONTROL} w-7 h-7 rounded-lg bg-black/70 backdrop-blur-sm text-white/90 flex items-center justify-center hover:bg-white hover:text-black transition-ui press shadow-xl`}
             >
               <EyeOff className="w-3.5 h-3.5" />
             </button>
@@ -458,7 +463,7 @@ function SuggestionCard({
             title="Aplicar arte neste mockup"
             className={`absolute inset-0 bg-black/40 transition-colors [transition-duration:var(--dur-slow)] flex items-center justify-center backdrop-blur-[2px] ${REVEAL_OVERLAY}`}
           >
-            <span className="bg-white text-black text-[10px] font-semibold px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition-ui active:scale-[0.97] shadow-2xl">
+            <span className="bg-white text-black text-[10px] font-semibold px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition-ui press shadow-2xl">
               Aplicar
             </span>
           </button>
@@ -476,44 +481,7 @@ function SuggestionCard({
   );
 }
 
-interface SmartObjectInfo {
-  name: string;
-  path: string;
-  innerWidth: number;
-  innerHeight: number;
-}
 
-interface AdjustmentInfo {
-  name: string;
-  path: string;
-  type: string;
-  hidden: boolean;
-}
-
-interface Face {
-  key: string;
-  name: string;
-  smartObject: string;
-  innerWidth: number;
-  innerHeight: number;
-  linkedCount: number;
-}
-
-interface PsdInfo {
-  smartObjects: SmartObjectInfo[];
-  adjustments: AdjustmentInfo[];
-  width: number;
-  height: number;
-  faces?: Face[];
-}
-
-interface ArtSlot {
-  file: File | null;
-  preview: string;
-  dims: { width: number; height: number } | null;
-  frame: FrameConfig;
-  img: HTMLImageElement | null;
-}
 
 interface Studio {
   name: string;
@@ -867,12 +835,11 @@ export default function Home() {
   /* O recorte é um MODO da superfície de resultado, não um painel à parte — por isso o
    * estado mora aqui, com quem é dono da superfície, e não dentro do `ArtFramePanel`. */
   const [cropOpen, setCropOpen] = useState(false);
+  /* `showAdjustments` saiu com o `PsdDetails` (estado que só uma caixa lia),
+   * `expandSoList` já estava morto, e o `useEffect` que sincronizava a seção de
+   * arte virou parte do `onAbertoChange` do `SmartObjectList`: reagir ao próprio
+   * estado num efeito é como a sincronia fica longe de quem a causa. */
   const [showSmartObjects, setShowSmartObjects] = useState(true);
-  const [showAdjustments, setShowAdjustments] = useState(false);
-  const [expandSoList, setExpandSoList] = useState(false);
-
-  // Sync: fechar Smart Objects fecha o painel de arte automaticamente
-  useEffect(() => { if (!showSmartObjects) setArtSectionCollapsed(true); }, [showSmartObjects]);
 
   const renderTimerRef = useRef<ReturnType<typeof setInterval>>(null);
   const autoPreviewTimer = useRef<ReturnType<typeof setTimeout>>(null);
@@ -1094,8 +1061,8 @@ export default function Home() {
     setVisantLoginUrl(null);
     try {
       const res = await fetch("/api/auth/visant", { method: "POST" });
+      if (!res.ok) throw new Error(await readError(res));
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
       setVisantLoginUrl(d.verificationUriComplete);
       window.open(d.verificationUriComplete, "_blank", "noopener");
 
@@ -1138,8 +1105,8 @@ export default function Home() {
       setSuggestError(null);
       fetch(`/api/suggest?${params}`)
         .then(async (r) => {
+          if (!r.ok) throw new Error(await readError(r));
           const d = await r.json();
-          if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
           setSuggestions(d.suggestions || []);
         })
         .catch((err) => {
@@ -1168,8 +1135,9 @@ export default function Home() {
   const loadCollections = useCallback(async () => {
     try {
       const r = await fetch("/api/collections");
+      if (!r.ok) return;
       const d = await r.json();
-      if (r.ok) setCollections(d.collections || []);
+      setCollections(d.collections || []);
     } catch {
       // Lista é conveniência: falhar em carregá-la não pode atrapalhar a curadoria.
     }
@@ -1189,8 +1157,8 @@ export default function Home() {
     setCollectionLoading(true);
     try {
       const r = await fetch(`/api/collections?collectionId=${encodeURIComponent(collectionKey)}`);
+      if (!r.ok) throw new Error(await readError(r));
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setCollectionRefs(d.references || []);
       setCollectionName(d.name || "");
       setCollectionIds(new Set<string>((d.items || []).map((i: { id: string }) => i.id)));
@@ -1238,7 +1206,7 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ collectionId: collectionKey, ids: [mockup.id], member }),
         });
-        if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
+        if (!r.ok) throw new Error(await readError(r));
         // Desfazer em vez de confirmar. Tirar da coleção é reversível, então pedir
         // confirmação antes cobraria um clique de todo mundo para proteger o engano de
         // poucos; o caminho barato é agir na hora e deixar a volta à mão. Só o REMOVER
@@ -1273,7 +1241,7 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ collectionId: collectionKey, ids, member: true }),
         });
-        if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
+        if (!r.ok) throw new Error(await readError(r));
         await loadCollection();
         toast.success(`${ids.length} ${ids.length === 1 ? "mockup guardado" : "mockups guardados"} na coleção`);
       } catch (err) {
@@ -1293,8 +1261,8 @@ export default function Home() {
     setCompletionsLoading(true);
     try {
       const r = await fetch(`/api/collections/similar?brandId=${encodeURIComponent(brandId)}&limit=18`);
+      if (!r.ok) throw new Error(await readError(r));
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setCompletions(d.references || []);
       setCompletionsError(null);
     } catch (err) {
@@ -1328,7 +1296,7 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ collectionId: collectionKey, order: ids }),
         });
-        if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
+        if (!r.ok) throw new Error(await readError(r));
       } catch (err) {
         toast.error(`Não salvou a ordem: ${String((err as Error).message || err)}`);
         void loadCollection();
@@ -1393,8 +1361,8 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ create: true, name }),
         });
+        if (!r.ok) throw new Error(await readError(r));
         const d = await r.json();
-        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
         setCollectionId(d.collection.id);
         setView("collection");
       } else {
@@ -1404,8 +1372,8 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ collectionId: collectionKey, name }),
         });
+        if (!r.ok) throw new Error(await readError(r));
         const d = await r.json();
-        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
         setCollectionName(d.name || "");
       }
       setNameDialog(null);
@@ -1422,7 +1390,7 @@ export default function Home() {
       const r = await fetch(`/api/collections?collectionId=${encodeURIComponent(collectionKey)}`, {
         method: "DELETE",
       });
-      if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`);
+      if (!r.ok) throw new Error(await readError(r));
       setCollectionId("");
       setView("all");
       await loadCollections();
@@ -1441,8 +1409,8 @@ export default function Home() {
     setAssetError(null);
     try {
       const res = await fetch(`/api/brands/${encodeURIComponent(brandId)}/assets`);
+      if (!res.ok) throw new Error(await readError(res));
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
       setBrandAssets(d.assets || []);
     } catch (err) {
       setAssetError(String((err as Error).message || err));
@@ -1799,7 +1767,6 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageBase64: dataUrl, limit: 60 }),
       });
-      const d = await res.json();
       if (!res.ok) {
         // 401 é "faça login", 502 é "o serviço caiu" — a rota já separa os dois
         // e a mensagem tem de separar também, senão manda tentar de novo quem
@@ -1809,10 +1776,11 @@ export default function Home() {
             description: "A busca visual usa o índice vetorial da conta.",
           });
         } else {
-          toast.error("A busca por imagem falhou", { description: d.error });
+          toast.error("A busca por imagem falhou", { description: await readError(res) });
         }
         return;
       }
+      const d = await res.json();
       const ids: string[] = (d.matches ?? []).map((m: { id: string }) => m.id).filter(Boolean);
       if (!ids.length) {
         toast("Nenhum mockup parecido", { description: "Nada no índice se aproximou dessa imagem." });
@@ -1856,8 +1824,8 @@ export default function Home() {
     setSimilarLoading(true);
     try {
       const r = await fetch(`/api/references/similar?id=${encodeURIComponent(mockup.id)}&limit=60`);
+      if (!r.ok) throw new Error(await readError(r));
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       const found: Reference[] = d.references ?? [];
       if (!found.length) {
         toast("Nada parecido encontrado", {
@@ -2226,11 +2194,19 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        setRenderLogs([{ step: "error", detail: err.error }]);
+        /* NUNCA `res.json()` seco aqui. Resposta de erro sem corpo (o 500 que o
+         * Next devolve quando o handler morre antes de responder) fazia o parse
+         * estourar DENTRO do try, e o `catch` lá embaixo mostrava
+         * "SyntaxError: Unexpected end of JSON input" — o erro do parser em cima
+         * do erro real, que ficava invisível. O status é o que sempre existe. */
+        const raw = await res.text().catch(() => "");
+        let detail = "";
+        try { detail = (JSON.parse(raw) as { error?: string }).error || ""; } catch {}
+        if (!detail) detail = raw.trim().slice(0, 200) || `O servidor respondeu HTTP ${res.status} sem explicação.`;
+        setRenderLogs([{ step: "error", detail }]);
         // O log só aparece se o usuário abrir o painel de logs — o entregável
         // final falhando precisa avisar sozinho.
-        toast.error("O render falhou", { description: err.error });
+        toast.error("O render falhou", { description: detail });
         return;
       }
 
@@ -2638,7 +2614,7 @@ export default function Home() {
               const panel = leftPanelRef.current;
               if (panel) panel.isCollapsed() ? panel.expand() : panel.collapse();
             }}
-            className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-ui active:scale-[0.97]"
+            className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-ui press"
             title="Toggle Sidebar"
           >
             <PanelLeft className="w-5 h-5" />
@@ -2697,7 +2673,7 @@ export default function Home() {
               <button
                 onClick={clearImageSearch}
                 title="Voltar ao catálogo"
-                className="ml-auto w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-acc/70 hover:text-white hover:bg-acc/20 transition-colors active:scale-[0.97]"
+                className="ml-auto w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-acc/70 hover:text-white hover:bg-acc/20 transition-colors transition-ui press"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -2724,7 +2700,7 @@ export default function Home() {
                 onClick={() => imageInputRef.current?.click()}
                 disabled={imageSearching}
                 title="Buscar mockups parecidos com uma imagem"
-                className="shrink-0 w-9 h-9 rounded-full bg-neutral-900/50 border border-neutral-800 flex items-center justify-center text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97] disabled:opacity-40"
+                className="shrink-0 w-9 h-9 rounded-full bg-neutral-900/50 border border-neutral-800 flex items-center justify-center text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors transition-ui press disabled:opacity-40"
               >
                 {imageSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
               </button>
@@ -2768,7 +2744,7 @@ export default function Home() {
           {Object.keys(renderCache).length > 0 && (
             <button
               onClick={() => { setShowSession(true); setSessionSelected(new Set()); }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300 transition-ui active:scale-[0.97]"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-acc2/10 border border-acc2/20 text-[10px] font-bold text-acc2 hover:bg-acc2/20 hover:text-acc2 transition-ui press"
               title="Renders desta sessão"
             >
               <Download className="w-3.5 h-3.5" />
@@ -2781,7 +2757,7 @@ export default function Home() {
               com controles do dia a dia por algo que se faz uma vez por sessão. */}
           <button
             onClick={openIngest}
-            className={`p-2 rounded-lg hover:bg-white/5 transition-ui active:scale-[0.97] ${
+            className={`p-2 rounded-lg hover:bg-white/5 transition-ui press ${
               ingestOpen ? "text-white bg-white/5" : "text-neutral-500 hover:text-white"
             }`}
             title="Adicionar pasta ao acervo"
@@ -2793,7 +2769,7 @@ export default function Home() {
 
           <button
             onClick={() => setShowSettings(true)}
-            className="p-2 rounded-lg hover:bg-white/5 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]"
+            className="p-2 rounded-lg hover:bg-white/5 text-neutral-500 hover:text-white transition-ui press"
             title="Configurações avançadas"
           >
             <Settings2 className="w-4.5 h-4.5" />
@@ -2808,7 +2784,7 @@ export default function Home() {
                 const panel = rightPanelRef.current;
                 if (panel) panel.isCollapsed() ? panel.expand() : panel.collapse();
               }}
-              className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-colors active:scale-[0.97]"
+              className="p-2 rounded-lg hover:bg-white/5 text-neutral-400 hover:text-white transition-colors transition-ui press"
               title="Alternar painel de detalhes"
             >
               <PanelRight className="w-5 h-5" />
@@ -2854,7 +2830,7 @@ export default function Home() {
                   key={chip.k}
                   onClick={chip.clear}
                   title="Remover este filtro"
-                  className="group inline-flex items-center gap-1.5 h-7 pl-3 pr-2 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-bold text-neutral-300 hover:border-neutral-600 hover:text-white transition-colors active:scale-[0.97]"
+                  className="group inline-flex items-center gap-1.5 h-7 pl-3 pr-2 rounded-full bg-neutral-900 border border-neutral-800 text-[10px] font-bold text-neutral-300 hover:border-neutral-600 hover:text-white transition-colors transition-ui press"
                 >
                   <span className="max-w-[14rem] truncate">{chip.label}</span>
                   <X className="w-3 h-3 text-neutral-500 group-hover:text-white transition-colors" />
@@ -2920,7 +2896,7 @@ export default function Home() {
                 <button
                   onClick={connectVisant}
                   disabled={visantConnecting}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white text-black text-[11px] font-semibold px-3 py-2.5 hover:bg-neutral-200 transition-ui disabled:opacity-50 active:scale-[0.98]"
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white text-black text-[11px] font-semibold px-3 py-2.5 hover:bg-neutral-200 transition-ui disabled:opacity-50 press"
                 >
                   {visantConnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5 fill-current" />}
                   {visantConnecting ? "Aguardando..." : "Conectar Visant"}
@@ -3167,7 +3143,7 @@ export default function Home() {
             {brandId && !suggestionsOpen && (
               <button
                 onClick={() => setSuggestionsOpen(true)}
-                className="mb-6 flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[11px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-ui active:scale-[0.97]"
+                className="mb-6 flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[11px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-ui press"
               >
                 <Zap className="w-3.5 h-3.5" />
                 Ver sugeridos para {brands.find((b) => b.id === brandId)?.name}
@@ -3200,7 +3176,7 @@ export default function Home() {
                       onClick={() => loadSuggestions({ force: true })}
                       disabled={loadingSuggestions}
                       title="Recalcular as sugestões desta marca"
-                      className="flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[11px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-ui active:scale-[0.97] disabled:opacity-40"
+                      className="flex items-center gap-2 h-8 px-3 rounded-full bg-neutral-900 border border-neutral-800 text-[11px] font-bold text-neutral-400 hover:text-white hover:border-neutral-600 transition-ui press disabled:opacity-40"
                     >
                       {/* Rótulo FIXO. Trocar para "Analisando" era a terceira
                           cópia do mesmo estado (ícone girando + botão desabilitado
@@ -3210,7 +3186,7 @@ export default function Home() {
                     </button>
                     {/* Fecha o PAINEL — a marca continua conectada (coleção, aba
                         Coleção e logo dependem dela). Desconectar é no seletor. */}
-                    <button onClick={() => setSuggestionsOpen(false)} title="Fechar as recomendações (a marca continua conectada)" className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui active:scale-[0.97]"><X className="w-4 h-4" /></button>
+                    <button onClick={() => setSuggestionsOpen(false)} title="Fechar as recomendações (a marca continua conectada)" className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui press"><X className="w-4 h-4" /></button>
                   </div>
                 </div>
                 {suggestError ? (
@@ -3244,7 +3220,7 @@ export default function Home() {
                           loadSuggestions({ limit: next });
                         }}
                         disabled={loadingSuggestions}
-                        className="shrink-0 w-32 rounded-2xl border border-dashed border-neutral-800 flex flex-col items-center justify-center gap-2 text-neutral-500 hover:text-neutral-300 hover:border-neutral-600 transition-ui active:scale-[0.97] disabled:opacity-40"
+                        className="shrink-0 w-32 rounded-2xl border border-dashed border-neutral-800 flex flex-col items-center justify-center gap-2 text-neutral-500 hover:text-neutral-300 hover:border-neutral-600 transition-ui press disabled:opacity-40"
                       >
                         {loadingSuggestions ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5" />}
                         <span className="text-[10px] font-semibold">Ver mais</span>
@@ -3312,7 +3288,7 @@ export default function Home() {
                   onClick={() => setNameDialog({ mode: "create", value: "" })}
                   title="Nova coleção (não precisa de marca)"
                   aria-label="Nova coleção"
-                  className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui active:scale-[0.97]"
+                  className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui press"
                 >
                   <FolderPlus className="w-3.5 h-3.5" />
                 </button>
@@ -3323,7 +3299,7 @@ export default function Home() {
                       onClick={() => setNameDialog({ mode: "rename", value: collectionName === "Coleção" ? "" : collectionName })}
                       title="Renomear esta coleção"
                       aria-label="Renomear coleção"
-                      className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui active:scale-[0.97]"
+                      className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui press"
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
@@ -3334,7 +3310,7 @@ export default function Home() {
                         onClick={() => void removeCollection()}
                         title="Apagar esta coleção"
                         aria-label="Apagar coleção"
-                        className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-red-400 hover:border-red-500/40 transition-ui active:scale-[0.97]"
+                        className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-red-400 hover:border-red-500/40 transition-ui press"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -3424,7 +3400,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => setView("all")}
-                  className="flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-[11px] font-semibold hover:bg-neutral-200 transition-colors active:scale-[0.97]"
+                  className="flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-[11px] font-semibold hover:bg-neutral-200 transition-colors transition-ui press"
                 >
                   <Search className="w-4 h-4" />
                   Ir escolher no acervo
@@ -3458,7 +3434,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => fetchPage(1, false)}
-                  className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white text-black text-[11px] font-semibold hover:bg-neutral-200 transition-ui active:scale-[0.98]"
+                  className="flex items-center gap-2 h-10 px-4 rounded-xl bg-white text-black text-[11px] font-semibold hover:bg-neutral-200 transition-ui press"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   Tentar de novo
@@ -3482,7 +3458,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={openIngest}
-                  className="flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-[11px] font-semibold hover:bg-neutral-200 transition-colors active:scale-[0.97] shadow-xl shadow-white/5"
+                  className="flex items-center gap-2 h-11 px-5 rounded-xl bg-white text-black text-[11px] font-semibold hover:bg-neutral-200 transition-colors transition-ui press shadow-xl shadow-white/5"
                 >
                   <FolderPlus className="w-4 h-4" />
                   Adicionar pasta
@@ -3499,7 +3475,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={clearAllFilters}
-                  className="flex items-center gap-2 h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
+                  className="flex items-center gap-2 h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors transition-ui press"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   Limpar filtros
@@ -3524,7 +3500,7 @@ export default function Home() {
                   {hideDuplicates && hiddenDupes > 0 && (
                     <button
                       onClick={() => setHideDuplicates(false)}
-                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
+                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors transition-ui press"
                     >
                       Mostrar duplicados
                     </button>
@@ -3532,7 +3508,7 @@ export default function Home() {
                   {hiddenIds.size > 0 && (
                     <button
                       onClick={restoreAllHidden}
-                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
+                      className="h-9 px-4 rounded-xl border border-neutral-800 text-[10px] font-semibold text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors transition-ui press"
                     >
                       Restaurar ocultos
                     </button>
@@ -3726,7 +3702,7 @@ export default function Home() {
                       <span>Falha ao carregar mais mockups: {fetchError}</span>
                       <button
                         onClick={() => fetchPage(page + 1, true)}
-                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-ui active:scale-[0.98]"
+                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-ui press"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         Tentar de novo
@@ -3741,7 +3717,7 @@ export default function Home() {
                           setTailError(null);
                           void loadTail();
                         }}
-                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-ui active:scale-[0.98]"
+                        className="flex items-center gap-2 h-8 px-3 rounded-full bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-ui press"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
                         Tentar de novo
@@ -3772,7 +3748,7 @@ export default function Home() {
               </span>
               <button
                 onClick={() => unhideMockup(lastHidden.id)}
-                className="flex items-center gap-2 bg-white text-black text-[10px] font-semibold px-3.5 py-2 rounded-xl hover:bg-neutral-200 transition-ui active:scale-[0.97]"
+                className="flex items-center gap-2 bg-white text-black text-[10px] font-semibold px-3.5 py-2 rounded-xl hover:bg-neutral-200 transition-ui press"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Desfazer
@@ -3800,7 +3776,7 @@ export default function Home() {
                 <h2 className="font-bold text-sm truncate pr-2">{selected.name}</h2>
                 <p className="text-[10px] font-bold text-neutral-500">{selected.studio}</p>
               </div>
-              <button onClick={() => setSelected(null)} className="p-1.5 rounded-lg hover:bg-neutral-900 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]">
+              <button onClick={() => setSelected(null)} className="p-1.5 rounded-lg hover:bg-neutral-900 text-neutral-500 hover:text-white transition-ui press">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -3844,7 +3820,7 @@ export default function Home() {
                         obriga a procurar. Esc faz o mesmo. */}
                     <button
                       onClick={() => setCropOpen(false)}
-                      className="absolute top-3 right-3 z-10 h-8 px-3 rounded-xl bg-white text-black text-[11px] font-semibold shadow-lg hover:bg-neutral-200 transition-ui active:scale-[0.97]"
+                      className="absolute top-3 right-3 z-10 h-8 px-3 rounded-xl bg-white text-black text-[11px] font-semibold shadow-lg hover:bg-neutral-200 transition-ui press"
                     >
                       Concluir recorte
                     </button>
@@ -3905,14 +3881,14 @@ export default function Home() {
                 <div className="absolute top-3 left-3 flex gap-2 opacity-0 group-hover/preview:opacity-100 group-focus-within/preview:opacity-100 translate-y-2 group-hover/preview:translate-y-0 group-focus-within/preview:translate-y-0 transition-ui [transition-duration:var(--dur-slow)]">
                   {renderResult && (
                     <>
-                      <button onClick={() => setFullscreen(true)} title="Ver em tela cheia" aria-label="Ver em tela cheia" className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-ui active:scale-[0.97]">
+                      <button onClick={() => setFullscreen(true)} title="Ver em tela cheia" aria-label="Ver em tela cheia" className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-ui press">
                         <Maximize2 className="w-4 h-4" />
                       </button>
                       <button
                         onClick={copyRenderAsPng}
                         title="Copiar como PNG"
                         aria-label="Copiar como PNG"
-                        className={`backdrop-blur shadow-xl w-9 h-9 rounded-xl flex items-center justify-center transition-ui active:scale-[0.97] ${copiedPng ? "bg-acc2 text-neutral-950" : "bg-black/80 hover:bg-white hover:text-black text-white"}`}
+                        className={`backdrop-blur shadow-xl w-9 h-9 rounded-xl flex items-center justify-center transition-ui press ${copiedPng ? "bg-acc2 text-neutral-950" : "bg-black/80 hover:bg-white hover:text-black text-white"}`}
                       >
                         {copiedPng ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                       </button>
@@ -3923,7 +3899,7 @@ export default function Home() {
                       onClick={() => fetch("/api/open-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: selected.psdPath }) })}
                       title="Abrir a pasta do PSD"
                       aria-label="Abrir a pasta do PSD"
-                      className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-ui active:scale-[0.97]"
+                      className="bg-black/80 backdrop-blur shadow-xl hover:bg-white hover:text-black text-white w-9 h-9 rounded-xl flex items-center justify-center transition-ui press"
                     >
                       <Folder className="w-4 h-4" />
                     </button>
@@ -3945,82 +3921,30 @@ export default function Home() {
               <div className="flex flex-col p-4 gap-5">
                 {/* Controls Accordion */}
                 <div className="space-y-3">
-                  {/* Section: Smart Objects — Photoshop-style layers.
-                      Com UM smart object não há escolha a fazer: a lista mostra a
-                      face que já está ativa. Acordeão de um item só é controle morto. */}
-                  {psdInfo && psdInfo.smartObjects.length > 1 && (
-                    <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden">
-                      <button
-                        onClick={() => setShowSmartObjects(!showSmartObjects)}
-                        className="w-full flex items-center justify-between px-4 py-3 text-[10px] font-medium text-neutral-500 hover:bg-white/5 transition-colors"
-                      >
-                        <div className="flex items-center gap-2 text-neutral-300">
-                          <Layers className="w-3.5 h-3.5 text-neutral-500" />
-                          Smart Objects ({psdInfo.smartObjects.length})
-                        </div>
-                        <ChevronDown className={`w-4 h-4 transition-transform [transition-duration:var(--dur-slow)] ${showSmartObjects ? "" : "-rotate-90"}`} />
-                      </button>
-                      {showSmartObjects && (
-                        <div className="border-t border-neutral-800 overflow-y-auto max-h-60 no-scrollbar">
-                          {psdInfo.smartObjects.map((so, i) => {
-                            const faceIdx = faces.findIndex(f => f.name === so.name || f.smartObject === (so.path || so.name));
-                            const isFace = faceIdx >= 0;
-                            const slot = isFace ? (artSlots[faceIdx] ?? null) : null;
-                            const isActive = isFace && activeSlot === faceIdx;
-                            return (
-                              <div
-                                key={i}
-                                onClick={() => {
-                                  if (!isFace) return;
-                                  setActiveSlot(faceIdx);
-                                  setSelectedSo(so.path || so.name);
-                                  setFrame((f) => ({ ...f, cropPixels: undefined }));
-                                  setArtSectionCollapsed(false);
-                                }}
-                                className={`flex items-center gap-3 px-3 py-2.5 border-b border-neutral-900/70 last:border-b-0 transition-colors select-none ${
-                                  isFace
-                                    ? isActive
-                                      ? "bg-white/8 cursor-pointer"
-                                      : "hover:bg-white/4 cursor-pointer"
-                                    : "opacity-35 cursor-default"
-                                }`}
-                              >
-                                {/* Active dot */}
-                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? "bg-white" : isFace ? "bg-neutral-600" : "bg-neutral-800"}`} />
-                                {/* Name + path */}
-                                <div className="flex-1 min-w-0">
-                                  <p className={`text-[11px] font-bold truncate ${isActive ? "text-white" : isFace ? "text-neutral-300" : "text-neutral-500"}`}>{so.name}</p>
-                                  {so.path && so.path.includes(" > ") && (
-                                    <p className="text-[9px] text-neutral-500 truncate">{so.path.split(" > ").slice(0, -1).join(" › ")}</p>
-                                  )}
-                                </div>
-                                {/* Dims */}
-                                <span className={`text-[9px] font-mono shrink-0 ${isActive ? "text-neutral-400" : "text-neutral-500"}`}>{so.innerWidth}×{so.innerHeight}</span>
-                                {/* Face slot thumbnail */}
-                                {isFace ? (
-                                  <div
-                                    className={`shrink-0 w-8 h-8 rounded-lg overflow-hidden border transition-colors ${isActive ? "border-white/40 shadow-lg shadow-white/5" : "border-neutral-800"}`}
-                                    onClick={(e) => { e.stopPropagation(); setActiveSlot(faceIdx); setArtSectionCollapsed(false); if (!slot?.preview) fileInputRef.current?.click(); }}
-                                  >
-                                    {slot?.preview ? (
-                                      // eslint-disable-next-line @next/next/no-img-element
-                                      <img src={slot.preview} alt={so.name} className="w-full h-full object-cover" />
-                                    ) : (
-                                      <div className="w-full h-full flex items-center justify-center bg-neutral-900 group-hover:bg-neutral-800">
-                                        <ImageIcon className="w-3 h-3 text-neutral-500" />
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div className="w-8 shrink-0" />
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <SmartObjectList
+                    psdInfo={psdInfo}
+                    faces={faces}
+                    artSlots={artSlots}
+                    activeSlot={activeSlot}
+                    aberto={showSmartObjects}
+                    onAbertoChange={(v) => {
+                      setShowSmartObjects(v);
+                      // Fechar Smart Objects fecha a seção de arte junto. Era um
+                      // `useEffect` observando o próprio estado; agora é o handler.
+                      if (!v) setArtSectionCollapsed(true);
+                    }}
+                    onSelectFace={(faceIdx, smartObject) => {
+                      setActiveSlot(faceIdx);
+                      setSelectedSo(smartObject);
+                      setFrame((fr) => ({ ...fr, cropPixels: undefined }));
+                      setArtSectionCollapsed(false);
+                    }}
+                    onPickArt={(faceIdx, temArte) => {
+                      setActiveSlot(faceIdx);
+                      setArtSectionCollapsed(false);
+                      if (!temArte) fileInputRef.current?.click();
+                    }}
+                  />
 
                 </div>
 
@@ -4030,48 +3954,13 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Detalhes do PSD — inspeção, não produção.
-                    Eram DOIS blocos permanentes acima do que decide: um acordeão
-                    "Camadas de ajuste" e uma linha de arquivo/MB/px, ~92px que ninguém
-                    consulta para enquadrar uma arte. Existiam porque o dado estava à mão,
-                    que é o vício clássico de painel. Viraram um bloco só, fechado por
-                    padrão: alcançável para os 3% que precisam, sumido para os 97%.
-                    Também matou o box-dentro-de-box (moldura tingida dentro de moldura
-                    tingida) que o acordeão interno criava. */}
-                <div className="border-t border-neutral-900 pt-3 pb-6">
-                  <button
-                    onClick={() => setShowAdjustments(!showAdjustments)}
-                    aria-expanded={showAdjustments}
-                    className="w-full flex items-center justify-between gap-2 px-1 py-1.5 text-[10px] font-medium text-neutral-500 hover:text-neutral-300 transition-colors rounded-lg"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Settings2 className="w-3.5 h-3.5" />
-                      Detalhes do PSD
-                    </span>
-                    <ChevronDown className={`w-4 h-4 transition-transform [transition-duration:var(--dur-base)] ${showAdjustments ? "" : "-rotate-90"}`} />
-                  </button>
-
-                  {showAdjustments && (
-                    <div className="pt-2 space-y-2">
-                      <p className="text-[10px] text-neutral-500 leading-relaxed px-1">
-                        {selected.psdPath?.split(/[/\\]/).pop()}
-                        {selected.psdSizeBytes ? ` · ${dec(selected.psdSizeBytes / 1e6)} MB` : ""}
-                        {psdInfo ? ` · ${psdInfo.width}×${psdInfo.height} px` : ""}
-                      </p>
-                      {psdInfo && psdInfo.adjustments.filter(a => !a.hidden).length > 0 && (
-                        <div className="space-y-0.5">
-                          {psdInfo.adjustments.filter(a => !a.hidden).map((a, i) => (
-                            <label key={i} className={`flex items-center gap-3 py-2 px-1 rounded-xl cursor-pointer transition-colors ${hiddenLayers.has(a.path || a.name) ? "opacity-40" : "hover:bg-white/5"}`}>
-                              <input type="checkbox" checked={!hiddenLayers.has(a.path || a.name)} onChange={() => toggleLayer(a.path || a.name)} className="accent-white w-3.5 h-3.5" />
-                              <span className={`text-[11px] font-bold truncate flex-1 ${hiddenLayers.has(a.path || a.name) ? "line-through" : "text-neutral-300"}`}>{a.name}</span>
-                              <span className="text-[9px] font-bold text-neutral-500">{a.type}</span>
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <PsdDetails
+                  psdInfo={psdInfo}
+                  psdPath={selected.psdPath}
+                  psdSizeBytes={selected.psdSizeBytes}
+                  hiddenLayers={hiddenLayers}
+                  onToggleLayer={toggleLayer}
+                />
               </div>
             </div>
 
@@ -4087,10 +3976,22 @@ export default function Home() {
                 aria-expanded={!artSectionCollapsed}
                 className="h-9 flex items-center justify-between px-4 w-full group select-none hover:bg-white/5 transition-colors"
               >
-                <p className="text-[10px] font-medium text-neutral-400 group-hover:text-neutral-200 transition-colors">
+                <p className="text-[10px] font-medium text-neutral-400 group-hover:text-neutral-200 transition-colors truncate">
                   {faces.length > 1 && activeFace ? `Arte: ${activeFace.name}` : "Sua arte"}
                 </p>
-                <ChevronDown className={`w-3.5 h-3.5 text-neutral-500 group-hover:text-neutral-300 transition-colors [transition-duration:var(--dur-base)] ${artSectionCollapsed ? "" : "rotate-180"}`} />
+                {/* A MEDIDA DA SUPERFÍCIE, sempre visível.
+                    Ela existia em dois lugares e nenhum dos dois serve para quem
+                    ainda vai CRIAR a arte: a lista de Smart Objects só aparece com
+                    duas faces ou mais, e a linha do `ArtFramePanel` exige a arte já
+                    anexada e a seção aberta. PSD de uma face, seção fechada — que é
+                    o estado padrão — não dizia em lugar nenhum para quantos pixels
+                    desenhar. Aqui é um termo no cabeçalho que já existe: zero caixa
+                    nova, zero altura nova, e é o número que decide o arquivo que a
+                    pessoa vai abrir no Figma antes de voltar. */}
+                <span className="ml-auto mr-2 shrink-0 text-[10px] font-mono tabular-nums text-neutral-600 group-hover:text-neutral-400 transition-ui">
+                  {soWidth && soHeight ? `${soWidth}×${soHeight}` : ""}
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-neutral-500 group-hover:text-neutral-300 transition-colors [transition-duration:var(--dur-base)] ${artSectionCollapsed ? "" : "rotate-180"}`} />
               </button>
 
               {/* Conteúdo colapsável */}
@@ -4144,8 +4045,8 @@ export default function Home() {
                     {/* Brand shortcuts — só quando sem arte */}
                     {brandId && !artPreview && (
                       <div className="flex flex-col gap-2 shrink-0 w-[4.5rem]">
-                        <button onClick={(e) => { e.stopPropagation(); loadBrandLogoAsArt(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-ui active:scale-[0.97] py-1"><Zap className="w-4 h-4" /><span>Logo</span></button>
-                        <button onClick={(e) => { e.stopPropagation(); openLibrary(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-ui active:scale-[0.97] py-1"><Library className="w-4 h-4" /><span>Library</span></button>
+                        <button onClick={(e) => { e.stopPropagation(); loadBrandLogoAsArt(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-ui press py-1"><Zap className="w-4 h-4" /><span>Logo</span></button>
+                        <button onClick={(e) => { e.stopPropagation(); openLibrary(); }} className="flex-1 flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-white hover:text-black transition-ui press py-1"><Library className="w-4 h-4" /><span>Library</span></button>
                       </div>
                     )}
                   </div>
@@ -4176,7 +4077,7 @@ export default function Home() {
                       }));
                       setFramingHint(null);
                     }}
-                    className="shrink-0 h-7 px-2.5 rounded-lg border border-neutral-800 font-bold text-neutral-300 hover:bg-neutral-900 hover:text-white transition-ui active:scale-[0.97]"
+                    className="shrink-0 h-7 px-2.5 rounded-lg border border-neutral-800 font-bold text-neutral-300 hover:bg-neutral-900 hover:text-white transition-ui press"
                   >
                     {framingHint.mode === "cover" ? "Encaixar" : "Preencher"}
                   </button>
@@ -4210,7 +4111,7 @@ export default function Home() {
                 <button
                   onClick={() => handleRender(true)}
                   disabled={renderDisabled}
-                  className="flex-1 py-3 rounded-xl border border-neutral-800 text-xs font-bold text-neutral-300 disabled:opacity-30 hover:bg-neutral-900 hover:text-white transition-ui active:scale-[0.97]"
+                  className="flex-1 py-3 rounded-xl border border-neutral-800 text-xs font-bold text-neutral-300 disabled:opacity-30 hover:bg-neutral-900 hover:text-white transition-ui press"
                 >
                   Prévia
                 </button>
@@ -4218,7 +4119,7 @@ export default function Home() {
                   <a
                     href={renderResult!}
                     download={`${selected.name.replace(/\s+/g, "_")}_mockup.png`}
-                    className="flex-[1.4] flex items-center justify-center gap-2 py-3 rounded-xl bg-acc2 text-neutral-950 text-xs font-semibold hover:bg-acc2/90 transition-ui active:scale-[0.97] shadow-lg shadow-acc2/10"
+                    className="flex-[1.4] flex items-center justify-center gap-2 py-3 rounded-xl bg-acc2 text-neutral-950 text-xs font-semibold hover:bg-acc2/90 transition-ui press shadow-lg shadow-acc2/10"
                   >
                     <Download className="w-4 h-4" /> Baixar PNG
                   </a>
@@ -4226,7 +4127,7 @@ export default function Home() {
                   <button
                     onClick={() => handleRender(false)}
                     disabled={renderDisabled}
-                    className="flex-[1.4] py-3 rounded-xl text-xs font-semibold bg-acc2 text-neutral-950 disabled:opacity-30 hover:bg-acc2/90 shadow-lg shadow-acc2/10 transition-ui active:scale-[0.97]"
+                    className="flex-[1.4] py-3 rounded-xl text-xs font-semibold bg-acc2 text-neutral-950 disabled:opacity-30 hover:bg-acc2/90 shadow-lg shadow-acc2/10 transition-ui press"
                   >
                     Gerar PNG{faces.length > 1 ? ` · ${filledCount}/${faces.length}` : ""}
                   </button>
@@ -4236,7 +4137,7 @@ export default function Home() {
                     onClick={() => setShowLogs(true)}
                     title="Ver logs do render"
                     aria-label="Ver logs do render"
-                    className={`px-3 py-3 rounded-xl border text-xs font-bold transition-ui active:scale-[0.97] ${renderLogs.some(l => l.step === "error") ? "border-red-500/40 text-red-400 hover:bg-red-500/10" : "border-neutral-800 text-neutral-500 hover:bg-neutral-900 hover:text-white"}`}
+                    className={`px-3 py-3 rounded-xl border text-xs font-bold transition-ui press ${renderLogs.some(l => l.step === "error") ? "border-red-500/40 text-red-400 hover:bg-red-500/10" : "border-neutral-800 text-neutral-500 hover:bg-neutral-900 hover:text-white"}`}
                   >
                     <Terminal className="w-4 h-4" />
                   </button>
@@ -4244,10 +4145,48 @@ export default function Home() {
               </div>
               )}
 
+              {/* Contrato de tempo, ANTES do clique.
+                  O render final leva de 20 a 60 segundos e nada dizia isso: o
+                  contador só nascia depois que a espera já tinha começado, quando
+                  a informação não serve mais para decidir. Quem não sabe que vai
+                  esperar interpreta a espera como travamento e clica de novo.
+                  Depois do primeiro render da sessão a linha para de estimar e
+                  passa a relatar: a medida real deste mockup, nesta máquina, vale
+                  mais que qualquer faixa que eu escrevesse aqui.
+
+                  ⚠️ A linha ocupa o slot SEMPRE (altura fixa), e por isso o texto
+                  cobre os três estados. A primeira versão dela sumia quando o
+                  render começava, e isso empurrava o botão primário ~14px no
+                  instante do clique — quem pegou foi o `check:render-failure`, que
+                  passou a errar o alvo e a reportar "o botão nunca ficou clicável".
+                  Salto de layout embaixo da ação que entrega o arquivo. */}
+              {filledCount > 0 && (
+                <p className="h-3.5 text-[10px] text-neutral-600 text-center tabular-nums">
+                  {finalReady
+                    ? renderTime != null && renderTime > 0
+                      ? `PNG pronto em ${dec(renderTime / 1000)}s`
+                      : "PNG pronto"
+                    : renderTime != null && renderTime > 0
+                      ? `o último PNG levou ${dec(renderTime / 1000)}s`
+                      : "o PNG final leva de 20 a 60 segundos"}
+                </p>
+              )}
+
+              {/* O texto que diz POR QUE o entregável falhou era o menor do rodapé
+                  (10px, contra os 12 do botão logo acima) — a hierarquia dizia que
+                  a explicação importava menos que o botão que acabou de falhar.
+                  E o `.join(", ")` colava os erros de um render multi-face numa
+                  frase corrida, sem quebra e sem dizer qual face morreu. */}
               {renderLogs.some((l) => l.step === "error") && (
-                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-[10px] text-red-400 font-medium flex items-center gap-2">
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  {renderLogs.filter((l) => l.step === "error").map((l) => l.detail).join(", ")}
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400 font-medium flex items-start gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                  <div className="space-y-1 min-w-0">
+                    {renderLogs
+                      .filter((l) => l.step === "error")
+                      .map((l, i) => (
+                        <p key={i} className="leading-snug break-words">{l.detail}</p>
+                      ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -4272,9 +4211,9 @@ export default function Home() {
             </div>
             <div className="overflow-y-auto flex-1 p-3 space-y-0.5 font-mono">
               {renderLogs.map((log, i) => (
-                <div key={i} className={`flex gap-2 py-0.5 text-[10px] leading-relaxed ${log.step === "error" ? "text-red-400" : log.step === "complete" ? "text-emerald-400" : log.step === "warning" ? "text-amber-400" : "text-neutral-500"}`}>
+                <div key={i} className={`flex gap-2 py-0.5 text-[10px] leading-relaxed ${log.step === "error" ? "text-red-400" : log.step === "complete" ? "text-acc2" : log.step === "warning" ? "text-amber-400" : "text-neutral-500"}`}>
                   <span className="shrink-0 text-neutral-500 w-5 text-right">{i + 1}</span>
-                  <span className={`shrink-0 font-bold ${log.step === "error" ? "text-red-500" : log.step === "complete" ? "text-emerald-500" : log.step === "warning" ? "text-amber-500" : "text-neutral-500"}`}>{log.step}</span>
+                  <span className={`shrink-0 font-bold ${log.step === "error" ? "text-red-500" : log.step === "complete" ? "text-acc2" : log.step === "warning" ? "text-amber-500" : "text-neutral-500"}`}>{log.step}</span>
                   {log.detail && <span className="break-all">{log.detail}</span>}
                 </div>
               ))}
@@ -4333,7 +4272,7 @@ export default function Home() {
                   )}
                   <button
                     onClick={() => triggerDownloads(downloadTargets)}
-                    className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-ui active:scale-[0.97]"
+                    className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-ui press"
                   >
                     <Download className="w-3.5 h-3.5" />
                     {sessionSelected.size > 0 ? `Baixar selecionados (${sessionSelected.size})` : "Baixar todos"}
@@ -4404,7 +4343,7 @@ export default function Home() {
             <div className="flex gap-2">
               <button
                 onClick={(e) => { e.stopPropagation(); copyRenderAsPng(); }}
-                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl transition-ui active:scale-[0.97] ${copiedPng ? "bg-acc2 text-neutral-950" : "bg-neutral-800 hover:bg-neutral-700 text-white"}`}
+                className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-xl transition-ui press ${copiedPng ? "bg-acc2 text-neutral-950" : "bg-neutral-800 hover:bg-neutral-700 text-white"}`}
               >
                 {copiedPng ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copiedPng ? "Copiado!" : "Copiar PNG"}
               </button>
@@ -4412,13 +4351,13 @@ export default function Home() {
                 href={renderResult}
                 download={`${selected?.name || "render"}-render.${isPreviewResult ? "jpg" : "png"}`}
                 onClick={(e) => e.stopPropagation()}
-                className="flex items-center gap-2 bg-white text-black text-xs font-bold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-ui active:scale-[0.97]"
+                className="flex items-center gap-2 bg-white text-black text-xs font-bold px-4 py-2 rounded-xl hover:bg-neutral-200 transition-ui press"
               >
                 <Download className="w-3.5 h-3.5" /> Download
               </a>
               <button
                 onClick={() => setFullscreen(false)}
-                className="bg-neutral-800 hover:bg-neutral-700 text-white w-9 h-9 rounded-xl flex items-center justify-center transition-ui active:scale-[0.97]"
+                className="bg-neutral-800 hover:bg-neutral-700 text-white w-9 h-9 rounded-xl flex items-center justify-center transition-ui press"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -4463,7 +4402,7 @@ export default function Home() {
                 {nameDialog?.mode === "rename" ? "Renomear coleção" : "Nova coleção"}
               </p>
             </div>
-            <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]">
+            <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui press">
               <X className="w-4 h-4" />
             </DialogClose>
           </div>
@@ -4481,7 +4420,7 @@ export default function Home() {
             </p>
             <button
               onClick={() => void submitCollectionName()}
-              className="h-10 rounded-xl bg-white text-black text-[11px] font-bold hover:bg-neutral-200 transition-ui active:scale-[0.98]"
+              className="h-10 rounded-xl bg-white text-black text-[11px] font-bold hover:bg-neutral-200 transition-ui press"
             >
               {nameDialog?.mode === "rename" ? "Salvar nome" : "Criar coleção"}
             </button>
@@ -4499,14 +4438,14 @@ export default function Home() {
               </div>
               <p className="text-sm font-semibold text-white">Configurações avançadas</p>
             </div>
-            <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]">
+            <DialogClose aria-label="Fechar" className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui press">
               <X className="w-4 h-4" />
             </DialogClose>
           </div>
           <div className="p-5 flex flex-col gap-3">
             <button
               onClick={() => { setShowSettings(false); setShowDupes(true); if (!dupesGroups.length && !dupesScanning) scanDuplicates(); }}
-              className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 hover:bg-amber-500/15 hover:border-amber-500/30 transition-ui active:scale-[0.98] group text-left"
+              className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 hover:bg-amber-500/15 hover:border-amber-500/30 transition-ui press group text-left"
             >
               <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0 group-hover:bg-amber-500/25 transition-colors">
                 <Copy className="w-4.5 h-4.5 text-amber-400" />
@@ -4541,7 +4480,7 @@ export default function Home() {
               {hiddenIds.size > 0 && (
                 <button
                   onClick={restoreAllHidden}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-ui active:scale-[0.97]"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-ui press"
                 >
                   <RotateCcw className="w-3 h-3" />
                   Restaurar todos
@@ -4552,7 +4491,7 @@ export default function Home() {
               <button
                 onClick={() => setShowHidden(false)}
                 title="Fechar"
-                className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]"
+                className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui press"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -4560,9 +4499,21 @@ export default function Home() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 scroll-smooth">
+            {/* Esqueleto com a forma da linha que vai chegar (miniatura de 40px,
+                nome, caminho), não um disco girando no meio do vazio: a lista não
+                colapsa e depois salta, e quem espera já lê o que vem. */}
             {hiddenLoading && (
-              <div className="flex items-center justify-center py-16">
-                <Loader2 className="w-8 h-8 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
+              <div aria-busy aria-label="Carregando o que está oculto">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 px-3 py-2 mb-0.5">
+                    <Skeleton className="w-10 h-10 shrink-0 rounded-lg" />
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <Skeleton className="h-2.5 w-1/3" />
+                      <Skeleton className="h-2 w-2/3" />
+                    </div>
+                    <Skeleton className="h-7 w-20 shrink-0 rounded-xl" />
+                  </div>
+                ))}
               </div>
             )}
 
@@ -4597,7 +4548,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => restoreHidden(ref)}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-ui active:scale-[0.97]"
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-ui press"
                 >
                   <Eye className="w-3 h-3" />
                   Reexibir
@@ -4653,12 +4604,12 @@ export default function Home() {
                 <button
                   onClick={() => scanDuplicates(true)}
                   disabled={dupesScanning}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-ui active:scale-[0.97] disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800 text-[10px] font-bold text-neutral-400 hover:bg-neutral-700 hover:text-white transition-ui press disabled:opacity-40"
                 >
                   <RefreshCw className={`w-3 h-3 ${dupesScanning ? "animate-spin" : ""}`} />
                   {dupesScanning ? "Escaneando..." : "Re-escanear"}
                 </button>
-                <button onClick={() => setShowDupes(false)} className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]">
+                <button onClick={() => setShowDupes(false)} className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui press">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -4739,7 +4690,7 @@ export default function Home() {
                 <div className="flex flex-col items-center justify-center py-16 gap-4">
                   <div className="p-4 rounded-full bg-red-500/10 text-red-500"><AlertTriangle className="w-7 h-7" /></div>
                   <p className="text-red-400 text-xs font-bold text-center px-8">{dupesError}</p>
-                  <button onClick={() => scanDuplicates()} className="text-[10px] font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-ui active:scale-[0.97]">
+                  <button onClick={() => scanDuplicates()} className="text-[10px] font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-ui press">
                     Tentar novamente
                   </button>
                 </div>
@@ -4776,7 +4727,7 @@ export default function Home() {
                   </div>
                   <div className="bg-black/40 rounded-xl border border-neutral-800/50 p-3 h-36 overflow-y-auto no-scrollbar font-mono text-[10px] leading-relaxed space-y-0.5">
                     {dupesLogs.map((line, i) => (
-                      <p key={i} className={line.startsWith("✓") ? "text-emerald-500" : line.startsWith("✗") ? "text-red-400" : line.startsWith("Duplicata") ? "text-amber-400/80" : "text-neutral-500"}>
+                      <p key={i} className={line.startsWith("✓") ? "text-acc2" : line.startsWith("✗") ? "text-red-400" : line.startsWith("Duplicata") ? "text-amber-400/80" : "text-neutral-500"}>
                         <span className="text-neutral-600 mr-2 select-none">{String(i + 1).padStart(2, " ")} ›</span>{line}
                       </p>
                     ))}
@@ -4788,8 +4739,8 @@ export default function Home() {
               {/* Clean state — scan done, zero dupes */}
               {!dupesScanning && dupesSummary && dupesGroups.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-20 gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 flex items-center justify-center">
-                    <CheckCircle2 className="w-7 h-7 text-emerald-400" />
+                  <div className="w-14 h-14 rounded-2xl bg-acc2/10 flex items-center justify-center">
+                    <CheckCircle2 className="w-7 h-7 text-acc2" />
                   </div>
                   <div className="text-center">
                     <p className="text-sm font-semibold text-white">Nenhuma duplicata</p>
@@ -4855,9 +4806,9 @@ export default function Home() {
                           return (
                             <div
                               key={fi}
-                              className={`grid grid-cols-[1rem_1fr_7rem_8rem_9rem] gap-x-3 items-center px-3 py-2 rounded-xl mb-0.5 ${isKeep ? "bg-emerald-500/[0.06]" : "bg-red-500/[0.06]"}`}
+                              className={`grid grid-cols-[1rem_1fr_7rem_8rem_9rem] gap-x-3 items-center px-3 py-2 rounded-xl mb-0.5 ${isKeep ? "bg-acc2/[0.06]" : "bg-red-500/[0.06]"}`}
                             >
-                              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isKeep ? "bg-emerald-500" : "bg-red-500/70"}`} />
+                              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isKeep ? "bg-acc2" : "bg-red-500/70"}`} />
                               <div className="flex items-center gap-2 min-w-0">
                                 {thumbUrl ? (
                                   // eslint-disable-next-line @next/next/no-img-element
@@ -4868,7 +4819,7 @@ export default function Home() {
                                   </div>
                                 )}
                                 <div className="min-w-0">
-                                  <p className={`text-[10px] font-bold truncate ${isKeep ? "text-emerald-300" : "text-neutral-400"}`}>{name}</p>
+                                  <p className={`text-[10px] font-bold truncate ${isKeep ? "text-acc2" : "text-neutral-400"}`}>{name}</p>
                                   <p className="text-[8px] text-neutral-500 font-mono truncate mt-0.5">
                                     <span
                                       title={origin.safeToDelete ? undefined : "Fora da sua conta. Apagar aqui apaga na origem, para todo mundo"}
@@ -4889,7 +4840,7 @@ export default function Home() {
                               <div className="flex items-center justify-end gap-1.5">
                                 <span className={`text-[8px] font-semibold px-2 py-0.5 rounded-full ${
                                   isKeep
-                                    ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+                                    ? "bg-acc2/15 text-acc2 border border-acc2/20"
                                     : "bg-red-500/10 text-red-400 border border-red-500/15"
                                 }`}>
                                   {isKeep ? "Manter" : "Remover"}
@@ -4960,16 +4911,25 @@ export default function Home() {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setShowLibrary(false)} className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui active:scale-[0.97]">
+              <button onClick={() => setShowLibrary(false)} className="p-2 rounded-xl hover:bg-neutral-800 text-neutral-500 hover:text-white transition-ui press">
                 <X className="w-6 h-6" />
               </button>
             </div>
             
             <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
               {loadingAssets ? (
-                <div className="flex flex-col items-center justify-center h-64 gap-4">
-                  <Loader2 className="w-10 h-10 border-2 border-neutral-700 border-t-white rounded-full animate-spin" />
-                  <p className="text-xs font-bold text-neutral-500">Sincronizando assets...</p>
+                // Mesma grade dos assets, na mesma proporção: zero salto quando chegam.
+                <div
+                  className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6"
+                  aria-busy
+                  aria-label="Sincronizando assets da marca"
+                >
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <div key={i} className="space-y-2">
+                      <Skeleton className="aspect-square w-full rounded-xl" />
+                      <Skeleton className="h-2.5 w-2/3" />
+                    </div>
+                  ))}
                 </div>
               ) : assetError ? (
                 <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -4977,7 +4937,7 @@ export default function Home() {
                   <p className="text-red-400 text-sm font-bold text-center px-10">{assetError}</p>
                   <button 
                     onClick={openLibrary}
-                    className="flex items-center gap-2 text-[10px] font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-ui active:scale-[0.97]"
+                    className="flex items-center gap-2 text-[10px] font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-neutral-200 transition-ui press"
                   >
                     Tentar novamente
                   </button>

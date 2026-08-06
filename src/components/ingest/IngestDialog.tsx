@@ -55,9 +55,9 @@ const VERDICT_META: Record<
   new: {
     label: "Novos",
     short: "Novo",
-    dot: "bg-emerald-500",
-    text: "text-emerald-400",
-    bg: "bg-emerald-500/10 border-emerald-500/20",
+    dot: "bg-acc2",
+    text: "text-acc2",
+    bg: "bg-acc2/10 border-acc2/20",
   },
   duplicate: {
     label: "Duplicatas",
@@ -553,7 +553,7 @@ export default function IngestDialog({
             onClick={onClose}
             disabled={phase === "ingesting"}
             title={phase === "ingesting" ? "Aguarde o ingest terminar" : "Fechar (Esc)"}
-            className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-600 hover:text-white transition-[color,background-color] active:scale-[0.97] disabled:opacity-30 shrink-0"
+            className="p-1.5 rounded-xl hover:bg-neutral-800 text-neutral-600 hover:text-white transition-ui press disabled:opacity-30 shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
@@ -624,7 +624,7 @@ export default function IngestDialog({
                 <p className="text-red-400 text-xs font-bold text-center max-w-md break-words">{error}</p>
                 <button
                   onClick={rescan}
-                  className="h-10 px-4 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.98]"
+                  className="h-10 px-4 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-ui press"
                 >
                   Escanear de novo
                 </button>
@@ -640,8 +640,8 @@ export default function IngestDialog({
                 transition={transitions.base}
                 className="flex-1 flex flex-col items-center justify-center gap-5 px-8"
               >
-                <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+                <div className="w-16 h-16 rounded-2xl bg-acc2/10 border border-acc2/20 flex items-center justify-center">
+                  <CheckCircle2 className="w-8 h-8 text-acc2" />
                 </div>
                 <div className="text-center">
                   <p className="text-sm font-black text-white uppercase tracking-widest">
@@ -675,13 +675,13 @@ export default function IngestDialog({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={recomecar}
-                    className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
+                    className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui press"
                   >
                     Adicionar outra pasta
                   </button>
                   <button
                     onClick={onClose}
-                    className="h-10 px-6 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.98]"
+                    className="h-10 px-6 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-ui press"
                   >
                     Ver no acervo
                   </button>
@@ -713,7 +713,7 @@ export default function IngestDialog({
                 </div>
                 <button
                   onClick={recomecar}
-                  className="h-10 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.98]"
+                  className="h-10 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-ui press"
                 >
                   Escolher outra pasta
                 </button>
@@ -728,7 +728,7 @@ export default function IngestDialog({
                 transition={transitions.base}
                 className="flex-1 flex flex-col items-center justify-center gap-4 px-8 text-center"
               >
-                <CheckCircle2 className="w-8 h-8 text-emerald-500/60" aria-hidden />
+                <CheckCircle2 className="w-8 h-8 text-acc2/60" aria-hidden />
                 <div>
                   <p className="text-sm font-black uppercase tracking-widest text-neutral-400">
                     Esta pasta já está toda no acervo
@@ -744,13 +744,13 @@ export default function IngestDialog({
                       setFilter("all");
                       setVerTudo(true);
                     }}
-                    className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
+                    className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui press"
                   >
                     Ver mesmo assim
                   </button>
                   <button
                     onClick={recomecar}
-                    className="h-10 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.98]"
+                    className="h-10 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-ui press"
                   >
                     Escolher outra pasta
                   </button>
@@ -782,7 +782,7 @@ export default function IngestDialog({
                   <button
                     onClick={() => setFilter("all")}
                     aria-pressed={filter === "all"}
-                    className={`h-8 px-3 rounded-full border text-[10px] font-black uppercase tracking-widest transition-[color,background-color,border-color] active:scale-[0.97] ${
+                    className={`h-8 px-3 rounded-full border text-[10px] font-black uppercase tracking-widest transition-ui press ${
                       filter === "all"
                         ? "bg-white text-black border-white"
                         : "bg-neutral-900 border-neutral-800 text-neutral-500 hover:text-neutral-300"
@@ -798,7 +798,7 @@ export default function IngestDialog({
                         key={v}
                         onClick={() => setFilter(on ? "all" : v)}
                         aria-pressed={on}
-                        className={`h-8 px-3 rounded-full border text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-[color,background-color,border-color] active:scale-[0.97] ${
+                        className={`h-8 px-3 rounded-full border text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-ui press ${
                           on ? "bg-white text-black border-white" : `${m.bg} ${m.text}`
                         }`}
                       >
@@ -822,7 +822,7 @@ export default function IngestDialog({
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder="Filtrar por nome ou caminho…"
-                      className="w-full h-9 rounded-xl bg-neutral-900 border border-neutral-800 pl-9 pr-4 text-xs focus:outline-none focus:border-neutral-600 transition-colors placeholder:text-neutral-700"
+                      className="w-full h-9 rounded-xl bg-neutral-900 border border-neutral-800 pl-9 pr-4 text-xs focus:outline-none focus:border-neutral-600 transition-ui placeholder:text-neutral-700"
                     />
                   </div>
                   <label className="flex items-center gap-2 shrink-0">
@@ -833,7 +833,7 @@ export default function IngestDialog({
                       value={studio}
                       onChange={(e) => setStudio(e.target.value)}
                       placeholder="pasta"
-                      className="w-40 h-9 rounded-xl bg-neutral-900 border border-neutral-800 px-3 text-xs font-bold focus:outline-none focus:border-neutral-600 transition-colors"
+                      className="w-40 h-9 rounded-xl bg-neutral-900 border border-neutral-800 px-3 text-xs font-bold focus:outline-none focus:border-neutral-600 transition-ui"
                     />
                   </label>
                   <button
@@ -842,10 +842,10 @@ export default function IngestDialog({
                       allVisibleSelected
                         ? "Desmarca tudo que está à vista"
                         : foraDaMarcacao > 0
-                          ? `Marca só os ${marcaveis.length} novos. ${foraDaMarcacao} ficam de fora; filtre por veredito para marcá-los.`
+                          ? `Marca só os ${marcaveis.length} novos. ${foraDaMarcacao} ficam de fora. Filtre por veredito para marcá-los.`
                           : "Marca tudo que está à vista"
                     }
-                    className="shrink-0 h-9 px-3 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
+                    className="shrink-0 h-9 px-3 rounded-xl border border-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui press"
                   >
                     {allVisibleSelected
                       ? "Desmarcar à vista"
@@ -875,7 +875,7 @@ export default function IngestDialog({
                         )
                       }
                       aria-label={`Ordenar por ${rotulo.toLowerCase()}`}
-                      className={`${cls} text-[9px] font-black uppercase tracking-widest transition-colors ${
+                      className={`${cls} text-[9px] font-black uppercase tracking-widest transition-ui ${
                         ordem.campo === campo
                           ? "text-neutral-300"
                           : "text-neutral-700 hover:text-neutral-500"
@@ -931,14 +931,14 @@ export default function IngestDialog({
                                 toggle(it.path);
                               }
                             }}
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer text-left transition-[color,background-color,border-color] ${
+                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer text-left transition-ui ${
                               on
                                 ? "bg-white/[0.06] border-neutral-700"
                                 : "bg-transparent border-transparent hover:bg-white/[0.03]"
                             }`}
                           >
                             <span
-                              className={`w-4 h-4 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
+                              className={`w-4 h-4 rounded-lg border flex items-center justify-center shrink-0 transition-ui ${
                                 on ? "bg-white border-white" : "border-neutral-700"
                               }`}
                             >
@@ -996,7 +996,7 @@ export default function IngestDialog({
                               }}
                               title="Mostrar no Explorer"
                               aria-label={`Mostrar ${it.name} no Explorer`}
-                              className="shrink-0 rounded-lg p-1.5 text-neutral-700 transition-colors hover:bg-white/5 hover:text-white"
+                              className="shrink-0 rounded-lg p-1.5 text-neutral-700 transition-ui hover:bg-white/5 hover:text-white"
                             >
                               <ExternalLink className="h-3 w-3" />
                             </button>
@@ -1023,7 +1023,7 @@ export default function IngestDialog({
             <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={onClose}
-                className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-colors active:scale-[0.97]"
+                className="h-10 px-4 rounded-xl border border-neutral-800 text-[11px] font-black uppercase tracking-widest text-neutral-500 hover:text-white hover:border-neutral-600 transition-ui press"
               >
                 Cancelar
               </button>
@@ -1036,7 +1036,7 @@ export default function IngestDialog({
               ) : (
                 <button
                   onClick={commit}
-                  className="h-10 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-colors active:scale-[0.97] shadow-xl shadow-white/5 flex items-center gap-2"
+                  className="h-10 px-5 rounded-xl bg-white text-black text-[11px] font-black uppercase tracking-widest hover:bg-neutral-200 transition-ui press shadow-xl shadow-white/5 flex items-center gap-2"
                 >
                   <Import className="w-3.5 h-3.5" />
                   Ingerir {selected.size}

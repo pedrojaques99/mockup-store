@@ -67,8 +67,34 @@
  * divergir. Aqui o escopo, a duração e a curva vêm do SSoT de motion. */
 @utility transition-ui {
   transition-property: color, background-color, border-color, box-shadow, opacity, transform;
-  transition-duration: var(--dur-base);
+  /* Uma duração por propriedade, na ordem da lista acima. `transform` é o único
+   * que sai mais rápido, porque quem move transform aqui é o PRESS: 200ms de
+   * volta faz o botão parecer que soltou depois do dedo. Cor pode assentar. */
+  transition-duration: var(--dur-base), var(--dur-base), var(--dur-base), var(--dur-base), var(--dur-base), var(--dur-press);
   transition-timing-function: var(--ease-out);
+}
+
+/* Feedback de pressão. Mesma história do `transition-ui`, um degrau pior: o
+ * `page.tsx` tinha 61 `active:scale-[…]` escritos à mão, em dois valores, e o
+ * SSoT (`lib/motion.ts`, `pressable`) declarava um TERCEIRO (0.985) que nenhum
+ * deles usava — o arquivo não importa `@/lib/motion` uma única vez. Enquanto o
+ * valor for literal, o próximo botão nasce com um quarto número.
+ *
+ * A duração é a de press (120ms), não a de UI (200ms): o toque precisa responder
+ * antes de o dedo sair, e herdar a transição de entrada é o jeito clássico de o
+ * press parecer atrasado.
+ *
+ * ⚠️ Mudou o 0.985 aqui, muda o `pressable` do `lib/motion.ts`. São espelho, como
+ * os tokens de duração e curva logo acima. */
+ * Ela declara SÓ o transform. Quem transiciona é o `transition-ui` logo acima —
+ * que já lista `transform` e agora dá a ele a duração de press. Se `press`
+ * declarasse a própria `transition-property`, ela sobrescreveria a lista do
+ * `transition-ui` nos 52 elementos que usam os dois, e as transições de COR
+ * morreriam em silêncio. Por isso `press` sempre anda acompanhado. */
+@utility press {
+  &:active {
+    transform: scale(0.985);
+  }
 }
 
 /* Também nunca existiu — 7 lugares pediam para esconder a barra de rolagem e

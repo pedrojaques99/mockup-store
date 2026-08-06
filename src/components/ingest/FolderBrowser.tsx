@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronRight, CornerLeftUp, HardDrive, Folder, Loader2 } from "lucide-react";
 import { motion } from "motion/react";
 import { transitions } from "@/lib/motion";
+import { readError } from "@/lib/http-error";
 
 /**
  * Navegador de pastas do próprio app.
@@ -36,8 +37,8 @@ export function FolderBrowser({
     setErro(null);
     try {
       const res = await fetch(`/api/fs/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+      if (!res.ok) throw new Error(await readError(res));
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
       setAtual(d.atual);
       setPai(d.pai);
       setPastas(d.pastas ?? []);

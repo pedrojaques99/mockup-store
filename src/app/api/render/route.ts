@@ -71,8 +71,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = await req.json();
-  const { psdPath, artBase64, smartObject = "Your design", hideLayers = [] } = body;
+  /* `req.json()` fora de try/catch derrubava o handler ANTES de qualquer
+   * `NextResponse.json`, e o 500 do Next sai com corpo VAZIO. O cliente então
+   * estourava no próprio `res.json()` e mostrava "SyntaxError: Unexpected end of
+   * JSON input" — a mensagem do parser, não a do problema.
+   *
+   * O corpo chega cortado quando passa do `middlewareClientMaxBodySize`
+   * (next.config.ts): o Next trunca o clone em silêncio. Se o teto voltar a ser
+   * baixo demais para alguma arte, o usuário lê o motivo em vez do sintoma. */
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      {
+        error:
+          "A arte não chegou inteira ao servidor (corpo da requisição truncado). Reduza a resolução da arte ou renderize menos faces por vez.",
+      },
+      { status: 413 },
+    );
+  }
+  const { psdPath, artBase64, smartObject = "Your design", hideLayers = [] } = body as {
+    psdPath?: string; artBase64?: string; smartObject?: string; hideLayers?: string[];
+  };
   const stream = body.stream === true;
   const preview = body.preview === true;
 

@@ -44,6 +44,27 @@ const nextConfig: NextConfig = {
   ],
   experimental: {
     /**
+     * TETO DO CORPO DA REQUISIÇÃO — o `SyntaxError: Unexpected end of JSON input`.
+     *
+     * Existe `src/middleware.ts` (injeta `x-tenant`), e todo request que casa o
+     * matcher tem o corpo CLONADO pelo Next antes de chegar na rota. O clone tem
+     * teto (`DEFAULT_BODY_CLONE_SIZE_LIMIT`, 10 MB) e, estourado o teto, o corpo é
+     * **truncado em silêncio**: o middleware nem lê corpo nenhum, mas a rota recebe
+     * um JSON cortado no meio.
+     *
+     * O estrago era mudo em três camadas. `req.json()` da rota estourava, o handler
+     * morria antes de qualquer `NextResponse.json`, o Next devolvia **500 com corpo
+     * vazio**, e o `res.json()` do cliente estourava de novo — o usuário via
+     * "SyntaxError: Unexpected end of JSON input" no lugar de "sua arte é grande
+     * demais". Medido: 9 MB passa, 10 MB quebra.
+     *
+     * Quem estoura isso é o caminho normal do produto, não um caso exótico: `arts[]`
+     * leva PNG full-res em base64 (+33%), e mockup multi-face manda uma arte POR
+     * FACE — dois smart objects de 2000×2832 já passam de 10 MB. `/api/search-by-image`
+     * e `/api/calibrate/render` mandam imagem inteira pelo mesmo cano.
+     */
+    middlewareClientMaxBodySize: "64mb",
+    /**
      * O dev server pré-carregava TODAS as rotas na memória ao subir: 566 MB de RSS
      * antes de servir o primeiro request (medido). Com isto, cada rota entra quando
      * é pedida — o custo continua existindo, mas só para as rotas que você abre, e

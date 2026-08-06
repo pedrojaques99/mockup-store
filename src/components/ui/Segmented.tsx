@@ -27,8 +27,8 @@ export function Segmented<T extends string>({
           className={cn(
             "py-1.5 rounded-lg text-[10px] font-medium border transition-colors",
             value === o.value
-              ? "bg-acc2 text-zinc-950 border-acc2"
-              : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"
+              ? "bg-acc2 text-neutral-950 border-acc2"
+              : "bg-neutral-800/60 text-neutral-400 border-neutral-700/50 hover:bg-neutral-700/60"
           )}
         >
           {o.label}

@@ -295,6 +295,34 @@ symlink para fora da árvore e o Turbopack recusa o caminho real, inclusive por
 `resolveAlias` absoluto. O bloco `turbopack` do `next.config.ts` já está pronto
 para o dia em que o engine virar dependência publicada — aí valem os ~900 MB.
 
+## Corpo de requisição tem teto de 10 MB (e ele corta calado)
+
+Existe `src/middleware.ts`, e todo request que casa o matcher (`/api/:path*`) tem o
+corpo **clonado** pelo Next antes de chegar na rota. O clone tem teto
+(`DEFAULT_BODY_CLONE_SIZE_LIMIT`, 10 MB) e, estourado, **trunca em silêncio** — o
+middleware nem lê corpo nenhum, mas a rota recebe um JSON cortado no meio.
+
+O estrago era mudo em três camadas: `req.json()` da rota estoura → o handler morre
+antes de qualquer `NextResponse.json` → o Next devolve **500 com corpo vazio** → o
+`res.json()` do cliente estoura de novo. O usuário lia
+`SyntaxError: Unexpected end of JSON input` — a mensagem do parser em cima do erro
+real, que ficava invisível. Medido: **9 MB passa, 10 MB quebra**.
+
+Quem estoura isso é o caminho normal do produto: `arts[]` leva PNG full-res em
+base64 (+33%) e mockup multi-face manda **uma arte por face** — dois smart objects
+de 2000×2832 já passam de 10 MB (foi assim que apareceu). `/api/search-by-image` e
+`/api/calibrate/render` mandam imagem inteira pelo mesmo cano.
+
+- **Teto**: `experimental.middlewareClientMaxBodySize: "64mb"` no `next.config.ts`.
+  Mexer no matcher do middleware não é o conserto — o header `x-tenant` é para as
+  rotas de API, é justamente onde os corpos grandes passam.
+- ⚠️ **Nunca `await res.json()` seco depois de `if (!res.ok)`.** Resposta de erro
+  sem corpo é o caso comum (todo 500 que o Next gera sozinho), e o parse estourando
+  dentro do `try` faz o `catch` mostrar o erro do parser. `res.text()` → parse
+  tolerante → fallback no status, que é o que sempre existe.
+- **Portão**: `npm run check:render-failure -- C` injeta um 500 sem corpo e reprova
+  se o aviso vazar "SyntaxError"/"JSON input". Provado nos dois sentidos.
+
 ## Imagem de fora do `public/` — `/api/local-image`
 
 O grid usa `next/image`, e para gerar cada variante o otimizador **busca a fonte

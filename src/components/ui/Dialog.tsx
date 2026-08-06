@@ -47,7 +47,7 @@ export function DialogContent({
 }) {
   const surface =
     skin === "zinc"
-      ? "border-zinc-700/70 bg-zinc-900"
+      ? "border-neutral-700/70 bg-neutral-900"
       : "border-neutral-800 bg-neutral-950";
 
   return (

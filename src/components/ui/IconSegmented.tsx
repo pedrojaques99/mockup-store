@@ -11,11 +11,11 @@ import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui/Tooltip";
 import type { IconButtonVariant } from "@/components/ui/IconButton";
 
-const IDLE = "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60 hover:text-zinc-200";
+const IDLE = "bg-neutral-800/60 text-neutral-400 border-neutral-700/50 hover:bg-neutral-700/60 hover:text-neutral-200";
 const SELECTED: Record<IconButtonVariant, string> = {
-  ghost:   "bg-zinc-100 text-zinc-950 border-zinc-100",
-  primary: "bg-zinc-100 text-zinc-950 border-zinc-100",
-  accent:  "bg-acc2 text-zinc-950 border-acc2",
+  ghost:   "bg-neutral-100 text-neutral-950 border-neutral-100",
+  primary: "bg-neutral-100 text-neutral-950 border-neutral-100",
+  accent:  "bg-acc2 text-neutral-950 border-acc2",
   danger:  "bg-rose-500 text-white border-rose-500",
   violet:  "bg-violet-500 text-white border-violet-500",
 };
@@ -59,7 +59,7 @@ export function IconSegmented<T extends string>({
               aria-pressed={on}
               onClick={() => onChange(o.value)}
               className={cn(
-                "flex items-center justify-center py-1.5 rounded-lg border text-[10px] font-medium transition-ui [transition-duration:var(--dur-fast)] active:scale-[0.97]",
+                "flex items-center justify-center py-1.5 rounded-lg border text-[10px] font-medium transition-ui press",
                 on ? SELECTED[o.variant ?? variant] : IDLE,
               )}
             >

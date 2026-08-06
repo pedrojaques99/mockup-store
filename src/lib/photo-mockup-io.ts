@@ -3,6 +3,7 @@
  * um fetch JSON com erro tipado. Extraídos de photo-mockup/page.tsx (sem mudança
  * de comportamento) pra serem reusados pelos hooks de domínio.
  */
+import { readError } from "@/lib/http-error";
 
 export function toBase64File(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -36,8 +37,8 @@ export function dataUrlToFile(dataUrl: string, name: string): File {
 
 export async function fetchJSON<T>(url: string, opts?: RequestInit): Promise<T> {
   const r = await fetch(url, opts);
-  const j = await r.json();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (!r.ok) throw new Error((j as any).error ?? `HTTP ${r.status}`);
-  return j as T;
+  // Portão antes do parse: resposta de erro sem corpo fazia o `json()` estourar e
+  // a tela mostrava "Unexpected end of JSON input" no lugar do motivo.
+  if (!r.ok) throw new Error(await readError(r));
+  return (await r.json()) as T;
 }

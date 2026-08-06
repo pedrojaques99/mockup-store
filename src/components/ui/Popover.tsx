@@ -29,7 +29,7 @@ export function PopoverContent({
         collisionPadding={collisionPadding}
         onOpenAutoFocus={(e) => e.preventDefault()}
         className={cn(
-          "z-40 w-72 max-h-[calc(100vh-32px)] overflow-y-auto rounded-2xl border border-zinc-700/70 bg-zinc-900/95 backdrop-blur-md p-3 text-zinc-200 shadow-2xl outline-none",
+          "z-40 w-72 max-h-[calc(100vh-32px)] overflow-y-auto rounded-2xl border border-neutral-700/70 bg-neutral-900/95 backdrop-blur-md p-3 text-neutral-200 shadow-2xl outline-none",
           "transition-opacity data-[state=closed]:opacity-0 data-[state=open]:opacity-100",
           className
         )}

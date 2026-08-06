@@ -40,13 +40,13 @@ export function Slider({
   const changed = defaultValue !== undefined && Math.abs(value - defaultValue) > 1e-6;
   return (
     <div className={cn("space-y-0.5", className)}>
-      <label className="text-[10px] text-zinc-400 flex items-center justify-between">
+      <label className="text-[10px] text-neutral-400 flex items-center justify-between">
         <span className="flex items-center gap-1">
           {label}
-          {hint && <span className="text-zinc-700">· {hint}</span>}
-          {changed && <span className={cn("w-1 h-1 rounded-full inline-block", accent === "acc2" ? "bg-acc2" : "bg-acc")} title="alterado — duplo-clique reseta" />}
+          {hint && <span className="text-neutral-700">· {hint}</span>}
+          {changed && <span className={cn("w-1 h-1 rounded-full inline-block", accent === "acc2" ? "bg-acc2" : "bg-acc")} title="alterado. Duplo-clique reseta" />}
         </span>
-        <span className={cn("font-mono transition-colors", active ? accCls : "text-zinc-500")}>{display ?? `${value}${suffix}`}</span>
+        <span className={cn("font-mono transition-colors", active ? accCls : "text-neutral-500")}>{display ?? `${value}${suffix}`}</span>
       </label>
       <input
         type="range"

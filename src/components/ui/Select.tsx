@@ -47,9 +47,9 @@ export function Select({
   boxed?: boolean;
 }) {
   const T = skin === "zinc"
-    ? { text: "text-zinc-200", muted: "text-zinc-500", chev: "text-zinc-500", hoverChev: "group-hover/sel:text-zinc-300",
-        box: "bg-zinc-800/60 border border-zinc-700/50 hover:bg-zinc-700/60",
-        menu: "border-zinc-700/60 bg-zinc-900/95", item: "text-zinc-400 data-[highlighted]:bg-white/8 data-[highlighted]:text-white", hint: "text-zinc-600" }
+    ? { text: "text-neutral-200", muted: "text-neutral-500", chev: "text-neutral-500", hoverChev: "group-hover/sel:text-neutral-300",
+        box: "bg-neutral-800/60 border border-neutral-700/50 hover:bg-neutral-700/60",
+        menu: "border-neutral-700/60 bg-neutral-900/95", item: "text-neutral-400 data-[highlighted]:bg-white/8 data-[highlighted]:text-white", hint: "text-neutral-600" }
     : { text: "text-white", muted: "text-neutral-500", chev: "text-neutral-600", hoverChev: "group-hover/sel:text-neutral-400",
         box: "bg-neutral-900 border border-neutral-800 hover:border-neutral-700",
         menu: "border-neutral-800 bg-neutral-950/95", item: "text-neutral-400 data-[highlighted]:bg-white/8 data-[highlighted]:text-white", hint: "text-neutral-600" };

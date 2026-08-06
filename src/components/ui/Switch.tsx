@@ -40,7 +40,7 @@ export function Switch({
       aria-label={label}
       className={cn(
         "relative w-7 h-4 shrink-0 rounded-full transition-colors [transition-duration:var(--dur-fast)]",
-        "data-[state=checked]:bg-emerald-500/80 data-[state=unchecked]:bg-neutral-800",
+        "data-[state=checked]:bg-acc2/80 data-[state=unchecked]:bg-neutral-800",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30",
         className,
       )}
