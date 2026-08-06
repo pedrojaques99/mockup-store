@@ -106,8 +106,14 @@ async function main() {
     }
   }
 
-  // Sinônimo PT↔EN: a invariante é a SIMETRIA. Se um lado acha, o outro tem que
-  // achar o mesmo tanto — independente de qual par existe nesta biblioteca.
+  // Sinônimo PT↔EN: a invariante é que os dois lados caem no MESMO acervo — não que
+  // devolvam o mesmo número. Igualdade exata é forte demais e acusa falha onde não há:
+  // a expansão é simétrica por construção (o par vive no mesmo grupo de `GROUPS`), mas
+  // o termo cru ainda passa por prefixo e fuzzy, e aí a cauda de cada idioma difere.
+  // Medido: "abrigo" 492 × "shelter" 500 — o inglês casa por prefixo com "shelters"/
+  // "sheltered", que existem no acervo, e o português não tem esse plural. Prova de que
+  // o caminho é o prefixo, não o sinônimo: "shelterxx", puro typo, ainda dá 128 hits.
+  // Então a asserção é de ORDEM DE GRANDEZA: nenhum lado zerado, gap dentro de 15%.
   try {
     const pares: Array<[string, string]> = [
       ["abrigo", "shelter"],
@@ -123,7 +129,13 @@ async function main() {
         getJson(`/api/references?has_psd=true&limit=1&search=${en}`),
       ]);
       if (a.total === 0 && b.total === 0) continue;
-      assert(`sinônimo "${pt}" ↔ "${en}" é simétrico`, a.total === b.total, `${a.total} × ${b.total}`);
+      const maior = Math.max(a.total, b.total);
+      const gap = Math.abs(a.total - b.total) / maior;
+      assert(
+        `sinônimo "${pt}" ↔ "${en}" cai no mesmo acervo`,
+        a.total > 0 && b.total > 0 && gap <= 0.15,
+        `${a.total} × ${b.total} (gap ${(gap * 100).toFixed(1)}%)`,
+      );
       testado = true;
       break;
     }
