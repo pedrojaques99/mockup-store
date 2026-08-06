@@ -270,9 +270,15 @@ npm run pack:publish -- --apply      # sobe (precisa R2_* no .env.local)
 - ⚠️ **E o slot é `face.smartObject`, NUNCA `face.name`.** `name` é rótulo curto
   de UI ("Frente", "Arte") e não identifica camada; `smartObject` é o path único
   do representante. Mandando o rótulo, o render casa o alvo errado — a arte cobre
-  a cena inteira e a face fica com o placeholder. **O QA automático aprova**
-  (imagem cheia de contraste, desvio alto), então só a contact sheet pega. Um
+  a cena inteira e a face fica com o placeholder. **O QA por desvio-padrão
+  aprova** (imagem cheia de contraste), e por anos só a contact sheet pegava. Um
   item em doze estava assim e o script tinha dito 110/112 ok.
+  **Isto agora tem portão**: `npm run check:offline -- --multiface "<psd>"`
+  renderiza a MESMA arte em duas faces e exige que as imagens difiram. Slot
+  respeitado dá 16,46%; mandando `face.name`, dá **0,00%** e `exit 1`. Um PSD de
+  face ÚNICA não serve para isso — lá não existe outro lugar para a arte ir, e o
+  slot errado passa batido (medido: 31,45% com o slot certo e com um slot
+  inventado).
 - A prévia do card **é** o render de QA: o usuário vê o mockup funcionando, não
   uma foto de catálogo que pode não bater com o resultado.
 

@@ -40,6 +40,13 @@ const urlExterna = iUrl >= 0 ? process.argv[iUrl + 1].replace(/\/+$/, "") : null
  */
 const iIng = process.argv.indexOf("--ingest");
 const pastaIngest = iIng >= 0 ? process.argv[iIng + 1] : null;
+/**
+ * `--multiface <arquivo.psd>` prova o que o diferencial de uma face NÃO prova:
+ * que o `smartObject` escolhe a face certa. Num PSD de face única não existe
+ * outro lugar para a arte ir, então lá o slot errado passa batido.
+ */
+const iMf = process.argv.indexOf("--multiface");
+const psdMultiface = iMf >= 0 ? process.argv[iMf + 1] : null;
 const PORTA = 4198;
 const BASE = urlExterna ?? `http://127.0.0.1:${PORTA}`;
 
@@ -414,6 +421,77 @@ if (!pastaIngest) {
           if (!entrou) falhas++;
         }
       }
+    }
+  }
+}
+
+/**
+ * O slot escolhe a face? Só um PSD multi-face responde.
+ *
+ * Renderiza a MESMA arte em duas faces diferentes: com o `smartObject` sendo
+ * respeitado as imagens diferem; ignorado, saem idênticas. É a única forma de
+ * pegar o defeito que o `AGENTS.md` documenta (mandar `face.name` no lugar de
+ * `face.smartObject` casa o alvo errado) e que o QA por desvio-padrão aprova
+ * sem piscar.
+ */
+console.log("\n--- o slot escolhe a face? (multi-face) ---");
+if (!psdMultiface) {
+  console.log('  PULADO (use --multiface "<arquivo.psd>" com 2+ faces)');
+} else if (!existsSync(psdMultiface)) {
+  console.log(`FALHA PSD não encontrado: ${psdMultiface}`);
+  falhas++;
+} else {
+  const nomePsd = psdMultiface.split(/[\\/]/).pop().replace(/\.psd$/i, "");
+  const pastaPsd = psdMultiface.replace(/[\\/][^\\/]+$/, "");
+
+  /**
+   * As faces vêm do `psd_metadata`, que só existe depois do ingest. O portão
+   * roda num banco virgem, então ingere ESTE arquivo (a rota aceita lista
+   * explícita) em vez da pasta inteira, que pode ter dezenas de PSDs de
+   * centenas de MB cada.
+   */
+  await fetch(`${BASE}/api/ingest-folder`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      folderPath: pastaPsd,
+      files: [{ name: nomePsd, path: psdMultiface, ext: ".psd", sizeBytes: 0, studio: "Portão Offline" }],
+      studio: "Portão Offline",
+    }),
+  }).catch(() => {});
+
+  const info = await (await fetch(`${BASE}/api/psd-info?name=${encodeURIComponent(nomePsd)}`)).json();
+  const faces = info.faces ?? [];
+  if (faces.length < 2) {
+    console.log(`  PULADO (o PSD expôs ${faces.length} face, precisa de 2+)`);
+  } else {
+    const arte = await arteChapada(255, 0, 0, 1000);
+    const renderNoSlot = async (slot) => {
+      const r = await fetch(`${BASE}/api/render`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          psdPath: psdMultiface,
+          preview: true,
+          arts: [{ smartObject: slot, artBase64: arte }],
+        }),
+      });
+      if (!r.ok || !(r.headers.get("content-type") ?? "").startsWith("image/")) return null;
+      return Buffer.from(await r.arrayBuffer());
+    };
+    console.log(`  faces: "${faces[0].name}" e "${faces[1].name}"`);
+    const i1 = await renderNoSlot(faces[0].smartObject);
+    const i2 = await renderNoSlot(faces[1].smartObject);
+    if (!i1 || !i2) {
+      console.log("FALHA um dos renders multi-face não voltou imagem");
+      falhas++;
+    } else {
+      const pct = await quantoMudou(i1, i2);
+      const respeita = pct !== null && pct > 0.3;
+      console.log(
+        `${respeita ? "OK   " : "FALHA"} a MESMA arte em faces diferentes muda ${pct === null ? "?" : pct.toFixed(2)}% (zero = slot ignorado)`,
+      );
+      if (!respeita) falhas++;
     }
   }
 }
