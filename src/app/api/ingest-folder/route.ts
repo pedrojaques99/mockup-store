@@ -6,6 +6,7 @@ import { scanPsd, IMAGE_EXTS } from "@/lib/psd-scan";
 import { invalidateCatalog } from "@/lib/search-index";
 import { mockupSignature } from "@/lib/dedup";
 import { existsSync } from "fs";
+import { paraPortavel } from "@/lib/psd-roots";
 
 /**
  * Commit do ingest.
@@ -63,9 +64,21 @@ function makeRefDoc(fields: {
     category: "reference",
     isAdminCurated: true,
     source: "local-ingest",
-    sourcePath: fields.sourcePath,
+    /**
+     * Caminho gravado em forma PORTÁTIL (`{acervo}/rel`).
+     *
+     * Gravando o absoluto, todo registro criado aqui fica preso a esta máquina:
+     * quem receber o acervo montado noutra letra de drive não vê erro, vê o
+     * catálogo encolhido, porque o `psd-presence` esconde o que não acha. Era o
+     * defeito que o seed já resolvia para o acervo herdado e que o ingest
+     * continuava recriando a cada pasta nova.
+     *
+     * Arquivo fora de toda raiz do `PSD_DIRS` continua absoluto, e é honesto
+     * sobre isso — ver `psd-roots.ts`.
+     */
+    sourcePath: paraPortavel(fields.sourcePath),
     psdFileName: fields.psdFileName,
-    psdPath: fields.psdPath,
+    psdPath: fields.psdPath ? paraPortavel(fields.psdPath) : undefined,
     psdSizeBytes: fields.psdSizeBytes,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -232,7 +245,15 @@ async function runIngest(
       }
       const meta = scanPsd(psd.path);
       if (meta) {
-        await psdMetaCol.updateOne({ fileName: meta.fileName }, { $set: meta }, { upsert: true });
+        // Mesmo motivo do doc de referência: o `filePath` é o que o render usa
+        // para achar o PSD, e absoluto ele só resolve nesta máquina.
+        const metaPortavel = {
+          ...meta,
+          ...(typeof meta.filePath === "string" && meta.filePath
+            ? { filePath: paraPortavel(meta.filePath) }
+            : {}),
+        };
+        await psdMetaCol.updateOne({ fileName: meta.fileName }, { $set: metaPortavel }, { upsert: true });
         report.psdMetadataScanned++;
       }
     } catch (err) {

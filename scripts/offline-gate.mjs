@@ -26,11 +26,20 @@
  */
 import { spawn, spawnSync } from "child_process";
 import { mkdtempSync, renameSync, existsSync } from "fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "os";
 import { join } from "path";
 
 const iUrl = process.argv.indexOf("--url");
 const urlExterna = iUrl >= 0 ? process.argv[iUrl + 1].replace(/\/+$/, "") : null;
+/**
+ * `--ingest <pasta>` liga a checagem do laço central: plugar pasta, scan,
+ * commit, e o card aparecendo no grid. Precisa de PSD de verdade, que o runner
+ * do CI não tem — sem a flag a checagem é **pulada e reportada**, nunca omitida
+ * em silêncio.
+ */
+const iIng = process.argv.indexOf("--ingest");
+const pastaIngest = iIng >= 0 ? process.argv[iIng + 1] : null;
 const PORTA = 4198;
 const BASE = urlExterna ?? `http://127.0.0.1:${PORTA}`;
 
@@ -38,6 +47,8 @@ const ENV = ".env.local";
 const BAK = ".env.local.portao-bak";
 let movido = false;
 let filho = null;
+/** Caminho do banco quando o portão sobe o próprio servidor. */
+let bancoDoTeste = null;
 
 function restaurar() {
   if (movido && existsSync(BAK)) {
@@ -78,7 +89,7 @@ async function subir() {
       NODE_ENV: "production",
       NEXT_DIST_DIR: process.env.NEXT_DIST_DIR ?? ".next-shipgate",
       APP_CONFIG_PATH: join(tmp, "config.json"),
-      LOCAL_DB_PATH: join(tmp, "catalog.sqlite"),
+      LOCAL_DB_PATH: (bancoDoTeste = join(tmp, "catalog.sqlite")),
     },
   });
   let log = "";
@@ -197,6 +208,93 @@ const acervoNoEnv = cfg0.acervo.origem === "env";
 if (!acervoNoEnv && !cfg1.acervo.pastas.some((p) => p.caminho === PASTA_TESTE)) {
   console.log("FALHA a pasta gravada não voltou no acervo");
   falhas++;
+}
+
+/**
+ * O laço central do usuário público: ele pluga a pasta dele e espera ver os
+ * mockups. Sem esta checagem o portão anterior media só LEITURA de catálogo, e
+ * a escrita (que é a primeira coisa que a pessoa faz) ficava sem cobertura.
+ */
+console.log("\n--- o laço central: plugar pasta e ver o mockup ---");
+if (!pastaIngest) {
+  console.log("  PULADO (rode com --ingest \"<pasta com PSD>\" para verificar)");
+} else if (!existsSync(pastaIngest)) {
+  console.log(`FALHA pasta não existe: ${pastaIngest}`);
+  falhas++;
+} else {
+  const ESTUDIO = "Portão Offline";
+
+  /**
+   * Aponta o acervo para a pasta que vai ser ingerida, que é o que o usuário
+   * faz de verdade: ele adiciona a pasta dele e ingere dela.
+   *
+   * Sem isto o portão configurava uma pasta de teste inventada e ingeria de
+   * OUTRO lugar; aí o caminho saía absoluto (corretamente, porque o arquivo não
+   * mora em raiz nenhuma) e o portão acusava um defeito que não existia.
+   */
+  await fetch(`${BASE}/api/config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ psdDirs: [pastaIngest] }),
+  });
+
+  const rs = await fetch(`${BASE}/api/ingest-folder/scan?path=${encodeURIComponent(pastaIngest)}`);
+  console.log(`${rs.ok ? "OK   " : "FALHA"} scan               ${rs.status}`);
+  if (!rs.ok) falhas++;
+  else {
+    const { items = [] } = await rs.json();
+    const arquivos = items
+      .filter((i) => i.verdict !== "trash")
+      .map((i) => ({ name: i.name, path: i.path, ext: i.ext, sizeBytes: i.sizeBytes, studio: ESTUDIO }));
+
+    const rc = await fetch(`${BASE}/api/ingest-folder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderPath: pastaIngest, files: arquivos, studio: ESTUDIO }),
+    });
+    console.log(`${rc.ok ? "OK   " : "FALHA"} commit             ${rc.status}`);
+    if (!rc.ok) falhas++;
+
+    await new Promise((r) => setTimeout(r, 1500));
+    const grid = await (await fetch(`${BASE}/api/references?limit=200`)).json();
+    const meus = (grid.references ?? []).filter((x) => x.studio === ESTUDIO);
+    console.log(`${meus.length ? "OK   " : "FALHA"} o card entra no grid  ${meus.length}`);
+    if (!meus.length) falhas++;
+    else {
+      // O caminho tem de sair PORTÁTIL do ingest. Absoluto prende o registro a
+      // esta máquina, e prende calado: noutra letra de drive o acervo encolhe
+      // sem erro na tela. Aqui o que volta já vem resolvido, então o sinal é o
+      // arquivo existir de verdade no disco.
+      const alvo = meus[0];
+      const ok = alvo.psdPath ? existsSync(alvo.psdPath) : false;
+      console.log(`${ok ? "OK   " : "FALHA"} o PSD resolve no disco  ${alvo.psdPath ?? "(sem psdPath)"}`);
+      if (!ok) falhas++;
+
+      /**
+       * E o caminho GRAVADO é portátil?
+       *
+       * A checagem acima não basta, e isso foi medido: sabotando o `paraLocal`
+       * para não resolver `{acervo}`, o portão continuou VERDE — porque o
+       * `resolver()` cai numa busca por nome dentro das raízes e reencontra o
+       * arquivo. A rede de segurança é boa para o usuário e péssima para o
+       * portão: ela esconde exatamente o defeito que faz o acervo encolher
+       * calado noutra máquina. Só lendo o valor no banco isso aparece.
+       */
+      if (!bancoDoTeste) {
+        console.log("  (portabilidade do caminho: PULADO no modo --url, sem acesso ao banco)");
+      } else {
+        const db = new DatabaseSync(bancoDoTeste, { readOnly: true });
+        const linha = db
+          .prepare("SELECT doc FROM community_presets WHERE json_extract(doc,'$.studio') = ?")
+          .get(ESTUDIO);
+        db.close();
+        const gravado = linha ? JSON.parse(linha.doc).psdPath : null;
+        const portavel = String(gravado ?? "").startsWith("{acervo}");
+        console.log(`${portavel ? "OK   " : "FALHA"} caminho gravado portátil  ${gravado ?? "(nada)"}`);
+        if (!portavel) falhas++;
+      }
+    }
+  }
 }
 
 await desfazer();
