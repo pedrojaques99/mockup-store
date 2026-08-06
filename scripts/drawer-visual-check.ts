@@ -73,6 +73,15 @@ const CONTRAST_FN = `(() => {
 })()`;
 
 async function abrirDrawer(page: Page): Promise<boolean> {
+  /**
+   * A home abre o tutorial de primeira visita sozinha, e num navegador de teste
+   * TODA visita é a primeira. O overlay do diálogo engole os cliques no grid, e
+   * o portão reprova o painel por um modal que nem é o dele. Precisa valer
+   * ANTES do primeiro script da página, senão o diálogo já montou.
+   */
+  await page.evaluateOnNewDocument(() => {
+    try { localStorage.setItem("boxy.como-usar.v1", "1"); } catch { /* storage bloqueado */ }
+  });
   await page.goto(BASE, { waitUntil: "networkidle2", timeout: 180_000 });
   // O grid é virtualizado e assíncrono; espera o primeiro card de verdade.
   await page.waitForFunction(

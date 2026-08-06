@@ -58,6 +58,27 @@ async function semEstouroHorizontal(page: Page) {
   });
 }
 
+/**
+ * A home abre o tutorial de primeira visita sozinha, e num navegador de teste
+ * TODA visita é a primeira. Sem dispensá-lo, o `[role="dialog"]` que este
+ * portão encontra é o do tutorial, e ele reprova o ingest por um diálogo que
+ * nem é o dele — foi assim que o CI ficou vermelho nos três sistemas com
+ * "stepper mostra 5 etapas — 0 encontradas".
+ *
+ * A marca precisa existir ANTES do primeiro script da página rodar, senão o
+ * diálogo já montou. `evaluateOnNewDocument` roda em todo carregamento,
+ * inclusive nos `reload` que os passos seguintes fazem.
+ */
+async function dispensarTutorial(page: Page) {
+  await page.evaluateOnNewDocument(() => {
+    try {
+      localStorage.setItem("boxy.como-usar.v1", "1");
+    } catch {
+      /* storage bloqueado: o tutorial não abre mesmo */
+    }
+  });
+}
+
 async function abrirDialogo(page: Page) {
   await page.waitForSelector('[aria-label="Adicionar pasta ao acervo"]', { timeout: 15000 });
   await page.click('[aria-label="Adicionar pasta ao acervo"]');
@@ -69,6 +90,7 @@ async function rodar(largura: number, altura: number, rotulo: string) {
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: largura, height: altura });
+    await dispensarTutorial(page);
     await page.goto(BASE, { waitUntil: "networkidle2", timeout: 60000 });
 
     // 1. O gatilho abre um diálogo de verdade.

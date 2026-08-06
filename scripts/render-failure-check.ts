@@ -74,6 +74,11 @@ const CASO = (process.argv.find((a) => a === "A" || a === "B" || a === "C") || "
     });
   });
 
+  // O tutorial de primeira visita abre sozinho, e num navegador de teste TODA
+  // visita é a primeira. O overlay engole os cliques no grid.
+  await page.evaluateOnNewDocument(() => {
+    try { localStorage.setItem("boxy.como-usar.v1", "1"); } catch { /* storage bloqueado */ }
+  });
   await page.goto(BASE, { waitUntil: "networkidle2", timeout: 180_000 });
   await page.waitForFunction(() => document.querySelectorAll("img").length > 3, { timeout: 180_000 });
   await sleep(1200);

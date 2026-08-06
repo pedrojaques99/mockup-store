@@ -183,8 +183,121 @@ function status() {
   );
 }
 
+/**
+ * Distribuição do seed — o passo que faltava para o time.
+ *
+ * O arquivo tem ~2 MB, e até aqui a única forma de entregá-lo era mandar por
+ * fora (Drive, WhatsApp, pendrive), com todos os problemas de versão que isso
+ * traz: ninguém sabe se o seed que recebeu é o mesmo que o outro recebeu.
+ *
+ * Uma Release do GitHub resolve com o que já existe: o repo é privado, então
+ * só quem tem acesso baixa, e o `gh` já está autenticado na máquina de quem
+ * trabalha aqui. A tag é fixa (`acervo-seed`), de propósito — o link é sempre
+ * o mesmo e o conteúdo é sempre o último.
+ *
+ * Dry-run por padrão, `--apply` age. Mesma convenção do `pack:publish` e do
+ * `psd:prune`, porque publicar acervo é escrita para fora.
+ */
+const TAG = "acervo-seed";
+
+async function gh(args: string[]): Promise<{ ok: boolean; saida: string }> {
+  const { execFile } = await import("child_process");
+  return new Promise((resolve) => {
+    execFile("gh", args, { shell: process.platform === "win32", maxBuffer: 8 << 20 }, (e, out, err) => {
+      resolve({ ok: !e, saida: (out || "") + (err || "") });
+    });
+  });
+}
+
+async function exigirGh(): Promise<boolean> {
+  const { ok, saida } = await gh(["auth", "status"]);
+  if (ok) return true;
+  console.error(
+    `\n  ${warn("✗")} o \`gh\` não está autenticado (ou não está instalado).` +
+      `\n    Instale em https://cli.github.com e rode \`gh auth login\`.` +
+      `\n    ${off(saida.trim().split("\n")[0] ?? "")}\n`,
+  );
+  return false;
+}
+
+async function publicar() {
+  const arquivo = arg("from") ?? SEED_PADRAO;
+  if (!existsSync(arquivo)) {
+    console.error(
+      `\n  ${warn("✗")} não achei ${arquivo}.` +
+        `\n    Rode ${bold("npm run seed:export")} primeiro.\n`,
+    );
+    process.exit(1);
+  }
+  if (!(await exigirGh())) process.exit(1);
+
+  const tamanho = (readFileSync(arquivo).length / 1024 / 1024).toFixed(1);
+  const aplicar = process.argv.includes("--apply");
+
+  console.log(`\n  ${bold("publicar o seed")}\n`);
+  console.log(`  ${off("arquivo")} ${arquivo} ${off(`(${tamanho} MB)`)}`);
+  console.log(`  ${off("release")} ${TAG}`);
+
+  if (!aplicar) {
+    console.log(
+      `\n  ${warn("dry-run")} nada foi enviado.` +
+        `\n  Para publicar de verdade: ${bold("npm run seed:publish -- --apply")}\n`,
+    );
+    return;
+  }
+
+  // Release já existente é atualizada; o `--clobber` troca o anexo no lugar.
+  const existe = await gh(["release", "view", TAG]);
+  if (!existe.ok) {
+    const criar = await gh([
+      "release", "create", TAG, arquivo,
+      "--title", "Acervo (seed do catálogo)",
+      "--notes", "Catálogo já indexado, com caminhos portáteis. Baixe com `npm run seed:fetch` e importe com `npm run seed:import`.",
+    ]);
+    if (!criar.ok) {
+      console.error(`\n  ${warn("✗")} falhou ao criar a release:\n${criar.saida}\n`);
+      process.exit(1);
+    }
+  } else {
+    const subir = await gh(["release", "upload", TAG, arquivo, "--clobber"]);
+    if (!subir.ok) {
+      console.error(`\n  ${warn("✗")} falhou ao subir o anexo:\n${subir.saida}\n`);
+      process.exit(1);
+    }
+  }
+
+  console.log(
+    `\n  ${ok("✓")} publicado em ${TAG}` +
+      `\n\n  O time roda: ${bold("npm run seed:fetch && npm run seed:import")}\n`,
+  );
+}
+
+async function buscar() {
+  if (!(await exigirGh())) process.exit(1);
+  const destino = arg("out") ?? SEED_PADRAO;
+  mkdirSync(dirname(destino), { recursive: true });
+  const nome = destino.split(/[\\/]/).pop()!;
+
+  console.log(`\n  ${bold("baixar o seed")} ${off(TAG)}\n`);
+  const r = await gh(["release", "download", TAG, "--pattern", nome, "--dir", dirname(destino), "--clobber"]);
+  if (!r.ok) {
+    console.error(
+      `\n  ${warn("✗")} não consegui baixar:\n${r.saida}` +
+        `\n    Alguém já rodou \`npm run seed:publish -- --apply\`?\n`,
+    );
+    process.exit(1);
+  }
+  const tamanho = existsSync(destino) ? (readFileSync(destino).length / 1024 / 1024).toFixed(1) : "?";
+  console.log(
+    `  ${ok("✓")} ${destino} ${off(`(${tamanho} MB)`)}` +
+      `\n\n  Próximo passo: ${bold("npm run seed:import")}\n`,
+  );
+}
+
 const comando = process.argv[2];
-const acoes: Record<string, () => void | Promise<void>> = { export: exportar, import: importar, status };
+const acoes: Record<string, () => void | Promise<void>> = {
+  export: exportar, import: importar, status, publish: publicar, fetch: buscar,
+};
 const acao = acoes[comando ?? ""];
 if (!acao) {
   console.log(

@@ -33,11 +33,9 @@ Não precisa combinar letra com ninguém. O catálogo guarda o caminho como
 
 ## 3. Importar o acervo já indexado *(só o time)*
 
-Quem tem o acervo BOXY recebe um arquivo `catalog-seed.json.gz`. Ponha em
-`data/` e rode:
-
 ```bash
-npm run seed:import
+npm run seed:fetch     # baixa da Release do repo (precisa do gh autenticado)
+npm run seed:import    # reata com a SUA pasta
 ```
 
 Isso traz os 9 mil registros **com as faces e smart objects já extraídos**.
@@ -45,7 +43,18 @@ Reindexar não é copiar linha: é abrir cada PSD. O seed poupa esse trabalho.
 
 Conferir depois: `npm run seed:status`.
 
-> Quem gera o seed (uma vez, na máquina que tem o Mongo): `npm run seed:export`.
+Não tem o `gh`? Peça o `catalog-seed.json.gz` a quem publicou, ponha em `data/`
+e rode só o `seed:import`.
+
+> **Quem publica** (uma vez, na máquina que tem o Mongo):
+> ```bash
+> npm run seed:export
+> npm run seed:publish            # dry-run, mostra o que subiria
+> npm run seed:publish -- --apply # sobe de verdade
+> ```
+> Vai para a Release `acervo-seed` do próprio repo. Como o repo é privado, só
+> quem tem acesso baixa. A tag é fixa de propósito: o link é sempre o mesmo e o
+> conteúdo é sempre o último.
 
 ## 4. Rodar
 
