@@ -4,6 +4,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { getDb } from "@/lib/db";
+import { contarDimensoes } from "@/lib/dimension-counts";
 import { summarizeBrand, type VisantBrandGuideline } from "@/lib/visant";
 
 export const DIMENSIONS = [
@@ -276,25 +277,15 @@ export async function getTaxonomy(): Promise<Taxonomy> {
     return taxonomyCache.data;
   }
 
-  const db = await getDb();
-  const raw = await db
-    .collection("community_presets")
-    .aggregate([
-      { $match: { category: "reference", isAdminCurated: true } },
-      { $project: { dimensions: { $objectToArray: "$dimensions" } } },
-      { $unwind: "$dimensions" },
-      { $unwind: "$dimensions.v" },
-      { $group: { _id: { dim: "$dimensions.k", value: "$dimensions.v" }, count: { $sum: 1 } } },
-      { $sort: { count: -1 as const } },
-    ])
-    .toArray();
+  // Mesma contagem do `/api/references/tags` — era o pipeline duplicado, e o
+  // único `aggregate` do projeto. Ver `dimension-counts.ts`.
+  const linhas = await contarDimensoes();
 
   const taxonomy: Taxonomy = {};
-  for (const r of raw) {
-    const dim = r._id.dim as Dimension;
-    if (!DIMENSIONS.includes(dim)) continue;
-    if (!taxonomy[dim]) taxonomy[dim] = [];
-    taxonomy[dim]!.push(r._id.value);
+  for (const { dim, value } of linhas) {
+    const d = dim as Dimension;
+    if (!DIMENSIONS.includes(d)) continue;
+    (taxonomy[d] ??= []).push(value);
   }
   
   taxonomyCache = { data: taxonomy, at: Date.now() };

@@ -10,7 +10,7 @@
  * aspecto. Este aqui é só o detalhamento por dimensão, que só existe nos docs do Mongo.
  */
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { contarDimensoes } from "@/lib/dimension-counts";
 
 type DimensionTags = Record<string, Array<{ value: string; count: number }>>;
 
@@ -22,8 +22,9 @@ export async function GET() {
   try {
     return NextResponse.json(await getDimensionTags());
   } catch (e) {
-    // Mongo offline não pode derrubar a home — sem dimensões, o filtro some, o grid fica.
-    console.error("[tags] Mongo indisponível:", e instanceof Error ? e.message : e);
+    // Catálogo fora do ar não pode derrubar a home — sem dimensões, o filtro
+    // some, o grid fica.
+    console.error("[tags] catálogo indisponível:", e instanceof Error ? e.message : e);
     return NextResponse.json(cache?.data ?? {});
   }
 }
@@ -39,33 +40,14 @@ async function getDimensionTags(): Promise<DimensionTags> {
 }
 
 async function dimensionTags(): Promise<DimensionTags> {
-  const db = await getDb();
-
-  const pipeline = [
-    { $match: { category: "reference", isAdminCurated: true } },
-    { $project: { dimensions: { $objectToArray: "$dimensions" } } },
-    { $unwind: "$dimensions" },
-    { $unwind: "$dimensions.v" },
-    {
-      $group: {
-        _id: { dim: "$dimensions.k", value: "$dimensions.v" },
-        count: { $sum: 1 },
-      },
-    },
-    { $sort: { count: -1 as const } },
-    // Teto de segurança: sem isto a agregação devolvia o produto cartesiano inteiro de
-    // dimensão × valor, e a UI só mostra as primeiras dezenas de cada uma.
-    { $limit: 2_000 },
-  ];
-
-  const raw = await db.collection("community_presets").aggregate(pipeline).toArray();
-
+  // A contagem mora em `dimension-counts` porque este pipeline era IGUAL ao do
+  // `brand-match.getTaxonomy()` — e era o único `aggregate` do projeto, ou seja,
+  // a única coisa que impedia o app de rodar sem Mongo depois que o catálogo
+  // virou local (o driver SQLite não implementa `aggregate`).
+  const linhas = await contarDimensoes();
   const tags: DimensionTags = {};
-  for (const r of raw) {
-    const dim = r._id.dim;
-    if (!tags[dim]) tags[dim] = [];
-    tags[dim].push({ value: r._id.value, count: r.count });
+  for (const { dim, value, count } of linhas) {
+    (tags[dim] ??= []).push({ value, count });
   }
-
   return tags;
 }
