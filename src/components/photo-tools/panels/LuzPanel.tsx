@@ -66,7 +66,7 @@ export function LuzPanel({
               type="button"
               onClick={() => setActive(l.id)}
               className={cn(
-                "relative py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1.5",
+                "relative py-1.5 rounded-lg text-[10px] font-medium border transition-ui flex items-center justify-center gap-1.5",
                 isActive
                   ? "bg-acc2 text-zinc-950 border-acc2"
                   : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
@@ -104,12 +104,12 @@ export function LuzPanel({
           onClick={onImport}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f?.type.startsWith("image/")) onUploadFile(f); }}
-          className="w-full rounded-xl border border-dashed border-zinc-700 hover:border-acc2/60 hover:bg-zinc-800/40 transition-colors py-5 flex flex-col items-center gap-1.5 text-center"
+          className="w-full rounded-xl border border-dashed border-zinc-700 hover:border-acc2/60 hover:bg-zinc-800/40 transition-ui py-5 flex flex-col items-center gap-1.5 text-center"
         >
           <ImagePlus size={18} className="text-zinc-500" />
           <span className="text-[11px] font-medium text-zinc-300">Escolher {layer.label.toLowerCase()}</span>
           <span className="text-[9px] text-zinc-600">
-            galeria · ou{" "}
+            da galeria, ou{" "}
             <span onClick={(e) => { e.stopPropagation(); pickFile(); }} className="text-acc2 hover:underline">enviar arquivo</span>
           </span>
         </button>
@@ -121,7 +121,7 @@ export function LuzPanel({
               type="button"
               onClick={onImport}
               title="Trocar textura"
-              className="w-11 h-11 flex-none rounded-lg border border-zinc-700/60 bg-zinc-900/60 overflow-hidden grid place-items-center hover:border-zinc-500 transition-colors"
+              className="w-11 h-11 flex-none rounded-lg border border-zinc-700/60 bg-zinc-900/60 overflow-hidden grid place-items-center hover:border-zinc-500 transition-ui"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={layer.src} alt="" className="w-full h-full object-cover" />
@@ -129,7 +129,7 @@ export function LuzPanel({
             <button
               type="button"
               onClick={onImport}
-              className="flex-1 py-1.5 rounded-lg text-[10px] font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+              className="flex-1 py-1.5 rounded-lg text-[10px] font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-ui"
             >
               Trocar
             </button>
@@ -164,7 +164,7 @@ export function LuzPanel({
             <button
               type="button"
               onClick={() => setAdvanced((v) => !v)}
-              className="w-full flex items-center gap-1.5 py-1 text-[10px] text-zinc-400 hover:text-zinc-200 transition-colors"
+              className="w-full flex items-center gap-1.5 py-1 text-[10px] text-zinc-400 hover:text-zinc-200 transition-ui"
             >
               <ChevronRight size={11} className={cn("transition-transform", advanced && "rotate-90")} />
               <Sliders size={11} /> Ajustes finos
@@ -222,7 +222,7 @@ export function LuzPanel({
                         type="button"
                         onClick={() => update({ maskMode: o.value })}
                         className={cn(
-                          "py-1.5 rounded-lg text-[10px] font-medium border transition-colors",
+                          "py-1.5 rounded-lg text-[10px] font-medium border transition-ui",
                           (layer.maskMode ?? "none") === o.value
                             ? "bg-acc2 text-zinc-950 border-acc2"
                             : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
@@ -238,7 +238,7 @@ export function LuzPanel({
                 <button
                   type="button"
                   onClick={onReset}
-                  className="w-full py-1.5 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors flex items-center justify-center gap-1"
+                  className="w-full py-1.5 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-ui flex items-center justify-center gap-1"
                 >
                   <RotateCcw size={10} /> Resetar ajustes
                 </button>

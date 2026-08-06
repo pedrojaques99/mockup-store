@@ -13,10 +13,10 @@ export type UpscaleTarget = "photo" | "art";
 export type UpscaleMode = "bicubic" | "pruna" | "google" | "ai";
 
 const METHOD_META: Record<UpscaleMode, { label: string; hint: string; factorBased: boolean }> = {
-  bicubic: { label: "Rápido",  hint: "Reamostragem local — grátis, sem inventar detalhe.", factorBased: true },
-  pruna:   { label: "Turbo",   hint: "Upscale rápido — até 128 MP.", factorBased: true },
-  google:  { label: "Nítido",  hint: "Mais detalhe — 2× ou 4×.", factorBased: true },
-  ai:      { label: "Visant",  hint: "Máxima qualidade — usa créditos da conta.", factorBased: false },
+  bicubic: { label: "Rápido",  hint: "Reamostragem local, grátis, sem inventar detalhe.", factorBased: true },
+  pruna:   { label: "Turbo",   hint: "Upscale rápido, até 128 MP.", factorBased: true },
+  google:  { label: "Nítido",  hint: "Mais detalhe, 2× ou 4×.", factorBased: true },
+  ai:      { label: "Visant",  hint: "Máxima qualidade, usa créditos da conta.", factorBased: false },
 };
 
 export function UpscalePanel({
@@ -110,7 +110,7 @@ export function UpscalePanel({
         type="button"
         onClick={onApply}
         disabled={applying || targetDisabled}
-        className="w-full py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 bg-acc2 text-zinc-950 hover:bg-acc2/90 disabled:opacity-40"
+        className="w-full py-2 rounded-xl text-xs font-medium transition-ui flex items-center justify-center gap-1.5 bg-acc2 text-zinc-950 hover:bg-acc2/90 disabled:opacity-40"
       >
         {applying ? (
           <><Loader2 size={12} className="animate-spin" /> Aumentando…</>

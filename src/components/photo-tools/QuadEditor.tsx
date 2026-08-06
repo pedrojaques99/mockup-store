@@ -12,7 +12,8 @@
 import { useRef, useCallback, useEffect } from "react";
 import type { Quad, QuadPt, Bend } from "@/stores/editorDoc";
 import { useViewerZoom } from "@/components/viewer-zoom";
-import { HANDLE_ACCENT, HANDLE_ACCENT_RGB } from "@/components/photo-tools/handle-style";
+import { HANDLE_ACCENT, HANDLE_ACCENT_RGB, HANDLE_ACTIVE } from "@/components/photo-tools/handle-style";
+import { imageToCanvas, canvasToImage, clientToImage, fitCanvasToImage, edgeGeometry } from "@/lib/quad-math";
 
 const CORNER_KEYS = ["tl", "tr", "br", "bl"] as const;
 const HANDLE_R = 9;
@@ -51,27 +52,15 @@ export function QuadEditor({
   const scaleRef = useRef({ sx: 1, sy: 1, ox: 0, oy: 0 });
   const logicalRef = useRef({ cw: 0, ch: 0 }); // tamanho lógico (CSS px); backing = ×res (HiDPI)
 
-  const toCanvas = useCallback(
-    (p: QuadPt) => ({ x: p.x * scaleRef.current.sx + scaleRef.current.ox, y: p.y * scaleRef.current.sy + scaleRef.current.oy }),
-    []
-  );
+  /* A matemática saiu daqui para `@/lib/quad-math`, onde é função pura e tem teste.
+   * Erro de sinal ou escala nesta conta não estoura nada: sai como arte torta no
+   * PNG, semanas depois. */
+  const toCanvas = useCallback((p: QuadPt) => imageToCanvas(p, scaleRef.current), []);
 
-  // Edge bend geometry (image space): midpoint, outward normal, dimension, handle pos.
-  const edgeGeom = useCallback((e: { a: keyof Quad; b: keyof Quad; key: BendKey }) => {
-    const a = quad[e.a], b = quad[e.b];
-    const cx = (quad.tl.x + quad.tr.x + quad.br.x + quad.bl.x) / 4;
-    const cy = (quad.tl.y + quad.tr.y + quad.br.y + quad.bl.y) / 4;
-    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    let nx = b.y - a.y, ny = -(b.x - a.x);
-    const len = Math.hypot(nx, ny) || 1; nx /= len; ny /= len;
-    if ((mx - cx) * nx + (my - cy) * ny < 0) { nx = -nx; ny = -ny; } // point outward
-    const dist = (p: QuadPt, q: QuadPt) => Math.hypot(p.x - q.x, p.y - q.y);
-    const quadW = (dist(quad.tl, quad.tr) + dist(quad.bl, quad.br)) / 2;
-    const quadH = (dist(quad.tl, quad.bl) + dist(quad.tr, quad.br)) / 2;
-    const dim = e.key === "top" || e.key === "bottom" ? quadH : quadW;
-    const bow = (bend?.[e.key] ?? 0) * dim;
-    return { mx, my, nx, ny, dim, bow, handle: { x: mx + nx * bow, y: my + ny * bow } };
-  }, [quad, bend]);
+  const edgeGeom = useCallback(
+    (e: { a: keyof Quad; b: keyof Quad; key: BendKey }) => edgeGeometry(quad, e, bend),
+    [quad, bend],
+  );
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -129,7 +118,7 @@ export function QuadEditor({
         ctx.translate(h.x, h.y);
         ctx.rotate(Math.PI / 4);
         const s = k(active ? 7 : 5);
-        ctx.fillStyle = active ? "#16a34a" : "#0a0a0a";
+        ctx.fillStyle = active ? HANDLE_ACTIVE : "#0a0a0a";
         ctx.strokeStyle = HANDLE_ACCENT;
         ctx.lineWidth = k(2);
         ctx.fillRect(-s, -s, s * 2, s * 2);
@@ -144,7 +133,7 @@ export function QuadEditor({
       const hovered = !active && hover.current === kk;
       ctx.beginPath();
       ctx.arc(x, y, k(active ? HANDLE_R + 2 : hovered ? HANDLE_R + 1 : HANDLE_R - 2), 0, Math.PI * 2);
-      ctx.fillStyle = active ? "#16a34a" : hovered ? HANDLE_ACCENT : "#ffffff";
+      ctx.fillStyle = active ? HANDLE_ACTIVE : hovered ? HANDLE_ACCENT : "#ffffff";
       ctx.fill();
       ctx.strokeStyle = active || hovered ? "#fff" : HANDLE_ACCENT;
       ctx.lineWidth = k(2);
@@ -165,8 +154,7 @@ export function QuadEditor({
       lx = Math.max(LENS_R + pad, Math.min(cw - LENS_R - pad, lx));
       ly = Math.max(LENS_R + pad, Math.min(ch - LENS_R - pad, ly));
 
-      const imgX = (corner.x - scaleRef.current.ox) / scaleRef.current.sx;
-      const imgY = (corner.y - scaleRef.current.oy) / scaleRef.current.sy;
+      const { x: imgX, y: imgY } = canvasToImage(corner, scaleRef.current);
       const srcW = (LENS_R * 2) / ZOOM / scaleRef.current.sx;
       const srcH = (LENS_R * 2) / ZOOM / scaleRef.current.sy;
 
@@ -231,12 +219,11 @@ export function QuadEditor({
       const iw = (img as HTMLElement).offsetWidth, ih = (img as HTMLElement).offsetHeight;
       // Canvas maior que a img (PAD de cada lado) + deslocado p/ -pad → desenha o
       // quad/cantos que vazam da imagem sem cortar no buffer. ox/oy = origem da img.
-      const padX = Math.round(iw * PAD), padY = Math.round(ih * PAD);
-      const cw = iw + padX * 2, ch = ih + padY * 2;
-      logicalRef.current = { cw, ch };           // tamanho lógico (CSS px); draw() faz o backing ×res
-      canvas.style.left = `${-padX}px`; canvas.style.top = `${-padY}px`;
-      canvas.style.width = `${cw}px`; canvas.style.height = `${ch}px`;
-      scaleRef.current = { sx: iw / imageNW, sy: ih / imageNH, ox: padX, oy: padY };
+      const box = fitCanvasToImage(iw, ih, imageNW, imageNH, PAD);
+      logicalRef.current = { cw: box.cw, ch: box.ch }; // lógico (CSS px); draw() faz o backing ×res
+      canvas.style.left = `${-box.padX}px`; canvas.style.top = `${-box.padY}px`;
+      canvas.style.width = `${box.cw}px`; canvas.style.height = `${box.ch}px`;
+      scaleRef.current = { sx: box.sx, sy: box.sy, ox: box.ox, oy: box.oy };
       draw();
     };
     const ro = new ResizeObserver(update);
@@ -250,11 +237,8 @@ export function QuadEditor({
 
   // Map a screen point to IMAGE coords using the LIVE rect (correct at any zoom),
   // plus the on-screen scale (image-px per screen-px) for tolerance conversion.
-  const clientToImg = (clientX: number, clientY: number) => {
-    const r = imgRef.current!.getBoundingClientRect();
-    const sc = (r.width / imageNW) || 1;
-    return { x: (clientX - r.left) / r.width * imageNW, y: (clientY - r.top) / r.height * imageNH, sc };
-  };
+  const clientToImg = (clientX: number, clientY: number) =>
+    clientToImage(clientX, clientY, imgRef.current!.getBoundingClientRect(), imageNW, imageNH);
 
   const hitTest = (ix: number, iy: number, sc: number): keyof Quad | null => {
     const tol = (HANDLE_R + 8) / sc;

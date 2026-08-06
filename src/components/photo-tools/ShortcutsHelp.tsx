@@ -31,7 +31,7 @@ export function ShortcutsHelp({ open, onClose }: { open: boolean; onClose: () =>
         <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-800">
           <Keyboard size={14} className="text-acc2" />
           <h2 className="text-sm font-medium text-zinc-100">Atalhos</h2>
-          <button onClick={onClose} aria-label="Fechar" title="Fechar" className="ml-auto p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"><X size={15} /></button>
+          <button onClick={onClose} aria-label="Fechar" title="Fechar" className="ml-auto p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition-ui"><X size={15} /></button>
         </div>
 
         <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-3">

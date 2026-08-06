@@ -17,7 +17,7 @@ export function CornersPanel({ onConfirm, size }: { onConfirm?: () => void; size
     <div className="space-y-2">
       <p className="text-[10px] text-zinc-600">
         Arraste os cantos pra ajustar a superfície; losangos curvam as bordas.
-        Duplo-clique num canto encaixa na borda da imagem · Enter vai pro render.
+        Duplo-clique num canto encaixa na borda da imagem, Enter vai pro render.
       </p>
       {size && size.w > 0 && size.h > 0 && (
         <div className="flex items-center justify-between rounded-lg bg-zinc-900/50 border border-zinc-800/60 px-2 py-1.5 font-mono text-[10px]">
@@ -28,9 +28,9 @@ export function CornersPanel({ onConfirm, size }: { onConfirm?: () => void; size
       {onConfirm && (
         <button
           onClick={onConfirm}
-          className="w-full py-2 rounded-xl text-xs font-medium bg-acc2 text-zinc-950 hover:bg-acc2/90 transition-colors flex items-center justify-center gap-1.5"
+          className="w-full py-2 rounded-xl text-xs font-medium bg-acc2 text-zinc-950 hover:bg-acc2/90 transition-ui flex items-center justify-center gap-1.5"
         >
-          <Check size={12} /> OK · ir pro render
+          <Check size={12} /> OK, ir pro render
         </button>
       )}
     </div>

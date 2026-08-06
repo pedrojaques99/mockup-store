@@ -26,6 +26,7 @@ import type { SceneAnalysis, SceneKind } from "@/lib/scene-classify";
 const CalibrateStage = dynamic(() => import("@/components/photo-tools/CalibrateStage").then((m) => m.CalibrateStage), { ssr: false });
 const MaskCalibrate = dynamic(() => import("@/components/photo-tools/MaskCalibrate").then((m) => m.MaskCalibrate), { ssr: false });
 import type { Quad } from "@/stores/editorDoc";
+import { readError } from "@/lib/http-error";
 
 type Method = "key-color" | "white" | "manual";
 type MaterialKind = "none" | "fabric" | "metal" | "glass" | "worn" | "shadow";
@@ -165,6 +166,10 @@ export default function CalibratePage() {
     setErr(null);
     try {
       const r = await fetch(`/api/calibrate/scenes?_=1${qstr(d)}`);
+      /* `r.json()` antes do portão do `ok` fazia o usuário ler o erro do PARSER:
+       * 500 com corpo vazio virava "Unexpected end of JSON input" e a caça ao bug
+       * começava no lugar errado. `readError` já existe pra isso. */
+      if (!r.ok) { setErr(await readError(r, "não consegui listar a pasta")); setScenes([]); setIgnored([]); setCur(-1); return; }
       const j = await r.json();
       if (j.error) { setErr(j.error); setScenes([]); setIgnored([]); setCur(-1); return; }
       setScenes(j.scenes); setIgnored(j.ignored ?? []);
@@ -184,6 +189,7 @@ export default function CalibratePage() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: s.name, dir, method }),
     });
+    if (!r.ok) throw new Error(await readError(r, "falha ao detectar a superfície"));
     return r.json();
   }, [dir]);
 
@@ -205,11 +211,21 @@ export default function CalibratePage() {
       const j = await detectFor(s, method);
 
       // 3) Carrega máscara sidecar via /api/calibrate/load (atomic com a entry).
+      /* Máscara é opcional: cena sem sidecar é caso normal e não vira erro. O que
+       * o catch vazio escondia era o caso ANORMAL — sidecar existe e a rota
+       * falhou. Aí o operador via "sem máscara" e pintava tudo de novo por cima
+       * de um arquivo que estava lá. 404 segue calado; o resto avisa. */
       try {
         const lr = await fetch(`/api/calibrate/load?name=${encodeURIComponent(s.name)}${qstr(dir)}`);
-        const lj = await lr.json();
-        if (lj?.surfaceMaskDataUrl) setMaskUrl(lj.surfaceMaskDataUrl);
-      } catch { /* */ }
+        if (lr.ok) {
+          const lj = await lr.json();
+          if (lj?.surfaceMaskDataUrl) setMaskUrl(lj.surfaceMaskDataUrl);
+        } else if (lr.status !== 404) {
+          setErr(`máscara salva não carregou: ${await readError(lr)}`);
+        }
+      } catch (e) {
+        setErr(`máscara salva não carregou: ${e instanceof Error ? e.message : String(e)}`);
+      }
 
       const width = j.width || s.width, height = j.height || s.height;
       const auto: Quad | null = j.quad ?? null;
@@ -596,7 +612,7 @@ export default function CalibratePage() {
         <div className="flex-1 overflow-y-auto">
           {scenes.map((s, i) => (
             <div key={s.name}
-              className={["group w-full px-3 py-2 border-b border-zinc-900 hover:bg-zinc-900 transition-colors cursor-pointer", i === cur ? "bg-zinc-900" : ""].join(" ")}
+              className={["group w-full px-3 py-2 border-b border-zinc-900 hover:bg-zinc-900 transition-ui cursor-pointer", i === cur ? "bg-zinc-900" : ""].join(" ")}
               onClick={() => setCur(i)}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 min-w-0">
@@ -634,9 +650,9 @@ export default function CalibratePage() {
       {/* ── viewer + controles ── */}
       <main className="flex-1 flex flex-col min-w-0">
         <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 text-xs">
-          <button onClick={() => go(-1)} disabled={cur <= 0} className="p-1.5 rounded hover:bg-zinc-800 disabled:opacity-30"><ChevronLeft size={16} /></button>
+          <button onClick={() => go(-1)} disabled={cur <= 0} aria-label="Cena anterior" title="Cena anterior" className="p-1.5 rounded hover:bg-zinc-800 disabled:opacity-30"><ChevronLeft size={16} /></button>
           <span className="font-mono text-zinc-400 min-w-[3ch] text-center">{scenes.length ? cur + 1 : 0}/{scenes.length}</span>
-          <button onClick={() => go(1)} disabled={cur >= scenes.length - 1} className="p-1.5 rounded hover:bg-zinc-800 disabled:opacity-30"><ChevronRight size={16} /></button>
+          <button onClick={() => go(1)} disabled={cur >= scenes.length - 1} aria-label="Próxima cena" title="Próxima cena" className="p-1.5 rounded hover:bg-zinc-800 disabled:opacity-30"><ChevronRight size={16} /></button>
 
           <span className="w-px h-4 bg-zinc-800 mx-1" />
           <button onClick={undo} title="Desfazer (Ctrl+Z)" className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400"><RotateCcw size={14} /></button>
@@ -673,7 +689,7 @@ export default function CalibratePage() {
             <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5 ml-1">
               {METHODS.map((m) => (
                 <button key={m.id} onClick={() => runDetect(m.id)}
-                  className={["px-2 py-1 rounded text-[11px] transition-colors", data.method === m.id ? "bg-sky-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{m.label}</button>
+                  className={["px-2 py-1 rounded text-[11px] transition-ui", data.method === m.id ? "bg-sky-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{m.label}</button>
               ))}
             </div>
           )}
@@ -685,7 +701,7 @@ export default function CalibratePage() {
             <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
               {SURFACE_TYPES.map((t) => (
                 <button key={t} onClick={() => editData((d) => ({ ...d, surfaceType: t }))}
-                  className={["px-2 py-1 rounded text-[11px] capitalize transition-colors", data.surfaceType === t ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{t}</button>
+                  className={["px-2 py-1 rounded text-[11px] capitalize transition-ui", data.surfaceType === t ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{t}</button>
               ))}
             </div>
           )}
@@ -693,13 +709,13 @@ export default function CalibratePage() {
           <button onClick={() => setOverlayOn((v) => !v)} title="Overlay magenta (O)" className={["p-1.5 rounded hover:bg-zinc-800", overlayOn ? "text-emerald-400" : "text-zinc-500"].join(" ")}>{overlayOn ? <Eye size={16} /> : <EyeOff size={16} />}</button>
           {engineMeta && (
             <span className="text-[10px] text-zinc-500 font-mono px-2 py-1 rounded bg-zinc-900 border border-zinc-800"
-              title={`Engine pai (SSoT) — global v${engineMeta.global.version} • ${engineMeta.global.samples} amostras${engineMeta.global.meanIoU ? ` • IoU ${engineMeta.global.meanIoU.toFixed(3)}` : ""}`}>
-              engine v{engineMeta.global.version}·{engineMeta.global.samples}
+              title={`Engine pai (SSoT). Global v${engineMeta.global.version}, ${engineMeta.global.samples} amostras${engineMeta.global.meanIoU ? `, IoU ${engineMeta.global.meanIoU.toFixed(3)}` : ""}`}>
+              engine v{engineMeta.global.version} ({engineMeta.global.samples})
             </span>
           )}
-          <button onClick={() => setUseAI((v) => !v)} title="Visant vision — análise mais precisa, ~1s + custo" className={["p-1.5 rounded hover:bg-zinc-800", useAI ? "text-purple-400" : "text-zinc-500"].join(" ")}><Scan size={16} /></button>
+          <button onClick={() => setUseAI((v) => !v)} title="Visant vision, análise mais precisa (~1s e custo)" className={["p-1.5 rounded hover:bg-zinc-800", useAI ? "text-purple-400" : "text-zinc-500"].join(" ")}><Scan size={16} /></button>
           <button onClick={toggleMesh} title="Malha / Warp envelope (W)" className={["p-1.5 rounded hover:bg-zinc-800", meshMode ? "text-lime-400" : "text-zinc-500"].join(" ")}><Grid3x3 size={16} /></button>
-          <button onClick={toggleMask} title="Máscara (K) — pen / brush / wand / SAM" className={["p-1.5 rounded hover:bg-zinc-800", maskMode ? "text-cyan-400" : "text-zinc-500"].join(" ")}><Lasso size={16} /></button>
+          <button onClick={toggleMask} title="Máscara (K): pen, brush, wand, SAM" className={["p-1.5 rounded hover:bg-zinc-800", maskMode ? "text-cyan-400" : "text-zinc-500"].join(" ")}><Lasso size={16} /></button>
           <button onClick={() => { setDispMode((v) => !v); setMatMode(false); }} title="Displacement (D)" className={["p-1.5 rounded hover:bg-zinc-800", dispMode ? "text-orange-400" : "text-zinc-500"].join(" ")}><Mountain size={16} /></button>
           <button onClick={() => { setMatMode((v) => !v); setDispMode(false); }} title="Material / FX (M)" className={["p-1.5 rounded hover:bg-zinc-800", matMode ? "text-fuchsia-400" : "text-zinc-500"].join(" ")}><Shirt size={16} /></button>
           <button onClick={() => setRenderMode((v) => !v)} title="Render final ao vivo (F)" className={["p-1.5 rounded hover:bg-zinc-800", renderMode ? "text-cyan-400" : "text-zinc-500"].join(" ")}>{rendering ? <Loader2 size={15} className="animate-spin" /> : <Play size={16} />}</button>
@@ -719,7 +735,7 @@ export default function CalibratePage() {
             <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
               {[2, 3, 4, 5].map((n) => (
                 <button key={n} onClick={() => setMeshDensity(n)}
-                  className={["px-2 py-1 rounded text-[11px] transition-colors", (data.mesh?.rows ?? 3) === n ? "bg-lime-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{n}×{n}</button>
+                  className={["px-2 py-1 rounded text-[11px] transition-ui", (data.mesh?.rows ?? 3) === n ? "bg-lime-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{n}×{n}</button>
               ))}
             </div>
             <button onClick={smoothMesh} title="Deriva hastes Bézier suaves dos vizinhos" className="px-2 py-1 rounded bg-lime-700 hover:bg-lime-600 text-white">Suavizar</button>
@@ -728,7 +744,7 @@ export default function CalibratePage() {
             <button onClick={applySmartMesh} title="Gera malha pré-curvada (flat/slight/drape/cylinder) do substrato detectado" className="px-2 py-1 rounded bg-violet-600 hover:bg-violet-500 text-white">Smart mesh ← substrato</button>
             <button onClick={() => applyDepthMesh(24)} title="DepthAnything-V2 (se REPLICATE_API_TOKEN) → curva a malha pelo depth real" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white">Depth-mesh 3D</button>
             <button onClick={resetMesh} className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300">resetar grade</button>
-            <span className="text-zinc-600">sel.: clique/Shift · haste: arraste (Alt=quebra, Ctrl=simetria) · âncora: Alt=canto, Ctrl=reset · setas movem, Del zera</span>
+            <span className="text-zinc-600">sel.: clique/Shift, haste: arraste (Alt=quebra, Ctrl=simetria), âncora: Alt=canto, Ctrl=reset, setas movem, Del zera</span>
           </div>
         )}
 
@@ -742,7 +758,7 @@ export default function CalibratePage() {
               return (
                 <button key={c.kind} onClick={() => setSubstrate(c.kind)}
                   title={`${sp.hint}${c.reasons.length ? ` · ${c.reasons.join(", ")}` : ""}`}
-                  className={["shrink-0 px-2 py-1 rounded text-[11px] transition-colors flex items-center gap-1", active ? "bg-violet-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"].join(" ")}>
+                  className={["shrink-0 px-2 py-1 rounded text-[11px] transition-ui flex items-center gap-1", active ? "bg-violet-600 text-white" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"].join(" ")}>
                   {sp.label}
                   <span className={active ? "text-violet-200" : "text-zinc-500"}>{(c.score * 100).toFixed(0)}</span>
                 </button>
@@ -794,7 +810,7 @@ export default function CalibratePage() {
             <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
               {MATERIALS.map((m) => (
                 <button key={m.id} onClick={() => editData((d) => ({ ...d, material: m.id }))}
-                  className={["px-2 py-1 rounded text-[11px] transition-colors", data.material === m.id ? "bg-fuchsia-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{m.label}</button>
+                  className={["px-2 py-1 rounded text-[11px] transition-ui", data.material === m.id ? "bg-fuchsia-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{m.label}</button>
               ))}
             </div>
             <label className="flex items-center gap-2 text-zinc-400">força
@@ -812,7 +828,7 @@ export default function CalibratePage() {
                 onChange={(e) => editData((d) => ({ ...d, materialScale: +e.target.value }))} disabled={data.material === "none"} />
               <span className="font-mono text-zinc-300 w-6">{data.materialScale}</span>
             </label>
-            <span className="text-zinc-600">procedural · blend {matBlend}</span>
+            <span className="text-zinc-600">procedural, blend {matBlend}</span>
           </div>
         )}
 
@@ -823,11 +839,11 @@ export default function CalibratePage() {
             <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
               {(["grid", "poster", "checker"] as const).map((k) => (
                 <button key={k} onClick={() => setArtKind(k)}
-                  className={["px-2 py-1 rounded text-[11px] capitalize transition-colors", artKind === k ? "bg-cyan-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{k}</button>
+                  className={["px-2 py-1 rounded text-[11px] capitalize transition-ui", artKind === k ? "bg-cyan-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{k}</button>
               ))}
             </div>
             <button onClick={() => refreshRender(false)} disabled={rendering} className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40">{rendering ? "renderizando…" : "re-renderizar"}</button>
-            <button onClick={() => refreshRender(true)} disabled={rendering} title="Render idêntico ao final (SSAA, full-res) — mais lento" className="px-2 py-1 rounded bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40">HD</button>
+            <button onClick={() => refreshRender(true)} disabled={rendering} title="Render idêntico ao final (SSAA, full-res), mais lento" className="px-2 py-1 rounded bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40">HD</button>
             <span className="text-zinc-600">arte-teste warpada com quad+luz+displacement+material</span>
           </div>
         )}
@@ -836,8 +852,17 @@ export default function CalibratePage() {
 
         <div ref={viewerRef} className="flex-1 min-h-0 relative">
           {busy && <div className="absolute inset-0 z-30 flex items-center justify-center bg-zinc-950/50"><Loader2 className="animate-spin text-zinc-400" /></div>}
+          {/* `key` por cena: trocar de cena REMONTA o editor de máscara, e isso não
+              é detalhe. O guarda de eco do MaskCalibrate ignora prop que não bate
+              com o último valor emitido — se um write externo chegar enquanto o eco
+              está pendente (pintar e trocar de cena no mesmo tique: o
+              `setMaskUrl(null)` do `loadScene` colapsa no mesmo lote), o eco nunca
+              limpa e a partir dali TODA mudança externa é ignorada. O sintoma é mudo
+              e caro: a máscara da cena anterior continua viva na nova, e o próximo
+              traço compõe em cima dela. Remontar zera os refs e a sessão de edição,
+              que é o que "outra cena" significa. */}
           {scene && data && viewSize.w > 0 && maskMode && (
-            <MaskCalibrate imageUrl={scene.url} imageW={data.width} imageH={data.height}
+            <MaskCalibrate key={scene.name} imageUrl={scene.url} imageW={data.width} imageH={data.height}
               mask={maskUrl} onMaskChange={(m) => { setMaskUrl(m); setDirty(true); }} />
           )}
           {scene && data && viewSize.w > 0 && !maskMode && (

@@ -77,7 +77,7 @@ export function AIEditPanel({
             type="button"
             onClick={onCleanPlaceholder}
             disabled={cleaning}
-            className="w-full py-1.5 rounded-lg text-[10px] font-medium border border-zinc-700/60 bg-zinc-800/60 text-zinc-200 hover:bg-zinc-700/60 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+            className="w-full py-1.5 rounded-lg text-[10px] font-medium border border-zinc-700/60 bg-zinc-800/60 text-zinc-200 hover:bg-zinc-700/60 disabled:opacity-50 transition-ui flex items-center justify-center gap-1.5"
           >
             {cleaning ? <><Loader2 size={11} className="animate-spin" /> Recriando…</> : <><Eraser size={11} /> Limpar faixa rosa</>}
           </button>
@@ -91,7 +91,7 @@ export function AIEditPanel({
         <button
           type="button"
           onClick={onEditMask}
-          className="w-full py-1.5 rounded-lg text-[10px] font-medium border border-zinc-700/60 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700/60 transition-colors flex items-center justify-center gap-1.5"
+          className="w-full py-1.5 rounded-lg text-[10px] font-medium border border-zinc-700/60 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700/60 transition-ui flex items-center justify-center gap-1.5"
         >
           <Lasso size={11} /> {hasMask ? "Editar seleção" : "Definir seleção"}
         </button>
@@ -100,7 +100,7 @@ export function AIEditPanel({
           {hasMask ? "Edita só a área marcada" : "Edita a imagem toda"}
           {hasMask && (
             <button type="button" onClick={onClearMask} title="Limpar seleção"
-              className="ml-auto text-zinc-600 hover:text-zinc-300 transition-colors"><X size={11} /></button>
+              className="ml-auto text-zinc-600 hover:text-zinc-300 transition-ui"><X size={11} /></button>
           )}
         </div>
       </div>
@@ -128,7 +128,7 @@ export function AIEditPanel({
             onChange={(e) => setPrompt(e.target.value)}
             rows={2}
             placeholder={mode === "remove" ? "ex: continuar a parede de tijolos" : "ex: uma garrafa de vinho tinto"}
-            className="w-full resize-none rounded-lg bg-zinc-900/60 border border-zinc-700/50 px-2 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-zinc-500 transition-colors"
+            className="w-full resize-none rounded-lg bg-zinc-900/60 border border-zinc-700/50 px-2 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-zinc-500 transition-ui"
           />
         </div>
       )}
@@ -152,7 +152,7 @@ export function AIEditPanel({
         type="button"
         onClick={onApply}
         disabled={disabled}
-        className="w-full py-2 rounded-xl text-xs font-medium bg-acc2 text-zinc-950 hover:bg-acc2/90 disabled:opacity-40 transition-colors flex items-center justify-center gap-1.5"
+        className="w-full py-2 rounded-xl text-xs font-medium bg-acc2 text-zinc-950 hover:bg-acc2/90 disabled:opacity-40 transition-ui flex items-center justify-center gap-1.5"
       >
         {applying ? <><Loader2 size={12} className="animate-spin" /> Editando…</> : <><Wand2 size={12} /> Aplicar edição</>}
       </button>

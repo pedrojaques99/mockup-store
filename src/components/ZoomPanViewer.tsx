@@ -8,12 +8,11 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
-import { ViewerZoomContext } from "./viewer-zoom";
+import { ViewerZoomContext, wheelZoomFactor } from "./viewer-zoom";
 import { ACC2 } from "@/lib/brand";
 
 const MIN_SCALE = 0.4; // 40% min
 const MAX_SCALE = 32; // até 3200% — pixel peeping sem trava prática
-const WHEEL_STEP = 0.0015; // per deltaY unit
 const BTN_STEP = 0.6;      // per button press
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -94,7 +93,7 @@ export default function ZoomPanViewer({
     if (!c) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const factor = Math.exp(-e.deltaY * WHEEL_STEP);
+      const factor = wheelZoomFactor(e.deltaY);
       applyZoom(scale * factor, e.clientX, e.clientY);
     };
     c.addEventListener("wheel", onWheel, { passive: false });

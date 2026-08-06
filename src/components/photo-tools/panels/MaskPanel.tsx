@@ -84,7 +84,7 @@ export function MaskPanel(p: MaskPanelProps) {
                 type="button"
                 onClick={() => p.setTarget(t.value)}
                 className={[
-                  "py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center justify-center gap-1",
+                  "py-1.5 rounded-lg text-[10px] font-medium border transition-ui flex items-center justify-center gap-1",
                   on ? t.on : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60",
                 ].join(" ")}
               >
@@ -104,30 +104,30 @@ export function MaskPanel(p: MaskPanelProps) {
           onChange={(v) => p.setView(v)}
           variant="primary"
           options={[
-            { value: "overlay", label: "Overlay — região sobre a imagem", icon: Eye },
-            { value: "mask", label: "Máscara — preto/branco isolado", icon: Contrast },
+            { value: "overlay", label: "Overlay: região sobre a imagem", icon: Eye },
+            { value: "mask", label: "Máscara: preto/branco isolado", icon: Contrast },
           ]}
         />
       </div>
 
       {/* ── FERRAMENTA (instrumento) ──────────────────────────────────── */}
       <div className="space-y-1.5">
-        <Section icon={activeTool.icon}>Ferramenta · <span className="text-zinc-500 normal-case tracking-normal">{activeTool.tip}</span></Section>
+        <Section icon={activeTool.icon}>Ferramenta: <span className="text-zinc-500 normal-case tracking-normal">{activeTool.tip}</span></Section>
         <IconSegmented<MaskInstrument>
           value={p.instrument}
           onChange={(v) => p.setInstrument(v)}
           variant="primary"
-          options={INSTRUMENTS.map((it) => ({ value: it.value, label: `${it.label} — ${it.tip}`, icon: it.icon }))}
+          options={INSTRUMENTS.map((it) => ({ value: it.value, label: `${it.label}: ${it.tip}`, icon: it.icon }))}
         />
 
         {/* opções do instrumento ativo — agrupadas */}
         <div className="rounded-lg bg-zinc-900/40 border border-zinc-800/60 p-2 space-y-1.5">
           {p.instrument === "pen" && (<>
-            <p className="text-[10px] text-zinc-500">{p.penStatus || "clique = canto · arraste = curva · 1º ponto = fechar"}</p>
+            <p className="text-[10px] text-zinc-500">{p.penStatus || "clique = canto, arraste = curva, 1º ponto = fechar"}</p>
             <Slider label="Suavizar borda" value={p.penFeather} onChange={p.setPenFeather} min={0} max={20} suffix="px" />
           </>)}
           {p.instrument === "brush" && (<>
-            <p className="text-[10px] text-zinc-500">Pinte na imagem — aplica {isAdd ? "somando" : "subtraindo"} a cada traço.</p>
+            <p className="text-[10px] text-zinc-500">Pinte na imagem. Aplica {isAdd ? "somando" : "subtraindo"} a cada traço.</p>
             <Slider label="Tamanho do pincel" value={p.brushSize} onChange={p.setBrushSize}
               min={Math.max(2, Math.round(maxDim * 0.005))} max={Math.max(20, Math.round(maxDim * 0.12))} suffix="px" />
           </>)}
@@ -139,14 +139,14 @@ export function MaskPanel(p: MaskPanelProps) {
             <Slider label="Tolerância" value={p.segTol} onChange={p.setSegTol} min={1} max={80} />
             <Slider label="Limpar borda" hint="tira franja" value={p.segContract} onChange={p.setSegContract} min={0} max={8} suffix="px" />
             <button onClick={() => p.setSegMatte((v) => !v)}
-              className={["w-full py-1.5 rounded-lg text-[10px] font-medium border transition-colors",
+              className={["w-full py-1.5 rounded-lg text-[10px] font-medium border transition-ui",
                 p.segMatte ? "bg-acc2 text-zinc-950 border-acc2" : "bg-zinc-800/60 text-zinc-400 border-zinc-700/50 hover:bg-zinc-700/60"].join(" ")}>
-              Refinar borda (matte) · {p.segMatte ? "on" : "off"}
+              Refinar borda (matte): {p.segMatte ? "on" : "off"}
             </button>
             <Slider label="Suavizar borda" value={p.segFeather} onChange={p.setSegFeather} min={0} max={20} suffix="px" />
           </>)}
           {p.instrument === "sam" && (<>
-            <p className="text-[10px] text-zinc-500">Clique no objeto · botão direito exclui.</p>
+            <p className="text-[10px] text-zinc-500">Clique no objeto, botão direito exclui.</p>
             <Slider label="Suavizar borda" value={p.segFeather} onChange={p.setSegFeather} min={0} max={20} suffix="px" />
             {p.segStatus.status !== "ready" && <p className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 size={9} className="animate-spin" /> {p.segStatus.msg}</p>}
           </>)}
@@ -175,7 +175,7 @@ export function MaskPanel(p: MaskPanelProps) {
         <button
           onClick={p.onApply}
           disabled={!canApply}
-          className={["w-full py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5",
+          className={["w-full py-2 rounded-xl text-xs font-medium transition-ui flex items-center justify-center gap-1.5",
             !canApply ? "bg-zinc-800 text-zinc-500"
               : isAdd ? "bg-acc2 text-zinc-950 hover:bg-acc2/90" : "bg-rose-500 text-white hover:bg-rose-500/90"].join(" ")}
         >

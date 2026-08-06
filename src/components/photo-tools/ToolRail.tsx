@@ -114,7 +114,7 @@ export function ToolRail<T extends string>({
                 type="button"
                 aria-label="Fechar painel"
                 onClick={() => onPanelOpenChange(false)}
-                className="text-zinc-500 hover:text-white transition-colors"
+                className="text-zinc-500 hover:text-white transition-ui"
               >
                 <X size={13} />
               </button>

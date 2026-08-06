@@ -9,12 +9,12 @@
  * SSoT: a máscara final viaja como PNG data URL pro /api/calibrate/save, que
  * grava sidecar `<name>.mask.png` referenciado em `QuadEntry.surfaceMaskRel`.
  */
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import { Pen, Brush, Wand2, Pipette, Eraser, RotateCcw, Plus, Minus, Eye, EyeOff } from "lucide-react";
 import PenMaskCanvas, { type PenApi } from "@/components/PenMaskCanvas";
 import BrushCanvas, { type BrushApi } from "@/components/BrushCanvas";
 import SegmentCanvas, { type SegApi, type SegMode } from "@/components/SegmentCanvas";
-import { compositeMask, capMaskDims } from "@/lib/mask-compose";
+import { compositeMask, invertMask, capMaskDims } from "@/lib/mask-compose";
 
 type Instrument = "pen" | "brush" | "wand" | "sam";
 
@@ -46,10 +46,40 @@ export function MaskCalibrate({
 
   const [maskW, maskH] = capMaskDims(imageW, imageH);
 
-  const composite = useCallback(async (patchUrl: string) => {
-    const next = await compositeMask(mask, patchUrl, mode, maskW, maskH);
+  // Fila serializada — mesma disciplina do useMaskEditor (photo-mockup). Sem ela, dois
+  // traços rápidos liam a MESMA base (o `mask` congelado no closure) e o segundo a
+  // sobrescrevia: o primeiro traço simplesmente sumia da tela — lost update, e o usuário
+  // só percebia depois. Aqui cada escrita espera a anterior COMMITAR, e a base vem do
+  // `maskRef` (o valor recém-produzido), não do prop, que só volta pelo React no próximo
+  // render.
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const enqueue = useCallback((fn: () => Promise<void> | void) => {
+    const next = queueRef.current.then(fn, fn);
+    queueRef.current = next.then(() => {}, () => {}); // nunca rejeita → fila não trava
+  }, []);
+
+  // Espelho da máscara commitada. `echoRef` guarda o último valor que NÓS emitimos:
+  // enquanto o prop não alcança esse valor, toda mudança que chega é eco atrasado do
+  // nosso próprio write e adotá-la ressuscitaria uma base velha. Alcançou (ou nunca
+  // emitimos), o prop manda — é assim que trocar de cena/carregar máscara do disco entra.
+  const maskRef = useRef<string | null>(mask);
+  const echoRef = useRef<{ v: string | null } | null>(null);
+  useEffect(() => {
+    if (!echoRef.current) { maskRef.current = mask; return; }
+    if (mask === echoRef.current.v) echoRef.current = null;
+  }, [mask]);
+
+  const commit = useCallback((next: string | null) => {
+    maskRef.current = next;
+    echoRef.current = { v: next };
     onMaskChange(next);
-  }, [mask, mode, maskW, maskH, onMaskChange]);
+  }, [onMaskChange]);
+
+  const composite = useCallback((patchUrl: string) => {
+    enqueue(async () => {
+      commit(await compositeMask(maskRef.current, patchUrl, mode, maskW, maskH));
+    });
+  }, [mode, maskW, maskH, enqueue, commit]);
 
   const handleApply = useCallback((_role: "surface" | "occluder", patchUrl: string) => {
     composite(patchUrl);
@@ -59,23 +89,27 @@ export function MaskCalibrate({
     if (patchUrl) composite(patchUrl);
   }, [composite]);
 
-  const clearMask = () => { onMaskChange(null); penRef.current?.clear?.(); brushRef.current?.clear?.(); segRef.current?.clear?.(); };
-  const invert = useCallback(async () => {
-    if (!mask) {
-      // sem mask → "invertido" = tudo branco
-      const cv = document.createElement("canvas"); cv.width = maskW; cv.height = maskH;
-      const ctx = cv.getContext("2d")!; ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, maskW, maskH);
-      onMaskChange(cv.toDataURL("image/png")); return;
-    }
-    const cv = document.createElement("canvas"); cv.width = maskW; cv.height = maskH;
-    const ctx = cv.getContext("2d")!;
-    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, maskW, maskH);
-    ctx.globalCompositeOperation = "destination-out";
-    const img = new Image(); img.src = mask;
-    await new Promise<void>((res) => { img.onload = () => res(); });
-    ctx.drawImage(img, 0, 0, maskW, maskH);
-    onMaskChange(cv.toDataURL("image/png"));
-  }, [mask, maskW, maskH, onMaskChange]);
+  const clearMask = useCallback(() => {
+    enqueue(() => { commit(null); });
+    penRef.current?.clear?.(); brushRef.current?.clear?.(); segRef.current?.clear?.();
+  }, [enqueue, commit]);
+
+  /* Inverter age sobre máscara que EXISTE — é o modelo do Photoshop, que este lib
+   * já diz seguir no cabeçalho: lá o Ctrl+I transforma a máscara, e CRIAR máscara é
+   * outro ato, com dois nomes próprios (Reveal All branca, Hide All preta). O
+   * Photoshop nunca sobrecarrega o Inverter para significar "cria uma cheia".
+   *
+   * Aqui o botão vivia sempre ligado e, sem máscara, cobria tudo de branco — a
+   * mesma tecla fazendo duas coisas conforme um estado que o usuário não vê. O
+   * irmão `MaskPanel` já estava certo (`disabled={!p.hasTargetMask}`); esta era a
+   * ponta divergente, e o controle passa a desligar igual. */
+  const invert = useCallback(() => {
+    enqueue(async () => {
+      const cur = maskRef.current;
+      if (!cur) return;
+      commit(await invertMask(cur, maskW, maskH));
+    });
+  }, [maskW, maskH, enqueue, commit]);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-zinc-950">
@@ -84,15 +118,15 @@ export function MaskCalibrate({
         <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
           {INSTRUMENTS.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setInstr(id)} title={label}
-              className={["flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors", instr === id ? "bg-cyan-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>
+              className={["flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-ui", instr === id ? "bg-acc2 text-zinc-950" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>
               <Icon size={12} /> {label}
             </button>
           ))}
         </div>
 
         <div className="flex items-center gap-0.5 bg-zinc-900 rounded-lg p-0.5">
-          <button onClick={() => setMode("add")} title="Somar (Shift = +)" className={["flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors", mode === "add" ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}><Plus size={12} /></button>
-          <button onClick={() => setMode("sub")} title="Subtrair (Alt = −)" className={["flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors", mode === "sub" ? "bg-red-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}><Minus size={12} /></button>
+          <button onClick={() => setMode("add")} title="Somar (Shift = +)" className={["flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-ui", mode === "add" ? "bg-acc2 text-zinc-950" : "text-zinc-400 hover:text-zinc-200"].join(" ")}><Plus size={12} /></button>
+          <button onClick={() => setMode("sub")} title="Subtrair (Alt = −)" className={["flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-ui", mode === "sub" ? "bg-red-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}><Minus size={12} /></button>
         </div>
 
         {instr === "brush" && (
@@ -125,12 +159,12 @@ export function MaskCalibrate({
         <div className="flex-1" />
 
         {(instr === "pen") && (
-          <button onClick={() => penRef.current?.apply?.("surface")} className="px-2 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white">Aplicar caneta</button>
+          <button onClick={() => penRef.current?.apply?.("surface")} className="px-2 py-1 rounded bg-acc2 hover:bg-acc2/90 text-zinc-950">Aplicar caneta</button>
         )}
         {(instr === "wand" || instr === "sam") && (
-          <button onClick={() => segRef.current?.apply?.("surface")} className="px-2 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white">Aplicar seleção</button>
+          <button onClick={() => segRef.current?.apply?.("surface")} className="px-2 py-1 rounded bg-acc2 hover:bg-acc2/90 text-zinc-950">Aplicar seleção</button>
         )}
-        <button onClick={invert} title="Inverter máscara" className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300">Inverter</button>
+        <button onClick={invert} disabled={!mask} title="Inverter máscara" className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-30 disabled:hover:bg-zinc-800">Inverter</button>
         <button onClick={clearMask} title="Limpar tudo" className="p-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"><Eraser size={13} /></button>
         <button onClick={() => setShowMask((v) => !v)} title="Mostrar/ocultar máscara" className="p-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300">{showMask ? <Eye size={13} /> : <EyeOff size={13} />}</button>
       </div>

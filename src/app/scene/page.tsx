@@ -4,6 +4,8 @@ import { Select } from "@/components/ui/Select";
 import { useState, useCallback, useRef } from "react";
 import type { SceneDoc } from "@visant/psd-engine";
 import { Upload, ImageIcon, Loader2, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
+import { fetchJSON, toBase64File } from "@/lib/photo-mockup-io";
+import { readError } from "@/lib/http-error";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -15,26 +17,6 @@ interface PsdEntry {
 }
 
 type StepState = "idle" | "loading" | "done" | "error";
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-async function fetchJson<T>(url: string, opts?: RequestInit): Promise<T> {
-  const r = await fetch(url, opts);
-  if (!r.ok) {
-    const j = await r.json().catch(() => ({}));
-    throw new Error((j as any).error ?? `HTTP ${r.status}`);
-  }
-  return r.json();
-}
-
-function toBase64(file: File): Promise<string> {
-  return new Promise((res, rej) => {
-    const fr = new FileReader();
-    fr.onload = () => res(fr.result as string);
-    fr.onerror = () => rej(new Error(`Não deu para ler o arquivo "${file.name}"`));
-    fr.readAsDataURL(file);
-  });
-}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -143,7 +125,7 @@ export default function ScenePage() {
 
   const loadPsds = useCallback(async () => {
     if (psdsLoaded) return;
-    const data = await fetchJson<{ psds: PsdEntry[] }>("/api/psds");
+    const data = await fetchJSON<{ psds: PsdEntry[] }>("/api/psds");
     setPsds(data.psds);
     setPsdsLoaded(true);
   }, [psdsLoaded]);
@@ -166,7 +148,7 @@ export default function ScenePage() {
     setRenderUrl(null);
 
     try {
-      const data = await fetchJson<{ sceneId: string; doc: SceneDoc; cached: boolean }>(
+      const data = await fetchJSON<{ sceneId: string; doc: SceneDoc; cached: boolean }>(
         "/api/scene/extract",
         {
           method: "POST",
@@ -188,7 +170,7 @@ export default function ScenePage() {
   // ── Step 3: pick art ──────────────────────────────────────────────────────
 
   const handleArtFile = useCallback(async (file: File) => {
-    const b64 = await toBase64(file);
+    const b64 = await toBase64File(file);
     setArtBase64(b64);
     setArtPreview(b64);
     setRenderUrl(null);
@@ -209,10 +191,11 @@ export default function ScenePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ artBase64, faceKey: faceKey || undefined }),
       });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error((j as any).error ?? `HTTP ${res.status}`);
-      }
+      /* Esta chamada devolve blob, então não passa pelo `fetchJSON` — mas o
+       * caminho de erro é o mesmo, e o `res.json().catch(() => ({}))` daqui tinha
+       * os mesmos dois furos: corpo de texto puro virava "HTTP 500", e `error`
+       * não-string virava "[object Object]" na tela. */
+      if (!res.ok) throw new Error(await readError(res));
       const blob = await res.blob();
       setRenderUrl(URL.createObjectURL(blob));
       setRenderMs(Date.now() - t0);

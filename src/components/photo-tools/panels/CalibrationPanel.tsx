@@ -81,7 +81,7 @@ export function CalibrationPanel() {
       if (dir) u.searchParams.set("dir", dir);
       const r = await fetch(u.toString());
       const j = await r.json();
-      if (!j.entry) { setErr("cena não calibrada — abra o /calibrate primeiro"); return; }
+      if (!j.entry) { setErr("cena não calibrada, abra o /calibrate primeiro"); return; }
       const e = j.entry;
       if (e.mesh) setMesh(e.mesh);
       if (typeof e.dispScale === "number") setDispScale(e.dispScale);
@@ -102,7 +102,7 @@ export function CalibrationPanel() {
 
   const exportToCalibrate = async () => {
     if (!scene) { setErr("informe o nome da cena"); return; }
-    if (!quad) { setErr("sem quad — defina cantos primeiro"); return; }
+    if (!quad) { setErr("sem quad, defina os cantos primeiro"); return; }
     setBusy("save"); setErr(null); setOkMsg(null);
     try {
       const surfaceMaskBase64 = useEditorDoc.getState().doc.surfaceMaskUrl ?? undefined;
@@ -131,7 +131,7 @@ export function CalibrationPanel() {
   };
 
   const ensureMesh = () => {
-    if (!quad) { setErr("sem quad — defina cantos primeiro"); return; }
+    if (!quad) { setErr("sem quad, defina os cantos primeiro"); return; }
     if (mesh) return;
     setMesh(ensureTangents(defaultMesh(quadToCorners(quad), 3, 3)));
   };
@@ -237,7 +237,7 @@ export function CalibrationPanel() {
         <div className="flex items-center gap-0.5 bg-zinc-950 rounded p-0.5 flex-wrap">
           {MATERIALS.map((m) => (
             <button key={m.id} onClick={() => setMaterial(m.id)}
-              className={["px-2 py-1 rounded text-[11px] transition-colors", material === m.id ? "bg-fuchsia-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{m.label}</button>
+              className={["px-2 py-1 rounded text-[11px] transition-ui", material === m.id ? "bg-fuchsia-600 text-white" : "text-zinc-400 hover:text-zinc-200"].join(" ")}>{m.label}</button>
           ))}
         </div>
         <label className="flex items-center justify-between gap-2">força

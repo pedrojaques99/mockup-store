@@ -111,6 +111,43 @@ export async function POST(req: NextRequest) {
   }
   const assets = await extractSceneAssets(sceneBuf, analysis, { surfaceMaskBuf, fast: !hd });
 
+  /* Sidecar refinado à mão vence a extração ao vivo.
+   *
+   * Medido em 06/08/2026 (`npx tsx scripts/render-ab.ts`): 3 de 5 cenas saem
+   * BYTE-IDÊNTICAS entre esta rota e a de produção (max 0/255) — o core é o
+   * mesmo e o WYSIWYG é real. A que divergiu deu max 152/255, e o diff mostrou
+   * que a divergência era um CONTORNO fino, não uma mancha na superfície: o
+   * occluder daquela cena tem 632 KB (contra ~10 KB das outras) porque foi
+   * pintado à mão. A produção lê esse arquivo do disco; aqui ele era regenerado
+   * do zero e o contorno saía noutro lugar.
+   *
+   * Ou seja: a prévia mentia exatamente nas cenas mais trabalhadas, que são as
+   * que mais custaram para ficar boas. Pasta sem sidecar — o caso normal desta
+   * rota, que abre `Render/New Mockups/` — cai na extração como antes.
+   *
+   * Qual asset era o culpado, isolado um a um em vez de deduzido:
+   *   occluder + reflexo + cast do disco ....... 0,56% (nada mudou)
+   *   + mask.png do disco ...................... 0,34%
+   *   + photo-clean.png do disco ............... 0,00%  ← convergiu
+   * Os dois culpados eram a máscara e a foto limpa; o occluder que eu suspeitei
+   * primeiro não mexeu um pixel. Ele fica assim mesmo, por simetria: a produção
+   * lê os cinco, e deixar três de fora recria a mesma assimetria noutro dia. */
+  const sidecar = async (arquivo: string): Promise<Buffer | undefined> => {
+    const p = join(dir, arquivo);
+    if (!existsSync(p)) return undefined;
+    const buf = await readFile(p);
+    /* O sidecar é full-res e o preview trabalha reduzido: sem reescalar junto, o
+     * composite desalinha e o conserto vira um bug pior que o original. */
+    return sc === 1 ? buf : await sharp(buf).resize(W, H, { fit: "fill" }).png().toBuffer();
+  };
+  const [discoOccluder, discoReflexo, discoCast, discoMask, discoClean] = await Promise.all([
+    sidecar("occluder.png"),
+    sidecar("reflection-mask.png"),
+    sidecar("color-cast.png"),
+    sidecar("mask.png"),
+    sidecar("photo-clean.png"),
+  ]);
+
   // Arte: usuário (`body.artBase64`) ou arte-teste procedural (→ base64 pro core).
   const d = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
   const innerW = Math.max(1, Math.round((d(quad.tl, quad.tr) + d(quad.bl, quad.br)) / 2));
@@ -131,8 +168,10 @@ export async function POST(req: NextRequest) {
   };
 
   const base = await buildBaseComposite({
-    engine, analysis, photo: assets.cleanPhoto, rawPhoto: sceneBuf,
-    multiply: assets.multiply, screen: assets.screen, mask: assets.mask, colorCast: assets.colorCast,
+    engine, analysis, photo: discoClean ?? assets.cleanPhoto, rawPhoto: sceneBuf,
+    multiply: assets.multiply, screen: assets.screen,
+    mask: discoMask ?? assets.mask,
+    colorCast: discoCast ?? assets.colorCast,
     artBase64,
     params: {
       warp: body.warp, textureAmount: body.textureAmount, mesh,
@@ -145,7 +184,7 @@ export async function POST(req: NextRequest) {
 
   const png = await applyLooks({
     engine, analysis, png: base.basePng, fullMask: base.fullMask, rawPhoto: sceneBuf, artBase64,
-    reflectionMask: assets.reflectionMask, occluder: assets.occluder,
+    reflectionMask: discoReflexo ?? assets.reflectionMask, occluder: discoOccluder ?? assets.occluder,
     params: {
       reflectionOpacity: body.reflectionOpacity, reflectionBlur: body.reflectionBlur,
       specularOpacity: body.specularOpacity, lightWrap: body.lightWrap,

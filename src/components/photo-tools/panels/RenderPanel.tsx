@@ -106,7 +106,7 @@ export function RenderPanel(p: RenderPanelProps) {
             compact
           />
           <button onClick={() => document.getElementById("art-input-fs")?.click()}
-            className="mt-1.5 w-full text-[9px] text-zinc-600 hover:text-zinc-400 transition-colors">
+            className="mt-1.5 w-full text-[9px] text-zinc-600 hover:text-zinc-400 transition-ui">
             Trocar arte
           </button>
         </div>
@@ -119,7 +119,7 @@ export function RenderPanel(p: RenderPanelProps) {
         <Slider label={<><Wand2 size={9} /> Realismo</>} hint="luz + sombra + grão" accent="acc2"
           value={p.realism} onChange={p.setRealism} min={0} max={1} step={0.05} display={`${Math.round(p.realism * 100)}%`} defaultValue={0.3} />
         <button onClick={() => p.setShowAdvanced((v) => !v)}
-          className="w-full flex items-center justify-between text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors pt-0.5">
+          className="w-full flex items-center justify-between text-[10px] text-zinc-500 hover:text-zinc-300 transition-ui pt-0.5">
           <span>Ajustes avançados</span>
           <ChevronRight size={11} className={["transition-transform", p.showAdvanced ? "rotate-90" : ""].join(" ")} />
         </button>
@@ -153,7 +153,7 @@ export function RenderPanel(p: RenderPanelProps) {
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-zinc-400">Visual</span>
           <button onClick={() => p.setShowCustomFX((v) => !v)}
-            className="text-[9px] text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1">
+            className="text-[9px] text-zinc-500 hover:text-zinc-300 transition-ui flex items-center gap-1">
             <Sliders size={8} /> {p.showCustomFX ? "Ocultar" : "Personalizar"}
           </button>
         </div>
@@ -164,7 +164,7 @@ export function RenderPanel(p: RenderPanelProps) {
               onMouseEnter={() => p.onPreviewLook?.(lookCssFilter(preset))}
               onMouseLeave={() => p.onPreviewLook?.(null)}
               onClick={() => { p.onPreviewLook?.(null); p.setActiveLook(preset.name); p.setFxGrain(preset.grain); p.setFxWarmth(preset.warmth); p.setFxSaturation(preset.saturation); p.setFxBrightness(preset.brightness); p.setFxContrast(100); }}
-              className={["px-2 py-0.5 rounded-full text-[10px] transition-colors",
+              className={["px-2 py-0.5 rounded-full text-[10px] transition-ui",
                 p.activeLook === preset.name ? "bg-zinc-200 text-zinc-900 font-medium" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"].join(" ")}>
               {preset.name}
             </button>
@@ -186,7 +186,7 @@ export function RenderPanel(p: RenderPanelProps) {
               <label className="text-[10px] text-zinc-400 flex items-center justify-between">
                 <span className="flex items-center gap-1">
                   {label}
-                  {value !== def && <span className="w-1 h-1 rounded-full inline-block bg-acc" title="alterado — duplo-clique reseta" />}
+                  {value !== def && <span className="w-1 h-1 rounded-full inline-block bg-acc" title="alterado, duplo-clique reseta" />}
                 </span>
                 <span className="font-mono text-zinc-500">{fmt(value)}</span>
               </label>
@@ -211,7 +211,7 @@ export function RenderPanel(p: RenderPanelProps) {
         {p.renderUrl ? (
           <>
             <button onClick={p.handlePublish} disabled={p.publishState === "loading"}
-              className={["flex-1 justify-center px-3 py-2 rounded-xl text-xs transition-colors flex items-center gap-1.5",
+              className={["flex-1 justify-center px-3 py-2 rounded-xl text-xs transition-ui flex items-center gap-1.5",
                 p.publishState === "done" ? "bg-acc2 text-zinc-950" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-400 disabled:text-zinc-600"].join(" ")}>
               {p.publishState === "done" ? <><CheckCircle2 size={11} /> Salvo!</> :
                p.publishState === "loading" ? <><Loader2 size={11} className="animate-spin" /> Salvando…</> :
@@ -248,7 +248,7 @@ export function RenderPanel(p: RenderPanelProps) {
       {process.env.NODE_ENV === "development" && p.shadowPreview && (
         <div className="rounded-lg border border-zinc-800 overflow-hidden">
           <button onClick={() => p.setShowShadowMap((v) => !v)}
-            className="w-full flex items-center justify-between px-2.5 py-1.5 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
+            className="w-full flex items-center justify-between px-2.5 py-1.5 text-[10px] text-zinc-600 hover:text-zinc-400 transition-ui">
             <span className="flex items-center gap-1">
               <Eye size={9} /> Mapa de sombra
               <span className="bg-zinc-800 text-zinc-500 px-1 rounded text-[9px]">dev</span>
@@ -264,7 +264,7 @@ export function RenderPanel(p: RenderPanelProps) {
 
       {/* AI Enhance */}
       {p.renderUrl && (
-        <div className={["rounded-xl border transition-colors overflow-hidden", p.showAiBlend ? "border-acc/40 bg-acc/5" : "border-zinc-800"].join(" ")}>
+        <div className={["rounded-xl border transition-ui overflow-hidden", p.showAiBlend ? "border-acc/40 bg-acc/5" : "border-zinc-800"].join(" ")}>
           <button onClick={() => p.setShowAiBlend((v) => !v)} className="w-full flex items-center justify-between px-3 py-2">
             <span className={["flex items-center gap-1.5 text-[11px] font-medium", p.showAiBlend ? "text-acc" : "text-zinc-400"].join(" ")}>
               <Wand2 size={10} className={p.showAiBlend ? "text-acc" : "text-zinc-500"} />
@@ -280,7 +280,7 @@ export function RenderPanel(p: RenderPanelProps) {
               <div className="grid grid-cols-3 gap-1">
                 {(["fast", "balanced", "quality"] as const).map((q) => (
                   <button key={q} onClick={() => p.setAiQuality(q)}
-                    className={["py-1.5 rounded-lg text-[10px] font-medium transition-colors",
+                    className={["py-1.5 rounded-lg text-[10px] font-medium transition-ui",
                       p.aiQuality === q ? "bg-acc text-zinc-950" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"].join(" ")}>
                     <span>{q === "fast" ? "Rápido" : q === "balanced" ? "Equilíbrio" : "Alta"}</span>
                     <span className={["block text-[9px] font-normal", p.aiQuality === q ? "text-acc" : "text-zinc-600"].join(" ")}>
@@ -314,7 +314,7 @@ export function RenderPanel(p: RenderPanelProps) {
                   className="w-full accent-acc h-1" />
               )}
               <button onClick={p.handleAIBlend} disabled={p.aiBlendState === "loading"}
-                className="w-full py-2 rounded-xl bg-acc hover:bg-acc disabled:bg-zinc-700 disabled:text-zinc-500 text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5">
+                className="w-full py-2 rounded-xl bg-acc hover:bg-acc disabled:bg-zinc-700 disabled:text-zinc-500 text-[11px] font-medium transition-ui flex items-center justify-center gap-1.5">
                 {p.aiBlendState === "loading"
                   ? <><Loader2 size={10} className="animate-spin" /> Aplicando…</>
                   : <><Wand2 size={10} /> {p.aiBlendState === "done" ? "Reaplicar" : "Aplicar"}</>}

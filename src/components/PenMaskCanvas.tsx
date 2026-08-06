@@ -121,9 +121,9 @@ export default function PenMaskCanvas({
   const hasMask = closed && anchors.length >= 2;
   useEffect(() => { onMaskChange?.(hasMask); }, [hasMask, onMaskChange]);
   useEffect(() => {
-    onStatus?.(!anchors.length ? "clique = canto · clique-arraste = curva"
-      : !closed ? `${anchors.length} âncoras · feche no ponto verde`
-      : "fechado · arraste âncoras/handles");
+    onStatus?.(!anchors.length ? "clique = canto, clique-arraste = curva"
+      : !closed ? `${anchors.length} âncoras, feche no ponto verde`
+      : "fechado, arraste âncoras/handles");
   }, [anchors.length, closed, onStatus]);
 
   const toImg = (e: React.PointerEvent) => {

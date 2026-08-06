@@ -77,8 +77,8 @@ export function ArtCropSurface({
           onCropComplete={(_area: Area, px: Area) => onCropPixels(px)}
         />
       </div>
-      <div className={fill ? "flex items-center gap-2 px-3 py-2 bg-neutral-950/90 backdrop-blur" : "flex items-center gap-2"}>
-        <label className="text-[10px] text-neutral-500 shrink-0" htmlFor="art-crop-zoom">Zoom</label>
+      <div className={fill ? "flex items-center gap-2 px-3 py-2 bg-zinc-950/90 backdrop-blur" : "flex items-center gap-2"}>
+        <label className="text-[10px] text-zinc-500 shrink-0" htmlFor="art-crop-zoom">Zoom</label>
         <input
           id="art-crop-zoom"
           type="range"
@@ -89,7 +89,7 @@ export function ArtCropSurface({
           onChange={(e) => setZoom(Number(e.target.value))}
           className="h-1 flex-1 accent-white"
         />
-        <span className="text-[10px] text-neutral-500 shrink-0 tabular-nums">{dec(zoom)}×</span>
+        <span className="text-[10px] text-zinc-500 shrink-0 tabular-nums">{dec(zoom)}×</span>
       </div>
     </div>
   );
@@ -222,7 +222,7 @@ export default function ArtFramePanel({
           <img
             src={artPreview}
             alt=""
-            className="w-10 h-10 rounded-lg bg-black object-contain shrink-0 border border-neutral-800"
+            className="w-10 h-10 rounded-lg bg-black object-contain shrink-0 border border-zinc-800"
           />
         )}
         <div className="min-w-0 flex-1">
@@ -238,7 +238,7 @@ export default function ArtFramePanel({
              *
              * A ampliação fica SEMPRE visível e só muda de cor. Aviso que aparece e some
              * ensina a não ler a linha; termo permanente que às vezes acende é régua. */
-            <p className={`${dimsSize} text-neutral-500 truncate`}>
+            <p className={`${dimsSize} text-zinc-500 truncate`}>
               {artDims.width}×{artDims.height}px
               {soWidth && soHeight ? ` → superfície ${Math.round(soWidth)}×${Math.round(soHeight)}` : ""}
               {upscale > 0 && (
@@ -250,7 +250,7 @@ export default function ArtFramePanel({
                       é âmbar, a mesma do selo de "Prévia", e essas são as duas únicas
                       exceções de cor do painel. */}
                   <span
-                    className={lowRes ? "text-amber-400 font-bold" : "text-neutral-500"}
+                    className={lowRes ? "text-amber-400 font-bold" : "text-zinc-500"}
                     title={
                       lowRes
                         ? `A fonte é ampliada ${dec(upscale)}× para caber na superfície, então o PNG sai borrado. Mande uma arte de ${Math.round(soWidth ?? 0)}px de largura, ou troque para Encaixar.`
@@ -275,7 +275,7 @@ export default function ArtFramePanel({
             title={cropOpen ? "Concluir recorte" : "Ajustar recorte"}
             aria-label={cropOpen ? "Concluir recorte" : "Ajustar recorte"}
             aria-expanded={cropOpen}
-            className={`p-1.5 rounded-lg shrink-0 transition-colors ${cropOpen ? "bg-white text-black" : "text-neutral-500 hover:text-white"}`}
+            className={`p-1.5 rounded-lg shrink-0 transition-ui ${cropOpen ? "bg-white text-black" : "text-zinc-500 hover:text-white"}`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
           </button>
@@ -309,7 +309,7 @@ export default function ArtFramePanel({
         {onClear && (
           <button
             onClick={onClear}
-            className="p-1.5 rounded-lg text-neutral-600 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0"
+            className="p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-ui shrink-0"
             title="Remover arte"
           >
             <X className="w-3.5 h-3.5" />
@@ -318,8 +318,8 @@ export default function ArtFramePanel({
       </div>
 
       {/* Fundo da arte — pra logo/PNG transparente: preenche atrás (tira o rosa). */}
-      <div className="flex items-center gap-2 pt-1.5 mt-0.5 border-t border-neutral-800/60">
-        <span className="text-[10px] text-neutral-500 shrink-0">Fundo</span>
+      <div className="flex items-center gap-2 pt-1.5 mt-0.5 border-t border-zinc-800/60">
+        <span className="text-[10px] text-zinc-500 shrink-0">Fundo</span>
         <div className="flex items-center gap-1.5">
           {([
             { v: null, title: "Transparente (mostra o placeholder)", style: { backgroundImage: "linear-gradient(45deg,#555 25%,transparent 25%,transparent 75%,#555 75%),linear-gradient(45deg,#555 25%,#222 25%,#222 75%,#555 75%)", backgroundSize: "6px 6px", backgroundPosition: "0 0,3px 3px" } as React.CSSProperties },
@@ -330,12 +330,12 @@ export default function ArtFramePanel({
             return (
               <button key={String(o.v)} type="button" title={o.title}
                 onClick={() => onFrameChange((f) => ({ ...f, bg: o.v }))}
-                className={`w-5 h-5 rounded-full border transition-colors ${on ? "ring-2 ring-acc2 border-acc2" : "border-neutral-700 hover:border-neutral-500"}`}
+                className={`w-5 h-5 rounded-full border transition-ui ${on ? "ring-2 ring-acc2 border-acc2" : "border-zinc-700 hover:border-zinc-500"}`}
                 style={o.style} />
             );
           })}
           {/* Cor personalizada */}
-          <label className={`w-5 h-5 rounded-full border grid place-items-center cursor-pointer overflow-hidden transition-colors ${frame.bg && !["#ffffff", "#000000"].includes(frame.bg.toLowerCase()) ? "ring-2 ring-acc2 border-acc2" : "border-neutral-700 hover:border-neutral-500"}`}
+          <label className={`w-5 h-5 rounded-full border grid place-items-center cursor-pointer overflow-hidden transition-ui ${frame.bg && !["#ffffff", "#000000"].includes(frame.bg.toLowerCase()) ? "ring-2 ring-acc2 border-acc2" : "border-zinc-700 hover:border-zinc-500"}`}
             title="Cor personalizada"
             style={{ background: frame.bg && !["#ffffff", "#000000"].includes(frame.bg.toLowerCase()) ? frame.bg : "conic-gradient(red,orange,yellow,lime,cyan,blue,magenta,red)" }}>
             <input type="color" value={frame.bg ?? "#ffffff"} onChange={(e) => onFrameChange((f) => ({ ...f, bg: e.target.value }))}

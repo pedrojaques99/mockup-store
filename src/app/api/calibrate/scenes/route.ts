@@ -1,9 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readdir } from "fs/promises";
+import { readdir, stat } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import sharp from "sharp";
 import { loadQuads, loadIgnored, resolveDir } from "@/lib/quad-store";
+
+/**
+ * Cache das dimensões, keyed por `caminho:mtime:tamanho`.
+ *
+ * Esta rota dispara a cada mudança de pasta no `/calibrate` e abria TODO arquivo
+ * com `sharp().metadata()` para ler dois números do cabeçalho. Numa pasta com
+ * centenas de PNG isso é I/O e decode repetidos a cada navegação — o catálogo já
+ * tinha resolvido esse problema (`search-index.ts`) e esta rota não replicou.
+ *
+ * A chave inclui mtime e tamanho, então NÃO precisa de TTL: os mesmos bytes têm
+ * sempre a mesma dimensão, e arquivo trocado gera chave nova. TTL aqui só criaria
+ * uma janela em que a resposta pode estar errada de propósito.
+ */
+const dimCache = new Map<string, { width: number; height: number }>();
+/** Teto simples: pasta grande não pode virar vazamento no processo do dev. */
+const DIM_CACHE_MAX = 5000;
+
+async function dimensoes(full: string): Promise<{ width: number; height: number } | null> {
+  let chave: string;
+  try {
+    const st = await stat(full);
+    chave = `${full}:${st.mtimeMs}:${st.size}`;
+  } catch {
+    return null;
+  }
+  const hit = dimCache.get(chave);
+  if (hit) return hit;
+
+  try {
+    const m = await sharp(full).metadata();
+    const dim = { width: m.width ?? 0, height: m.height ?? 0 };
+    if (dimCache.size >= DIM_CACHE_MAX) {
+      // FIFO: a chave mais antiga sai. Sem LRU de propósito — a fila de calibração
+      // anda para a frente, então o que saiu dificilmente volta.
+      const primeira = dimCache.keys().next().value;
+      if (primeira !== undefined) dimCache.delete(primeira);
+    }
+    dimCache.set(chave, dim);
+    return dim;
+  } catch {
+    return null;
+  }
+}
 
 export interface CalibrateScene {
   name: string;
@@ -34,11 +77,9 @@ export async function GET(req: NextRequest) {
   for (const name of files) {
     if (ignored.has(name)) continue;
     const full = join(dir, name);
-    let width = 0, height = 0;
-    try {
-      const m = await sharp(full).metadata();
-      width = m.width ?? 0; height = m.height ?? 0;
-    } catch { continue; }
+    const dim = await dimensoes(full);
+    if (!dim) continue;
+    const { width, height } = dim;
 
     const entry = golden[name];
     const status: CalibrateScene["status"] = !entry ? "unsaved" : entry.source;

@@ -49,21 +49,21 @@ export function ArtDropZone({
         onDrop={onDrop}
         title="Solte ou clique pra adicionar a arte"
         className={[
-          "w-full h-full rounded-xl overflow-hidden cursor-pointer flex flex-col items-center justify-center text-center gap-1 px-2 border backdrop-blur-2xl shadow-2xl shadow-black/40 transition-colors group",
+          "w-full h-full rounded-xl overflow-hidden cursor-pointer flex flex-col items-center justify-center text-center gap-1 px-2 border backdrop-blur-2xl shadow-2xl shadow-black/40 transition-ui group",
           dragOver ? "border-acc bg-acc/10" : "border-white/12 bg-white/[0.06] hover:bg-white/[0.1]",
           className,
         ].join(" ")}
       >
         {tier !== "tiny" && (
-          <Upload size={icon} className={dragOver ? "text-acc" : "text-zinc-300 group-hover:text-white transition-colors"} />
+          <Upload size={icon} className={dragOver ? "text-acc" : "text-zinc-300 group-hover:text-white transition-ui"} />
         )}
         {(tier === "full" || tier === "compact") && (
-          <p className={[tier === "full" ? "text-sm" : "text-[11px]", "font-medium leading-tight transition-colors", dragOver ? "text-acc" : "text-zinc-200 group-hover:text-white"].join(" ")}>
+          <p className={[tier === "full" ? "text-sm" : "text-[11px]", "font-medium leading-tight transition-ui", dragOver ? "text-acc" : "text-zinc-200 group-hover:text-white"].join(" ")}>
             {dragOver ? "Solte" : tier === "full" ? "Solte a arte aqui" : "Solte a arte"}
           </p>
         )}
         {tier === "full" && (
-          <p className="text-[10px] text-zinc-400/80 leading-tight">PNG, JPG, SVG · renderiza ao soltar</p>
+          <p className="text-[10px] text-zinc-400/80 leading-tight">PNG, JPG, SVG. Renderiza ao soltar</p>
         )}
         {tier === "tiny" && (
           // Espaço minúsculo: só um glow pulsante clicável (texto/ícone não cabem).
@@ -80,7 +80,7 @@ export function ArtDropZone({
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
       className={[
-        "rounded-2xl cursor-pointer transition-colors flex flex-col items-center justify-center text-center group",
+        "rounded-2xl cursor-pointer transition-ui flex flex-col items-center justify-center text-center group",
         hero
           // Glass panel — compact, frosted, floats over the scene (not a full-screen zone).
           ? ["gap-2.5 px-6 py-7 w-full max-w-[340px] border backdrop-blur-2xl shadow-2xl shadow-black/50",
@@ -93,12 +93,12 @@ export function ArtDropZone({
     >
       <Upload
         size={hero ? 30 : 20}
-        className={dragOver ? "text-acc" : "text-zinc-500 group-hover:text-zinc-300 transition-colors"}
+        className={dragOver ? "text-acc" : "text-zinc-500 group-hover:text-zinc-300 transition-ui"}
       />
-      <p className={[hero ? "text-sm" : "text-[10px]", "font-medium transition-colors", dragOver ? "text-acc" : "text-zinc-300 group-hover:text-white"].join(" ")}>
+      <p className={[hero ? "text-sm" : "text-[10px]", "font-medium transition-ui", dragOver ? "text-acc" : "text-zinc-300 group-hover:text-white"].join(" ")}>
         {dragOver ? "Solte pra renderizar" : "Solte a arte aqui"}
       </p>
-      <p className={[hero ? "text-xs" : "text-[9px]", "text-zinc-700"].join(" ")}>PNG, JPG, SVG · renderiza ao soltar</p>
+      <p className={[hero ? "text-xs" : "text-[9px]", "text-zinc-700"].join(" ")}>PNG, JPG, SVG. Renderiza ao soltar</p>
     </div>
   );
 }

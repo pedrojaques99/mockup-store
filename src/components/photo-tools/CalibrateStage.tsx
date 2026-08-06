@@ -16,8 +16,13 @@ import {
   hOutOf, hInOf, vOutOf, vInOf, type WarpMesh, type Tangent,
 } from "@/lib/mesh-core";
 
-type Pt = { x: number; y: number };
-type Quad = { tl: Pt; tr: Pt; br: Pt; bl: Pt };
+/* Redeclaração local do mesmo shape que o `key-color-core` exporta — ver o
+ * comentário em `stores/editorDoc.ts`. */
+import type { Pt, QuadCorners as Quad } from "@/lib/key-color-core";
+import { wheelZoomFactor } from "@/components/viewer-zoom";
+import {
+  HANDLE_ACCENT, HANDLE_ACCENT_RGB, HANDLE_ACTIVE, HANDLE_TANGENT, HANDLE_BROKEN, HANDLE_FILL,
+} from "@/components/photo-tools/handle-style";
 const QK = ["tl", "tr", "br", "bl"] as const;
 
 function useImg(url: string | undefined): HTMLImageElement | null {
@@ -59,7 +64,9 @@ export function CalibrateStage({
     e.evt.preventDefault(); const stage = stageRef.current; if (!stage) return;
     const ptr = stage.getPointerPosition(); if (!ptr) return;
     const old = view.scale, mp = { x: (ptr.x - view.x) / old, y: (ptr.y - view.y) / old };
-    const next = Math.max(0.1, Math.min(40, old * Math.exp(-e.evt.deltaY * 0.0015)));
+    // Alcance local de propósito (encaixe de canto pede mais aproximação que
+    // leitura de mockup); a SENSIBILIDADE é compartilhada. Ver `viewer-zoom.tsx`.
+    const next = Math.max(0.1, Math.min(40, old * wheelZoomFactor(e.evt.deltaY)));
     setView({ scale: next, x: ptr.x - mp.x * next, y: ptr.y - mp.y * next });
   }, [view]);
 
@@ -210,10 +217,10 @@ export function CalibrateStage({
 
         {/* ── editor: CANTOS ── */}
         {mode === "cantos" && <>
-          <Line points={cornerLines} stroke="#22c55e" strokeWidth={lw} closed fill="rgba(34,197,94,0.10)" />
+          <Line points={cornerLines} stroke={HANDLE_ACCENT} strokeWidth={lw} closed fill={`rgba(${HANDLE_ACCENT_RGB}, 0.10)`} />
           {QK.map((kk) => {
             const p = quad[kk];
-            return <Circle key={kk} x={p.x} y={p.y} radius={r} fill="#fff" stroke="#22c55e" strokeWidth={lw} draggable
+            return <Circle key={kk} x={p.x} y={p.y} radius={r} fill="#fff" stroke={HANDLE_ACCENT} strokeWidth={lw} draggable
               onDragMove={(e) => onQuadChange({ ...quad, [kk]: { x: Math.round(e.target.x()), y: Math.round(e.target.y()) } })} />;
           })}
         </>}
@@ -223,17 +230,17 @@ export function CalibrateStage({
           {Array.from({ length: mesh.rows }).map((_, i) => Array.from({ length: mesh.cols - 1 }).map((__, j) => {
             const ci = Math.min(i, mesh.rows - 2), lv = i === mesh.rows - 1 ? 1 : 0; const pts: number[] = [];
             for (let s = 0; s <= 10; s++) { const p = evalCell(mesh, ci, j, s / 10, lv); pts.push(p.x, p.y); }
-            return <Line key={`r${i}_${j}`} points={pts} stroke="#22c55e" strokeWidth={lw} opacity={0.7} listening={false} />;
+            return <Line key={`r${i}_${j}`} points={pts} stroke={HANDLE_ACCENT} strokeWidth={lw} opacity={0.7} listening={false} />;
           }))}
           {Array.from({ length: mesh.rows - 1 }).map((_, i) => Array.from({ length: mesh.cols }).map((__, j) => {
             const cj = Math.min(j, mesh.cols - 2), lu = j === mesh.cols - 1 ? 1 : 0; const pts: number[] = [];
             for (let s = 0; s <= 10; s++) { const p = evalCell(mesh, i, cj, lu, s / 10); pts.push(p.x, p.y); }
-            return <Line key={`c${i}_${j}`} points={pts} stroke="#22c55e" strokeWidth={lw} opacity={0.7} listening={false} />;
+            return <Line key={`c${i}_${j}`} points={pts} stroke={HANDLE_ACCENT} strokeWidth={lw} opacity={0.7} listening={false} />;
           }))}
           {/* âncoras (Alt = smooth⇄corner · Ctrl = reset nó) */}
           {mesh.points.map((p, k) => (
             <Circle key={k} x={p.x} y={p.y} radius={sel.has(k) ? r + 1 / view.scale : r}
-              fill={sel.has(k) ? "#16a34a" : "#fff"} stroke="#22c55e" strokeWidth={lw} draggable
+              fill={sel.has(k) ? HANDLE_ACTIVE : "#fff"} stroke={HANDLE_ACCENT} strokeWidth={lw} draggable
               onMouseDown={(e) => onPtDown(k, e)} onDragStart={() => onPtDragStart(k)} onDragMove={(e) => onPtDrag(k, e)}
               onClick={(e) => {
                 if (e.evt.altKey) { e.cancelBubble = true; toggleSmoothCorner(k); }
@@ -251,10 +258,10 @@ export function CalibrateStage({
             const nodes: any[] = [];
             const addH = (id: string, axis: "h" | "v", side: "out" | "in", off: Pt, dir: Pt, broken: boolean) => {
               const o = (Math.abs(off.x) > 0.5 || Math.abs(off.y) > 0.5) ? off : dir;
-              const hx = p.x + o.x, hy = p.y + o.y, col = broken ? "#f59e0b" : "#38bdf8";
+              const hx = p.x + o.x, hy = p.y + o.y, col = broken ? HANDLE_BROKEN : HANDLE_TANGENT;
               nodes.push(
                 <Line key={`l${id}`} points={[p.x, p.y, hx, hy]} stroke={col} strokeWidth={lw} opacity={0.8} listening={false} />,
-                <Circle key={`h${id}`} x={hx} y={hy} radius={hr} fill={col} stroke="#0a0a0a" strokeWidth={lw} draggable
+                <Circle key={`h${id}`} x={hx} y={hy} radius={hr} fill={col} stroke={HANDLE_FILL} strokeWidth={lw} draggable
                   onMouseEnter={(e) => { const s = e.target.getStage(); if (s) s.container().style.cursor = "crosshair"; }}
                   onMouseLeave={(e) => { const s = e.target.getStage(); if (s) s.container().style.cursor = "default"; }}
                   onClick={(e) => { if (e.evt.altKey) { e.cancelBubble = true; clearHandle(k, axis, side); } }}
@@ -267,7 +274,7 @@ export function CalibrateStage({
             if (i > 0) addH(`${k}vi`, "v", "in", vInOf(t), dirTo(P(i - 1, j)), broV);
             return nodes;
           })}
-          {marquee && <Rect x={marquee.x} y={marquee.y} width={marquee.w} height={marquee.h} fill="rgba(34,197,94,0.12)" stroke="#22c55e" strokeWidth={lw} listening={false} />}
+          {marquee && <Rect x={marquee.x} y={marquee.y} width={marquee.w} height={marquee.h} fill="rgba(34,197,94,0.12)" stroke={HANDLE_ACCENT} strokeWidth={lw} listening={false} />}
         </>}
       </Layer>
     </Stage>

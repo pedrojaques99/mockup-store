@@ -17,8 +17,19 @@ import { DEFAULT_FRAME, type FrameConfig } from "@/lib/art-frame";
 import { LUZ_DEFAULTS, type LuzLayer } from "@/types/luz";
 import type { WarpMesh } from "@/lib/mesh-core";
 
-export interface QuadPt { x: number; y: number }
-export interface Quad { tl: QuadPt; tr: QuadPt; br: QuadPt; bl: QuadPt }
+/* O quad tinha QUATRO declarações estruturalmente idênticas e nominalmente
+ * distintas: aqui, em `photo-mockup/page.tsx`, em `photo-tools/CalibrateStage.tsx`
+ * e em `lib/key-color-core.ts` (como `Pt`/`QuadCorners`). Idênticas campo a campo,
+ * então o TypeScript aceitava trocar uma pela outra e ninguém percebia — e
+ * acrescentar um campo em uma delas não acusaria erro em nenhuma das outras.
+ *
+ * O SSoT é o `key-color-core`: é o módulo mais fundo (12 consumidores, incluindo
+ * rotas de servidor e `mesh-core`), e é puro, sem React. Aqui ficam só os apelidos
+ * que a UI já usa, para não renomear 12 arquivos por gosto de nome. */
+import type { Pt, QuadCorners } from "@/lib/key-color-core";
+
+export type QuadPt = Pt;
+export type Quad = QuadCorners;
 export interface Bend { top: number; bottom: number; left: number; right: number }
 
 /** Campos versionados pelo undo. Adicione aqui → já entra no Ctrl+Z. */

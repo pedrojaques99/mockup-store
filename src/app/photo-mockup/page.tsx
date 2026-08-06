@@ -38,6 +38,7 @@ import { CanvasContextChip } from "@/components/photo-tools/CanvasContextChip";
 import { ShortcutsHelp } from "@/components/photo-tools/ShortcutsHelp";
 import { useMaskEditor } from "./hooks/useMaskEditor";
 import { toBase64File, urlToDataUrl, dataUrlToFile, fetchJSON } from "@/lib/photo-mockup-io";
+import { readError } from "@/lib/http-error";
 import { useDocField, editorHistory, useTemporal, useEditorDoc } from "@/stores/editorDoc";
 import { packProject, unpackProject } from "@/lib/project-file";
 import { saveSession, loadSession, clearSession } from "@/stores/photoSession";
@@ -49,8 +50,10 @@ import { ACC, ACC2, ACC2_RGB } from "@/lib/brand";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface QuadPt { x: number; y: number }
-interface Quad { tl: QuadPt; tr: QuadPt; br: QuadPt; bl: QuadPt }
+/* Estas duas eram redeclaração local do que o `editorDoc` (e por baixo dele o
+ * `key-color-core`) já exporta — sombra silenciosa: o mesmo shape com outro nome,
+ * que o compilador aceitava trocar sem avisar. */
+import type { Quad, QuadPt } from "@/stores/editorDoc";
 
 interface Analysis {
   id: string;
@@ -509,7 +512,7 @@ function PhotoMockupPageInner() {
         const file = new File([blob], "cropped.png", { type: "image/png" });
         setCropResetKey((k) => k + 1); setCropArea(null);
         await handlePhotoFile(file, { quad: mappedQuad }); // re-sobe → render lê a foto cortada do disco
-        toast.success(`Cortado · ${W}×${H}px`, { id: tId });
+        toast.success(`Cortado em ${W}×${H}px`, { id: tId });
       } else toast.dismiss(tId);
     } catch (e: any) {
       if (e instanceof AiOpError) return; // expand cancel/timeout/erro já avisado no toast
@@ -548,12 +551,29 @@ function PhotoMockupPageInner() {
     if (!sceneId || uploadId) return;
     (async () => {
       try {
-        const res = await fetch(`/api/photo-mockup/analyze`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: sceneId }),
-        });
-        if (!res.ok) return;
+        /* Os dois pedidos só dependem do `sceneId`, e `settings` não olha para o
+         * resultado do `analyze` — em série eram dois RTT para buscar coisas
+         * independentes. O `settings` é opcional (cena sem ajuste salvo é
+         * legítima), então ele vai de `allSettled`: falhar ali não pode derrubar
+         * o carregamento da cena. */
+        const [res, settingsCheck] = await Promise.all([
+          fetch(`/api/photo-mockup/analyze`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: sceneId }),
+          }),
+          fetch(`/api/photo-mockup/${sceneId}/asset/settings`).catch(() => null),
+        ]);
+        /* Este é o caminho de entrada por link direto. Voltar calado deixava a
+         * tela vazia sem uma pista do motivo, e o operador recarregava a página
+         * em vez de reportar — o resto do arquivo já usa toast.error. */
+        if (!res.ok) {
+          const msg = await readError(res, "cena não encontrada");
+          setAnalyzeErr(msg);
+          setAnalyzeState("error");
+          toast.error(`Não consegui abrir a cena: ${msg}`);
+          return;
+        }
         const data = await res.json();
 
         setUploadId(sceneId);
@@ -566,9 +586,7 @@ function PhotoMockupPageInner() {
         setPhotoUrl(`/api/photo-mockup/${sceneId}/asset/photo-clean`);
         setShadowPreview(`/api/photo-mockup/${sceneId}/asset/shadow`);
 
-        const settingsUrl = `/api/photo-mockup/${sceneId}/asset/settings`;
-        const settingsCheck = await fetch(settingsUrl);
-        if (settingsCheck.ok) {
+        if (settingsCheck?.ok) {
           const s = await settingsCheck.json();
           if (typeof s.shadowOpacity    === "number") setShadowOpacity(s.shadowOpacity);
           if (typeof s.highlightOpacity === "number") setHighlightOpacity(s.highlightOpacity);
@@ -590,7 +608,14 @@ function PhotoMockupPageInner() {
           if (typeof s.specularOpacity === "number") setSpecularOpacity(s.specularOpacity);
         }
         editorHistory.clear(); // cena carregada → baseline novo
-      } catch { /* scene not found */ }
+      } catch (e) {
+        /* Rede caída, JSON quebrado, cena corrompida. Antes caía num catch vazio
+         * comentado como "scene not found", que é só UMA das causas possíveis. */
+        const msg = e instanceof Error ? e.message : String(e);
+        setAnalyzeErr(msg);
+        setAnalyzeState("error");
+        toast.error(`Não consegui abrir a cena: ${msg}`);
+      }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -779,7 +804,7 @@ function PhotoMockupPageInner() {
       }
       if (!srcB64) return;
       setUpscaling(true);
-      const label = `Upscale · ${upMode === "bicubic" ? "Rápido" : upMode === "ai" ? "Visant" : upMode === "pruna" ? "Turbo" : "Nítido"}`;
+      const label = `Upscale ${upMode === "bicubic" ? "Rápido" : upMode === "ai" ? "Visant" : upMode === "pruna" ? "Turbo" : "Nítido"}`;
       const res = await runAiOp(label,
         (signal) => fetchJSON<{ base64: string; width: number; height: number }>(
           `/api/photo-mockup/${uploadId ?? "x"}/upscale`,
@@ -804,7 +829,7 @@ function PhotoMockupPageInner() {
         } : null;
         await handlePhotoFile(file, { quad: mapped });
       } else await handleArtFile(file);
-      toast.success(`Resolução aumentada · ${res.width}×${res.height}px`);
+      toast.success(`Resolução aumentada para ${res.width}×${res.height}px`);
     } catch (e: any) {
       if (e instanceof AiOpError) return; // cancel/timeout/erro já avisados no toast
       setUpscaleErr(e?.message ?? "falha no upscale");
@@ -877,9 +902,9 @@ function PhotoMockupPageInner() {
       setProcessState("done");
       if (artFile) setTimeout(() => handleRenderRef.current(), 100);
       if (j.aiCleaned === false) {
-        toast.warning("Edição indisponível — usei limpeza simples (pode sobrar um pouco de rosa).");
+        toast.warning("Edição indisponível. Usei limpeza simples, pode sobrar um pouco de rosa.");
       } else {
-        toast.success(j.cleanMaterial ? `Superfície recriada · ${j.cleanMaterial}` : "Superfície recriada sem o rosa");
+        toast.success(j.cleanMaterial ? `Superfície recriada com ${j.cleanMaterial}` : "Superfície recriada sem o rosa");
       }
     } catch (e: any) {
       if (!(e instanceof AiOpError)) toast.error(e?.message ?? "falha ao limpar superfície");
@@ -923,7 +948,7 @@ function PhotoMockupPageInner() {
           mesh: useEditorDoc.getState().doc.mesh ?? undefined,
         }),
       });
-      if (!res.ok) { const j = await res.json(); throw new Error(j.error ?? `HTTP ${res.status}`); }
+      if (!res.ok) throw new Error(await readError(res));
       if (process.env.NODE_ENV === "development") {
         const st = res.headers.get("Server-Timing");
         if (st) console.debug(`[render] ${Date.now() - t0}ms total · ${st}`);
@@ -1018,7 +1043,7 @@ function PhotoMockupPageInner() {
           tags: analysis?.surfaceType ? [analysis.surfaceType] : [],
         }),
       });
-      if (!r.ok) { const j = await r.json(); throw new Error(j.error ?? `HTTP ${r.status}`); }
+      if (!r.ok) throw new Error(await readError(r));
       setPublishState("done");
       toast.success(`"${name}" publicado na Biblioteca`, { id: tId });
     } catch (e: any) {
@@ -1261,13 +1286,13 @@ function PhotoMockupPageInner() {
           <nav className="flex items-center gap-1">
             <Link
               href="/"
-              className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
+              className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-white hover:bg-white/5 transition-ui"
             >
               Store
             </Link>
             <Link
               href="/photo-mockup"
-              className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 bg-white/8 text-white border border-white/10 transition-colors"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 bg-white/8 text-white border border-white/10 transition-ui"
             >
               <Camera size={11} />
               Scene Maker
@@ -1290,7 +1315,7 @@ function PhotoMockupPageInner() {
               onClick={() => document.getElementById("vsn-input")?.click()}
               title="Abrir projeto (.vsn)"
               aria-label="Abrir projeto"
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-ui"
             >
               <FolderOpen size={14} />
             </button>
@@ -1298,17 +1323,17 @@ function PhotoMockupPageInner() {
               <>
                 <button
                   onClick={saveProject}
-                  title="Salvar projeto em arquivo (.vsn) — foto + luz + máscaras + ajustes"
+                  title="Salvar projeto em arquivo (.vsn) com foto, luz, máscaras e ajustes"
                   aria-label="Salvar projeto"
-                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-ui"
                 >
                   <Save size={14} />
                 </button>
                 <button
                   onClick={resetPhoto}
-                  title="Novo projeto — descarta esta cena e sobe uma nova foto"
+                  title="Novo projeto. Descarta esta cena e sobe uma nova foto"
                   aria-label="Novo projeto"
-                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-ui"
                 >
                   <RefreshCw size={14} />
                 </button>
@@ -1321,14 +1346,14 @@ function PhotoMockupPageInner() {
             <button
               onClick={() => editorHistory.undo()} disabled={!canUndo}
               title="Desfazer (Ctrl+Z)"
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 disabled:opacity-25 disabled:hover:bg-transparent transition-ui"
             >
               <Undo2 size={14} />
             </button>
             <button
               onClick={() => editorHistory.redo()} disabled={!canRedo}
               title="Refazer (Ctrl+Shift+Z)"
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 disabled:opacity-25 disabled:hover:bg-transparent transition-ui"
             >
               <Redo2 size={14} />
             </button>
@@ -1336,7 +1361,7 @@ function PhotoMockupPageInner() {
               onClick={() => setShortcutsOpen(true)}
               title="Atalhos (?)"
               aria-label="Atalhos"
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-ui"
             >
               <Keyboard size={14} />
             </button>
@@ -1366,7 +1391,7 @@ function PhotoMockupPageInner() {
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={handleDrop}
                     onClick={() => document.getElementById("photo-input")?.click()}
-                    className="border-2 border-dashed border-zinc-700 hover:border-zinc-500 rounded-2xl flex flex-col items-center justify-center gap-3 p-12 cursor-pointer transition-colors min-h-[300px]"
+                    className="border-2 border-dashed border-zinc-700 hover:border-zinc-500 rounded-2xl flex flex-col items-center justify-center gap-3 p-12 cursor-pointer transition-ui min-h-[300px]"
                   >
                     <input
                       id="photo-input"
@@ -1398,8 +1423,8 @@ function PhotoMockupPageInner() {
                 {photoUrl && quad && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-zinc-400">Arraste os cantos pra ajustar · {imgDims.w}×{imgDims.h}px</span>
-                      <button onClick={resetPhoto} className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
+                      <span className="text-sm text-zinc-400">Arraste os cantos pra ajustar a imagem de {imgDims.w}×{imgDims.h}px</span>
+                      <button onClick={resetPhoto} className="text-xs text-zinc-500 hover:text-zinc-300 transition-ui">
                         Trocar foto
                       </button>
                     </div>
@@ -1418,7 +1443,7 @@ function PhotoMockupPageInner() {
       {/* ── Unified editor — single fullscreen canvas + side-panel tools ── */}
       {(active === "process" || active === "render") && (
         <div
-          className={["fixed top-14 bottom-0 left-0 right-0 z-40 overflow-hidden transition-colors",
+          className={["fixed top-14 bottom-0 left-0 right-0 z-40 overflow-hidden transition-ui",
             !artFile && bgDragOver ? "bg-acc/10" : "bg-zinc-950"].join(" ")}
           onDragOver={(e) => { if (!artFile) { e.preventDefault(); setBgDragOver(true); } }}
           onDragLeave={(e) => { if (e.currentTarget === e.target) setBgDragOver(false); }}
@@ -1670,7 +1695,7 @@ function PhotoMockupPageInner() {
                 {tool === "render" && renderUrl && photoUrl && (
                   <button
                     onClick={() => setCompare((v) => !v)}
-                    className={["absolute top-3 z-20 text-[11px] px-2 py-0.5 rounded-full backdrop-blur-sm flex items-center gap-1 transition-colors",
+                    className={["absolute top-3 z-20 text-[11px] px-2 py-0.5 rounded-full backdrop-blur-sm flex items-center gap-1 transition-ui",
                       aiBlendUrl ? "left-20" : "left-4",
                       compare ? "bg-acc2/80 text-zinc-950" : "bg-black/50 text-zinc-400 hover:text-white"].join(" ")}
                     title="Comparar antes/depois"
@@ -1683,7 +1708,7 @@ function PhotoMockupPageInner() {
                 {aiBlendUrl && (
                   <button
                     onClick={() => setShowAiResult(v => !v)}
-                    className={["absolute top-3 left-4 z-20 text-[11px] px-2 py-0.5 rounded-full backdrop-blur-sm flex items-center gap-1 transition-colors",
+                    className={["absolute top-3 left-4 z-20 text-[11px] px-2 py-0.5 rounded-full backdrop-blur-sm flex items-center gap-1 transition-ui",
                       // Branco sobre o verde da marca dá ~2.6:1 e não passa em lugar
                       // nenhum. Verde é cor CLARA: texto em cima é quase-preto
                       // (guideline BOXY, seção acessibilidade).
@@ -1704,7 +1729,7 @@ function PhotoMockupPageInner() {
                 {renderMs && renderState === "done" && !autoRenderPending && (
                   <span className="absolute top-3 right-4 z-20 text-[11px] font-mono bg-black/50 text-zinc-400 px-2 py-0.5 rounded-full backdrop-blur-sm">
                     {aiBlendUrl && showAiResult
-                      ? `Visant · ${aiBlendMs ? (aiBlendMs / 1000).toFixed(1) : "?"}s`
+                      ? `Visant em ${aiBlendMs ? (aiBlendMs / 1000).toFixed(1) : "?"}s`
                       : `${(renderMs / 1000).toFixed(1)}s`}
                   </span>
                 )}
@@ -1779,7 +1804,7 @@ function PhotoMockupPageInner() {
                           {!(tool === "mask" && maskTarget === "aiedit") && (<>
                           {artFile && quad && (
                             <button onClick={() => handleProcess()} disabled={processState === "loading"}
-                              className={["w-full py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5",
+                              className={["w-full py-2 rounded-xl text-xs font-medium transition-ui flex items-center justify-center gap-1.5",
                                 processState === "loading" ? "bg-zinc-700 text-zinc-400"
                                   : processState === "idle" ? "bg-acc2 text-zinc-950 hover:bg-acc2/90"
                                   : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"].join(" ")}>
@@ -1789,12 +1814,12 @@ function PhotoMockupPageInner() {
                             </button>
                           )}
                           {!artFile && (
-                            <p className="text-[10px] text-acc/80">Solte a arte no painel — o render acontece sozinho.</p>
+                            <p className="text-[10px] text-acc/80">Solte a arte no painel. O render acontece sozinho.</p>
                           )}
                           {(processState === "loading" || renderState === "loading" || autoRenderPending) ? (
-                            <p className="text-[10px] text-acc flex items-center gap-1"><Loader2 size={9} className="animate-spin" /> Processando · {(procMs / 1000).toFixed(1)}s</p>
+                            <p className="text-[10px] text-acc flex items-center gap-1"><Loader2 size={9} className="animate-spin" /> Processando há {(procMs / 1000).toFixed(1)}s</p>
                           ) : (artFile && processState === "done" && renderState === "done") ? (
-                            <p className="text-[10px] text-acc2 flex items-center gap-1"><CheckCircle2 size={9} /> Pronto{renderMs ? ` · ${(renderMs / 1000).toFixed(1)}s` : ""}</p>
+                            <p className="text-[10px] text-acc2 flex items-center gap-1"><CheckCircle2 size={9} /> Pronto{renderMs ? ` em ${(renderMs / 1000).toFixed(1)}s` : ""}</p>
                           ) : null}
 
                           {/* Layers — non-destructive: eye hides a mask from the bake without losing it. */}
@@ -1808,12 +1833,12 @@ function PhotoMockupPageInner() {
                               ] as const).filter((l) => l.url).map((l) => (
                                 <div key={l.label} className="flex items-center gap-1.5 text-[10px]">
                                   <button onClick={() => { l.set(!l.on); setProcessState("idle"); }} title="Mostrar/ocultar"
-                                    className="text-zinc-400 hover:text-white transition-colors">
+                                    className="text-zinc-400 hover:text-white transition-ui">
                                     <Eye size={11} className={l.on ? "" : "opacity-25"} />
                                   </button>
                                   <span className={["flex-1", l.on ? l.color : "text-zinc-600 line-through"].join(" ")}>{l.label}</span>
                                   <button onClick={() => { l.clr(); setProcessState("idle"); }} title="Remover"
-                                    className="text-zinc-600 hover:text-red-400 transition-colors px-0.5">×</button>
+                                    className="text-zinc-600 hover:text-red-400 transition-ui px-0.5">×</button>
                                 </div>
                               ))}
                               <div className="flex items-center gap-1.5 text-[10px] text-zinc-500">
@@ -1963,7 +1988,7 @@ function PhotoMockupPageInner() {
                   return (
                     <div className="absolute bottom-4 left-4 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full bg-zinc-900/85 border border-zinc-700/50 backdrop-blur-md text-[11px] text-zinc-300 shadow-lg pointer-events-none">
                       <Loader2 size={11} className="animate-spin text-acc" />
-                      <span>{busy}{showMs ? ` · ${(procMs / 1000).toFixed(1)}s` : "…"}</span>
+                      <span>{busy}{showMs ? ` há ${(procMs / 1000).toFixed(1)}s` : "…"}</span>
                     </div>
                   );
                 })()}
@@ -1971,16 +1996,16 @@ function PhotoMockupPageInner() {
                 {/* Dica de 1º uso — chip efêmero, dispensável, lembra via localStorage. */}
                 {(() => {
                   const hint = (tool === "render" && !artFile && !hintsSeen["drop-art"])
-                      ? { key: "drop-art", text: "Solte a arte na superfície destacada — renderiza sozinho" }
+                      ? { key: "drop-art", text: "Solte a arte na superfície destacada. Renderiza sozinho" }
                     : (tool === "corners" && !hintsSeen["corners"])
-                      ? { key: "corners", text: "Arraste os cantos pra ajustar a superfície · OK quando estiver certo" }
+                      ? { key: "corners", text: "Arraste os cantos pra ajustar a superfície, OK quando estiver certo" }
                     : null;
                   if (!hint) return null;
                   return (
                     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full bg-acc2/15 border border-acc2/30 backdrop-blur-md text-[11px] text-acc2 shadow-lg animate-in fade-in slide-in-from-bottom-2">
                       <Lightbulb size={12} />
                       <span>{hint.text}</span>
-                      <button onClick={() => dismissHint(hint.key)} className="ml-1 text-acc2/70 hover:text-acc2 transition-colors" aria-label="Dispensar dica"><X size={12} /></button>
+                      <button onClick={() => dismissHint(hint.key)} className="ml-1 text-acc2/70 hover:text-acc2 transition-ui" aria-label="Dispensar dica"><X size={12} /></button>
                     </div>
                   );
                 })()}
@@ -2008,9 +2033,9 @@ function PhotoMockupPageInner() {
                       />
                       <div className="flex items-center gap-2 justify-end">
                         <button onClick={() => setPublishModalOpen(false)}
-                          className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-white hover:bg-white/5 transition-colors">Cancelar</button>
+                          className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-white hover:bg-white/5 transition-ui">Cancelar</button>
                         <button onClick={() => doPublish(publishName)} disabled={!publishName.trim()}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-acc2 text-zinc-950 hover:bg-acc2/90 disabled:opacity-40 transition-colors">Salvar</button>
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-acc2 text-zinc-950 hover:bg-acc2/90 disabled:opacity-40 transition-ui">Salvar</button>
                       </div>
                   </DialogContent>
                 </Dialog>

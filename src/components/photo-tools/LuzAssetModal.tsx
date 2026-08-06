@@ -73,7 +73,7 @@ export function LuzAssetModal({
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-ui"
             >
               <Upload size={12} /> Upload
             </button>
@@ -82,7 +82,7 @@ export function LuzAssetModal({
               onClick={onClose}
               aria-label="Fechar"
               title="Fechar"
-              className="p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition-ui"
             >
               <X size={16} />
             </button>
@@ -145,7 +145,7 @@ export function LuzAssetModal({
                   key={it.path}
                   type="button"
                   onClick={() => onPick(it.path)}
-                  className="group rounded-lg overflow-hidden border border-zinc-800 hover:border-acc2 bg-zinc-950/60 transition-colors text-left"
+                  className="group rounded-lg overflow-hidden border border-zinc-800 hover:border-acc2 bg-zinc-950/60 transition-ui text-left"
                   title={it.name}
                 >
                   <div className="aspect-square grid place-items-center bg-[conic-gradient(at_50%_50%,#27272a_25%,#18181b_0_50%,#27272a_0_75%,#18181b_0)] bg-[length:16px_16px]">

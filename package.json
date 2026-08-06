@@ -33,7 +33,9 @@
     "pack:publish": "tsx --env-file-if-exists=.env.local scripts/publish-pack.ts",
     "pack:fidelity": "bun scripts/scene-fidelity.ts",
     "visual:drawer": "tsx scripts/drawer-visual-check.ts",
-    "check:render-failure": "tsx scripts/render-failure-check.ts"
+    "check:render-failure": "tsx scripts/render-failure-check.ts",
+    "check:render-ab": "tsx scripts/render-ab.ts",
+    "visual:scene": "tsx scripts/scene-visual-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",

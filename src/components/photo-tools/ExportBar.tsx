@@ -88,7 +88,7 @@ export function ExportBar({ src }: { src: string | null }) {
         type="button"
         onClick={save}
         disabled={!src || busy}
-        className="w-full py-2 rounded-xl text-[11px] font-medium flex items-center justify-center gap-1.5 transition-colors bg-acc2 hover:bg-acc2/90 text-zinc-950 disabled:bg-zinc-800 disabled:text-zinc-500"
+        className="w-full py-2 rounded-xl text-[11px] font-medium flex items-center justify-center gap-1.5 transition-ui bg-acc2 hover:bg-acc2/90 text-zinc-950 disabled:bg-zinc-800 disabled:text-zinc-500"
       >
         {busy ? <><Loader2 size={11} className="animate-spin" /> Salvando…</> : <><Download size={11} /> Salvar {fmt.toUpperCase()}</>}
       </button>

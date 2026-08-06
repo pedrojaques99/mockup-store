@@ -73,7 +73,7 @@ export function EditSelectionPanel(p: EditSelectionPanelProps) {
           </>
         ) : (
           <>
-            <p className="text-[10px] text-zinc-500">Clique no objeto · botão direito exclui.</p>
+            <p className="text-[10px] text-zinc-500">Clique no objeto, botão direito exclui.</p>
             <Slider label="Suavizar borda" value={p.segFeather} onChange={p.setSegFeather} min={0} max={20} suffix="px" />
             {p.segStatus.status !== "ready" && (
               <p className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 size={9} className="animate-spin" /> {p.segStatus.msg}</p>
@@ -82,7 +82,7 @@ export function EditSelectionPanel(p: EditSelectionPanelProps) {
               type="button"
               onClick={p.onApply}
               disabled={!p.segHasMask}
-              className={["w-full py-1.5 rounded-lg text-[10px] font-medium transition-colors flex items-center justify-center gap-1",
+              className={["w-full py-1.5 rounded-lg text-[10px] font-medium transition-ui flex items-center justify-center gap-1",
                 p.segHasMask ? "bg-violet-500 text-white hover:bg-violet-500/90" : "bg-zinc-800 text-zinc-500"].join(" ")}
             >
               <Plus size={12} /> Adicionar à seleção
@@ -97,7 +97,7 @@ export function EditSelectionPanel(p: EditSelectionPanelProps) {
         <IconButton icon={Trash2} label="Limpar seleção" onClick={p.onClear} disabled={!p.hasMask} className="w-9 h-9 rounded-xl" />
         <button
           onClick={p.onDone}
-          className="flex-1 py-2 rounded-xl text-xs font-medium bg-violet-500 text-white hover:bg-violet-500/90 transition-colors flex items-center justify-center gap-1.5"
+          className="flex-1 py-2 rounded-xl text-xs font-medium bg-violet-500 text-white hover:bg-violet-500/90 transition-ui flex items-center justify-center gap-1.5"
         >
           <Check size={12} /> Concluir
         </button>

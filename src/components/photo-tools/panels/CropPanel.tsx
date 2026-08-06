@@ -42,7 +42,7 @@ export function CropPanel({
 
       <p className="text-[10px] text-zinc-500 leading-snug">
         Arraste as <span className="text-zinc-300">8 alças</span> pra ajustar a moldura. Puxe pra <span className="text-acc">fora da imagem</span> → estende a cena.
-        <br /><span className="text-zinc-600">Duplo-clique dentro (ou Enter) aplica · Esc cancela.</span>
+        <br /><span className="text-zinc-600">Duplo-clique dentro (ou Enter) aplica, Esc cancela.</span>
       </p>
 
       <div className="space-y-0.5">
@@ -62,7 +62,7 @@ export function CropPanel({
       <button
         type="button"
         onClick={onReset}
-        className="w-full py-1.5 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors flex items-center justify-center gap-1"
+        className="w-full py-1.5 rounded-lg text-[10px] bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-ui flex items-center justify-center gap-1"
       >
         <RotateCcw size={10} /> Resetar moldura
       </button>
@@ -90,7 +90,7 @@ export function CropPanel({
         type="button"
         onClick={onApply}
         disabled={!canApply || applying}
-        className="w-full py-2 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 bg-acc2 text-zinc-950 hover:bg-acc2/90 disabled:opacity-40"
+        className="w-full py-2 rounded-xl text-xs font-medium transition-ui flex items-center justify-center gap-1.5 bg-acc2 text-zinc-950 hover:bg-acc2/90 disabled:opacity-40"
       >
         {applying ? (
           <><Loader2 size={12} className="animate-spin" /> {expanding ? "Expandindo…" : "Cortando…"}</>
