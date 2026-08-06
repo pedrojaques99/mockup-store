@@ -36,15 +36,42 @@ import { dirname, join } from "path";
 
 export type Origem = "env" | "config" | "ausente";
 
-/** Provedores que o app usa, com o que cada um liga. */
+/**
+ * Provedores que o app usa, com o que cada um liga e **onde se pega a chave**.
+ *
+ * O link não é enfeite: sem ele a pessoa que quer ligar a geração de imagem sai
+ * do app, procura "openai api key" e cai numa página de marketing antes da
+ * página do console. Um clique resolve o passo que trava o BYOK inteiro.
+ */
 export const PROVEDORES = [
-  { chave: "OPENAI_API_KEY", nome: "OpenAI", liga: "geração de imagem" },
-  { chave: "GEMINI_API_KEY", nome: "Gemini", liga: "detecção assistida de superfície" },
-  { chave: "ANTHROPIC_API_KEY", nome: "Anthropic", liga: "análise de cena" },
-  { chave: "REPLICATE_API_TOKEN", nome: "Replicate", liga: "segmentação, profundidade, reluz e upscale" },
-  { chave: "VISANT_API_KEY", nome: "Visant Labs", liga: "lotes por marca (brand kit)" },
-  { chave: "NVIDIA_API_KEY", nome: "NVIDIA", liga: "upscale alternativo" },
-  { chave: "EMBEDDINGS_API_KEY", nome: "Embeddings", liga: "busca semântica" },
+  {
+    chave: "OPENAI_API_KEY", nome: "OpenAI", liga: "geração de imagem",
+    obter: "https://platform.openai.com/api-keys",
+  },
+  {
+    chave: "GEMINI_API_KEY", nome: "Gemini", liga: "detecção assistida de superfície",
+    obter: "https://aistudio.google.com/apikey",
+  },
+  {
+    chave: "ANTHROPIC_API_KEY", nome: "Anthropic", liga: "análise de cena",
+    obter: "https://console.anthropic.com/settings/keys",
+  },
+  {
+    chave: "REPLICATE_API_TOKEN", nome: "Replicate", liga: "segmentação, profundidade, reluz e upscale",
+    obter: "https://replicate.com/account/api-tokens",
+  },
+  {
+    chave: "VISANT_API_KEY", nome: "Visant Labs", liga: "lotes por marca (brand kit)",
+    obter: "https://visantlabs.com",
+  },
+  {
+    chave: "NVIDIA_API_KEY", nome: "NVIDIA", liga: "upscale alternativo",
+    obter: "https://build.nvidia.com",
+  },
+  {
+    chave: "EMBEDDINGS_API_KEY", nome: "Embeddings", liga: "busca semântica",
+    obter: "https://platform.openai.com/api-keys",
+  },
 ] as const;
 
 export type ChaveProvedor = (typeof PROVEDORES)[number]["chave"];

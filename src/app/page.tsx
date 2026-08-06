@@ -4448,30 +4448,25 @@ export default function Home() {
             </DialogClose>
           </div>
 
-          {/* Acervo, chaves e render-server. Só é montado com o diálogo aberto,
-              para o GET de configuração não custar nada em quem nunca abre.
-              `min-h-0` é o que faz o filho rolar: sem ele o flex item adota a
-              altura do conteúdo e o rodapé sai por cima do painel. */}
+          {/* Acervo, conta, chaves e manutenção. Só é montado com o diálogo
+              aberto, para o GET de configuração não custar nada em quem nunca
+              abre. `min-h-0` é o que faz o filho rolar: sem ele o flex item
+              adota a altura do conteúdo e transborda o diálogo.
+
+              Duplicatas mora DENTRO do painel (aba Avançado). Como rodapé fixo
+              ela competia com o conteúdo em toda rolagem, sendo uma ação de
+              manutenção que quase ninguém usa. */}
           {showSettings && (
             <div className="flex-1 min-h-0 overflow-y-auto">
-              <ConfigPanel />
+              <ConfigPanel
+                onAbrirDuplicatas={() => {
+                  setShowSettings(false);
+                  setShowDupes(true);
+                  if (!dupesGroups.length && !dupesScanning) scanDuplicates();
+                }}
+              />
             </div>
           )}
-
-          <div className="p-5 border-t border-neutral-800 shrink-0 flex flex-col gap-3">
-            <button
-              onClick={() => { setShowSettings(false); setShowDupes(true); if (!dupesGroups.length && !dupesScanning) scanDuplicates(); }}
-              className="w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl bg-amber-500/8 border border-amber-500/15 hover:bg-amber-500/15 hover:border-amber-500/30 transition-ui press group text-left"
-            >
-              <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0 group-hover:bg-amber-500/25 transition-colors">
-                <Copy className="w-4.5 h-4.5 text-amber-400" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-amber-300">Duplicatas</p>
-                <p className="text-[10px] text-neutral-500 font-medium">Encontrar e remover PSDs duplicados</p>
-              </div>
-            </button>
-          </div>
         </DialogContent>
       </Dialog>
 

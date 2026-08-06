@@ -27,7 +27,7 @@ import {
   caminhoConfig,
   type ChaveProvedor,
 } from "@/lib/app-config";
-import { invalidateCatalog } from "@/lib/search-index";
+import { invalidateCatalog, catalogStats } from "@/lib/search-index";
 import { driverAtivo } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -41,9 +41,20 @@ export async function GET() {
     const overlay = pastasOverlay();
     const render = portaRender();
 
+    const stats = catalogStats();
     return NextResponse.json({
       arquivo: caminhoConfig(),
       catalogo: driverAtivo(),
+      /**
+       * O tamanho do acervo é a resposta para "configurei e funcionou?".
+       *
+       * `montado` viaja junto porque o cache do catálogo é POR WORKER: uma
+       * requisição que cai num worker frio lê `visiveis: 0` legitimamente, e
+       * sem essa bandeira a tela dizia "0 no grid" com o grid cheio atrás.
+       * Zero silencioso é indistinguível de zero verdadeiro, e foi assim que o
+       * defeito apareceu numa captura.
+       */
+      itens: { total: stats.docs ?? 0, visiveis: stats.visiveis ?? 0, montado: stats.indiceMontado },
       acervo: {
         origem: acervo.origem,
         pastas: acervo.valor.map((p) => ({ caminho: p, existe: existsSync(p) })),
@@ -56,6 +67,7 @@ export async function GET() {
           chave: p.chave,
           nome: p.nome,
           liga: p.liga,
+          obter: p.obter,
           // Presença e máscara. O valor em claro fica no servidor.
           definida: !!valor,
           mascara: valor ? mascarar(valor) : null,
