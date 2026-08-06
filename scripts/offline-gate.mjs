@@ -297,6 +297,127 @@ if (!pastaIngest) {
   }
 }
 
+/**
+ * O render, que é o produto. Sem isto o portão prova que dá para NAVEGAR sem
+ * Mongo, e o usuário veio aqui para exportar um PNG.
+ *
+ * ## Por que teste diferencial, e não "a arte apareceu"
+ *
+ * Medir se a arte entrou procurando cor saturada ou desvio-padrão **aprova
+ * mockup quebrado** — este projeto já pagou por isso: um pôster BRANCO (arte não
+ * entrou) pontuou 3,4% porque o grafite da parede tinha vermelho e amarelo,
+ * enquanto crachá e copo legítimos deram 2,2%. Cenário colorido é
+ * indistinguível de arte, por cor.
+ *
+ * O diferencial resolve porque o cenário é IDÊNTICO nos dois renders e se
+ * cancela: renderiza a mesma face com duas artes distintas e conta o que mudou.
+ * Pixel que muda é pixel que a arte controla. Quebrado dá 0,00% — provado
+ * sabotando a rota para ignorar a arte recebida: 0,00% e `exit 1`.
+ *
+ * ## O que este teste NÃO prova, medido
+ *
+ * Ele responde "a arte entrou?", **não** "a arte entrou no lugar certo?".
+ * Mandando um `smartObject` que não casa camada nenhuma, o resultado foi
+ * idêntico ao do slot correto (31,45% nos dois) — porque num PSD de UMA face
+ * não existe outro lugar para a arte ir. Num mural multi-face o slot errado
+ * mudaria o alvo, e este teste continuaria verde.
+ *
+ * Para essa classe, o que pega é olhar a contact sheet. Está registrado em
+ * `AGENTS.md`: o slot é `face.smartObject`, nunca `face.name`.
+ */
+console.log("\n--- o render, que é o produto ---");
+async function quantoMudou(a, b) {
+  const sharp = (await import("sharp")).default;
+  // Reduz os dois ao mesmo tamanho antes de comparar: a métrica é a FRAÇÃO do
+  // quadro que muda, e ela não depende da resolução. Menor também é ordens de
+  // grandeza mais barato que varrer 3159x1777 duas vezes.
+  const cru = (buf) => sharp(buf).resize(400, 400, { fit: "fill" }).raw().toBuffer({ resolveWithObject: true });
+  const [ia, ib] = await Promise.all([cru(a), cru(b)]);
+  const ca = ia.info.channels, cb = ib.info.channels;
+  if (ia.data.length / ca !== ib.data.length / cb) return null;
+  const total = ia.info.width * ia.info.height;
+  let mudou = 0;
+  for (let i = 0; i < total; i++) {
+    const oa = i * ca, ob = i * cb;
+    if (
+      Math.abs(ia.data[oa] - ib.data[ob]) > 8 ||
+      Math.abs(ia.data[oa + 1] - ib.data[ob + 1]) > 8 ||
+      Math.abs(ia.data[oa + 2] - ib.data[ob + 2]) > 8
+    ) mudou++;
+  }
+  return (mudou / total) * 100;
+}
+
+/** Arte chapada de uma cor só, em PNG, sem depender de arquivo no disco. */
+async function arteChapada(r, g, b, lado = 1200) {
+  const sharp = (await import("sharp")).default;
+  return (await sharp({
+    create: { width: lado, height: lado, channels: 3, background: { r, g, b } },
+  }).png().toBuffer()).toString("base64");
+}
+
+if (!pastaIngest) {
+  console.log("  PULADO (o render precisa de um PSD, use --ingest)");
+} else {
+  const grid = await (await fetch(`${BASE}/api/references?limit=200`)).json();
+  const alvo = (grid.references ?? []).find((x) => x.studio === "Portão Offline" && x.psdPath);
+  if (!alvo) {
+    console.log("FALHA sem PSD ingerido para renderizar");
+    falhas++;
+  } else {
+    const info = await (await fetch(`${BASE}/api/psd-info?name=${encodeURIComponent(alvo.psdFileName)}`)).json();
+    // ⚠️ A face vem do `computeFaces` do engine, NUNCA de `meta.smartObjects`:
+    // preenchendo todo smart object, a arte pinta o cenário de fundo.
+    const face = (info.faces ?? [])[0];
+    if (!face) {
+      console.log("FALHA o PSD não expôs face editável");
+      falhas++;
+    } else {
+      // ⚠️ E o slot é `face.smartObject`, NUNCA `face.name`: o `name` é rótulo
+      // curto de UI e casa o alvo errado, cobrindo a cena inteira. O QA por
+      // desvio-padrão APROVA isso; só o diferencial pega.
+      const slot = face.smartObject;
+      console.log(`  face: "${face.name}" · slot: ${String(slot).slice(0, 60)}`);
+
+      const renderizar = async (b64) => {
+        const r = await fetch(`${BASE}/api/render`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ psdPath: alvo.psdPath, preview: true, arts: [{ smartObject: slot, artBase64: b64 }] }),
+        });
+        if (!r.ok) return { ok: false, status: r.status, msg: (await r.text()).slice(0, 120) };
+        // A rota devolve os BYTES da imagem, não JSON (jpeg no preview, png no
+        // full). Ler com `.json()` estoura no parser e mostra o erro errado.
+        const tipo = r.headers.get("content-type") ?? "";
+        if (!tipo.startsWith("image/")) {
+          return { ok: false, status: 200, msg: `não veio imagem: ${tipo}` };
+        }
+        return { ok: true, buf: Buffer.from(await r.arrayBuffer()), tipo };
+      };
+
+      const r1 = await renderizar(await arteChapada(255, 0, 0));
+      console.log(`${r1.ok ? "OK   " : "FALHA"} render A (vermelho)  ${r1.ok ? `${(r1.buf.length / 1024).toFixed(0)} KB` : `${r1.status} ${r1.msg}`}`);
+      if (!r1.ok) falhas++;
+
+      const r2 = await renderizar(await arteChapada(0, 0, 255));
+      console.log(`${r2.ok ? "OK   " : "FALHA"} render B (azul)      ${r2.ok ? `${(r2.buf.length / 1024).toFixed(0)} KB` : `${r2.status} ${r2.msg}`}`);
+      if (!r2.ok) falhas++;
+
+      if (r1.ok && r2.ok) {
+        const pct = await quantoMudou(r1.buf, r2.buf);
+        if (pct === null) {
+          console.log("  (diferencial: PULADO, não consegui decodificar as imagens)");
+        } else {
+          // 0,3% é o corte que o `publish-pack` já usa. Quebrado dá 0,00%.
+          const entrou = pct > 0.3;
+          console.log(`${entrou ? "OK   " : "FALHA"} a arte ENTROU        ${pct.toFixed(2)}% do quadro muda entre as duas artes`);
+          if (!entrou) falhas++;
+        }
+      }
+    }
+  }
+}
+
 await desfazer();
 console.log(falhas ? `\n=== PORTÃO VERMELHO: ${falhas} ===` : "\n=== PORTÃO VERDE ===");
 process.exit(falhas ? 1 : 0);
