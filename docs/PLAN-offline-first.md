@@ -44,6 +44,21 @@ Com isso o mesmo registro serve qualquer máquina, e aí o resto cai:
 - O banco pode ser SQLite local, porque não há mais nada de máquina-específico
   gravado dentro dele.
 
+## Estado: entregue em 06/08/2026
+
+| Fase | Estado | Prova |
+|---|---|---|
+| 1. Caminho relativo | feito | 20 testes; 189 PSDs resolvem igual em duas raízes (junção do Windows) |
+| 2. Driver duplo | feito | 17 testes; sem Mongo o catálogo saiu de 134 para 5.869 itens |
+| 3. Seed | feito | export 8.992 docs em 2,0 MB; `seed:publish`/`seed:fetch` pela Release |
+| 4. BYOK + painel | feito | 18 testes; abas, conta Visant, links; chave nunca volta em claro |
+| 5. Instalador | feito | `npm run setup` interativo, mudo sem TTY |
+| 6. Portão de ship | feito | `check:offline` cobre config, ingest, render e multi-face |
+
+O laço central inteiro, medido sem Mongo: plugar pasta → scan → commit → card no
+grid → `psd-info` → render com a arte entrando (31,45% de diferencial) → slot
+escolhendo a face certa num multi-face (16,46%).
+
 ## Fases
 
 ### Fase 1 — Caminho relativo (`src/lib/psd-roots.ts`)
@@ -59,11 +74,15 @@ Com isso o mesmo registro serve qualquer máquina, e aí o resto cai:
 
 ### Fase 2 — Driver duplo no `getDb`
 
-- `db.ts` vira interface. SQLite (`better-sqlite3`) é o **default**; Mongo entra
-  só quando `MONGODB_URI` existe.
-- Os 9 consumidores falam com a interface, não com o driver.
+- `db.ts` escolhe o driver. SQLite é o **default**; Mongo entra só quando
+  `MONGODB_URI` existe.
+- **Ficou `node:sqlite`, não `better-sqlite3`** como este plano previa: é
+  biblioteca padrão do Node 22, então não há módulo nativo para compilar no
+  passo "clone e roda", que é justamente o que se quer tornar trivial.
+- Os 9 consumidores não mudaram: o driver local implementa a fatia comum
+  (`find`/`findOne`/`insertOne`/`updateOne`) e estoura com nome no resto.
 - Ganho imediato: **ingest e publicar param de responder 500 sem Mongo** — que é
-  o que hoje impede o app de ser público.
+  o que impedia o app de ser público.
 
 ### Fase 3 — Seed do acervo
 
