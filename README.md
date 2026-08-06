@@ -13,6 +13,26 @@ que produz lote de mockups por marca, byte-idêntico ao que a interface mostra.
 
 ---
 
+## Como usar em 3 cliques
+
+Com o app aberto (`npm run dev` → http://localhost:3000):
+
+1. **Escolha um mockup.** Clique em qualquer imagem do grid. Abre um painel à direita
+   com ele.
+2. **Solte sua arte.** Arraste seu PNG na prévia do painel, ou clique nela para
+   procurar no computador. O tamanho certo em pixels está escrito no cabeçalho
+   "Sua arte" — é o número para desenhar antes de voltar.
+3. **Gere e baixe.** Botão **Gerar PNG**, espera o render, **Baixar PNG**.
+
+É isso. Se o mockup tiver mais de uma face (um mural de pôsteres, por exemplo), cada
+face vira um slot na lista e você repete o passo 2 em cada uma.
+
+O mesmo tutorial mora dentro do app: abre sozinho na primeira visita e depois fica no
+botão **?** do topo.
+
+**Tem uma foto sua em vez de um PSD?** `/photo-mockup` (o *Scene Maker*) detecta a
+superfície anunciante na foto e coloca a arte por cima — sem Photoshop e sem PSD.
+
 ## Rodando
 
 ```bash

@@ -69,6 +69,7 @@ import { Dialog, DialogContent, DialogClose } from "@/components/ui/Dialog";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { SmartObjectList } from "@/components/mockup/SmartObjectList";
 import { PsdDetails } from "@/components/mockup/PsdDetails";
+import { ComoUsar } from "@/components/ComoUsar";
 import type { Face, PsdInfo, ArtSlot } from "@/components/mockup/types";
 import { Switch } from "@/components/ui/Switch";
 import { useContainerColumns } from "@/hooks/use-container-columns";
@@ -2634,6 +2635,8 @@ export default function Home() {
             <Camera className="w-3.5 h-3.5 shrink-0" />
             <span className="hidden lg:inline">Scene Maker</span>
           </Link>
+
+          <ComoUsar />
 
           {/* O header não cabia numa janela estreita: a raiz é `overflow-hidden`,
               então nada rolava — o campo de busca simplesmente saía da tela e
