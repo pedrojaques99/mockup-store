@@ -65,3 +65,7 @@ bun.lock
 
 # Build de produção isolado (NEXT_DIST_DIR) — medir perf sem brigar pelo .next do dev
 .next-prod/
+
+# catalogo local e seed (cada maquina tem o seu)
+data/catalog.sqlite*
+data/catalog-seed.json.gz

@@ -35,7 +35,10 @@
     "visual:drawer": "tsx scripts/drawer-visual-check.ts",
     "check:render-failure": "tsx scripts/render-failure-check.ts",
     "check:render-ab": "tsx scripts/render-ab.ts",
-    "visual:scene": "tsx scripts/scene-visual-check.ts"
+    "visual:scene": "tsx scripts/scene-visual-check.ts",
+    "seed:export": "tsx --env-file-if-exists=.env.local scripts/catalog-seed.ts export",
+    "seed:import": "tsx --env-file-if-exists=.env.local scripts/catalog-seed.ts import",
+    "seed:status": "tsx --env-file-if-exists=.env.local scripts/catalog-seed.ts status"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
@@ -82,7 +85,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^22.20.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

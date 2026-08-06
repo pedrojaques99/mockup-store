@@ -1,32 +1,43 @@
 import { MongoClient, Db } from "mongodb";
+import { bancoLocal } from "./store-sqlite";
 
 let client: MongoClient;
 let db: Db;
 
 /**
- * Conecta no Mongo. Falha CEDO e com nome próprio: sem as variáveis, o
- * `new MongoClient(undefined)` estourava lá dentro do driver com uma mensagem
- * que não dizia o que fazer. Quem chama isto sabe tratar (`search-index.ts`
- * engole e cai para o catálogo de disco); quem não trata devolve 500, mas
- * agora com o motivo escrito.
+ * Qual driver está valendo nesta máquina.
+ *
+ * `mongo` quando as duas variáveis existem (o operador pediu explicitamente);
+ * `local` no resto — que é o caso do usuário que baixou o app.
+ */
+export function driverAtivo(): "mongo" | "local" {
+  const uri = (process.env.MONGODB_URI ?? "").trim();
+  const nome = (process.env.MONGODB_DB_NAME ?? "").trim();
+  return uri && nome ? "mongo" : "local";
+}
+
+/**
+ * O catálogo. **SQLite local por padrão, Mongo quando configurado.**
+ *
+ * Antes isto era só Mongo e estourava sem ele — o que fazia ingest e publicar
+ * responderem 500 numa máquina sem cluster. Medido: sem `MONGODB_URI`, com 112
+ * PSDs no `PSD_DIRS`, o catálogo devolvia 134 itens e **nenhum PSD**. O acervo
+ * de quem baixou o app não aparecia, e era esse o bloqueio para o produto ser
+ * público.
+ *
+ * O tipo de retorno continua `Db` porque os 9 chamadores falam a fatia comum
+ * (`collection().find/findOne/insertOne/updateOne`); o driver local implementa
+ * exatamente essa fatia e **estoura com nome** no que não cobre — nunca devolve
+ * resultado errado calado. Ver `store-sqlite.ts`.
  */
 export async function getDb(): Promise<Db> {
-  if (db) return db;
-  const uri = process.env.MONGODB_URI;
-  const dbName = process.env.MONGODB_DB_NAME;
-  const faltando = [
-    !uri && "MONGODB_URI",
-    !dbName && "MONGODB_DB_NAME",
-  ].filter(Boolean);
-  if (faltando.length) {
-    throw new Error(
-      `Mongo não configurado: falta ${faltando.join(" e ")} no .env.local. ` +
-        `Veja .env.example — sem Mongo o catálogo funciona só com o disco.`,
-    );
+  if (driverAtivo() === "local") {
+    return bancoLocal() as unknown as Db;
   }
-  client = new MongoClient(uri!);
+  if (db) return db;
+  client = new MongoClient(process.env.MONGODB_URI!);
   await client.connect();
-  db = client.db(dbName!);
+  db = client.db(process.env.MONGODB_DB_NAME!);
   return db;
 }
 

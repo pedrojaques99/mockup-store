@@ -24,6 +24,7 @@ import { logQuery, getBoostFn } from "./search-telemetry";
 import { getHidden } from "./hidden-store";
 import { semanticRank } from "./semantic-index";
 import { filtrarPsdsSumidos } from "./psd-presence";
+import { resolver as resolverCaminho } from "./psd-roots";
 
 export { aspectBucket, type SearchDoc, type SearchQuery, type Facets, type AspectBucket } from "./search-engine";
 
@@ -135,7 +136,19 @@ async function fetchMongoDocs(): Promise<SearchDoc[]> {
       .toArray();
 
     return rows.map((ref) => {
-      let psdPath = ref.psdPath as string | undefined;
+      /**
+       * O caminho gravado pode estar em três formatos, e todos precisam
+       * funcionar na mesma leitura:
+       *  - portátil (`{acervo}/…`), vindo do seed — resolve pela pasta desta máquina;
+       *  - absoluto desta máquina, o legado — passa direto;
+       *  - absoluto de OUTRA máquina, também legado — o arquivo não sumiu, mudou
+       *    de letra, e a busca por nome dentro das raízes locais o reencontra
+       *    (mesma rede do `psd:repoint`, aqui só como leitura).
+       */
+      let psdPath = resolverCaminho(ref.psdPath as string | undefined, (nome) => {
+        const achado = findPsdForRef(nome, ref.studio as string);
+        return achado?.path;
+      });
       let psdFileName = ref.psdFileName as string | undefined;
       let psdSizeBytes: number | undefined;
       if (!psdPath) {
