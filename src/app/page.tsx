@@ -70,6 +70,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { SmartObjectList } from "@/components/mockup/SmartObjectList";
 import { PsdDetails } from "@/components/mockup/PsdDetails";
 import { ComoUsar } from "@/components/ComoUsar";
+import { Atualizar } from "@/components/Atualizar";
 import { ConfigPanel } from "@/components/ConfigPanel";
 import type { Face, PsdInfo, ArtSlot } from "@/components/mockup/types";
 import { Switch } from "@/components/ui/Switch";
@@ -3145,6 +3146,12 @@ export default function Home() {
         {/* Main Area: Grid */}
         <Panel className="relative flex flex-col bg-neutral-950 min-w-0 overflow-hidden">
           <main ref={gridScrollRef} className="flex-1 overflow-y-auto p-8 no-scrollbar">
+            {/* Some sozinho quando nao ha atualizacao: selo permanente vira
+                ruido, e ai a pessoa ignora tambem quando importa. */}
+            <div className="mb-6 empty:mb-0">
+              <Atualizar />
+            </div>
+
             {brandId && !suggestionsOpen && (
               <button
                 onClick={() => setSuggestionsOpen(true)}
