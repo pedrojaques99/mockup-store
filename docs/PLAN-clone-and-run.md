@@ -151,7 +151,7 @@ repo, **sem `.env.local`, sem `data/`, sem Mongo, sem chave, sem `Z:/`**), com o
 
 | Item | Estado | Prova |
 |---|---|---|
-| B0 `psd-engine` | ⏳ **falta você publicar** | comandos acima; é a única pendência |
+| B0 `psd-engine` | ✅ `0.2.0` no npm, link fora do lockfile, portão no CI | clone limpo em `C:/Temp`: `npm ci` + `tsc` 0 + 459 testes + `next build` |
 | B1 `tsx` | ✅ vira devDependency; scripts passam a chamá-lo direto | `npm run setup` roda |
 | B2 CI não exercitava | ✅ job `clone-and-run` novo, nos 3 SOs | `.github/workflows/ci.yml` |
 | B3 README | ✅ reescrito | `README.md` |
