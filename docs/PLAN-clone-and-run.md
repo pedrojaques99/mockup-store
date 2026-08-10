@@ -28,7 +28,22 @@ O README só explica o que o CI já provou.
 
 > **B0 é o bloqueio que anula todos os outros. Sem ele resolvido, o resto é decoração.**
 
-#### B0 — `@visant/psd-engine` é um link para uma pasta fora do repo
+#### B0 — `@visant/psd-engine` é um link para uma pasta fora do repo — ✅ RESOLVIDO em 10/08/2026
+
+> `@visant/psd-engine@0.2.0` está publicado (npm, MIT, `pejaques`) e o `package.json`
+> daqui pede `^0.2.0`. `grep Cursor/visantlabs-os package-lock.json` dá **zero**, e o CI
+> ganhou um passo que falha se o caminho local voltar. Os dois jobs perderam o clone do
+> `visantlabs-os` — não existe mais repositório irmão no caminho crítico.
+>
+> Medido depois da troca: `tsc --noEmit` 0 erros, 459 testes em 40 arquivos passando.
+>
+> ⚠️ O que a 0.2.0 carrega além dos exports: a correção da **cena lavada**. O
+> `extractScene` perdia a pilha de ajuste (grupo `FX` em `pass through` virava um `over`
+> chapado), e agora adjustment layer vira `role: 'adjust'` com LUT, aplicado em ordem de
+> documento. Isso muda o comportamento de `/scene` e `/api/scene/extract` — ver
+> `scene-fidelity` antes de assumir que os números antigos valem.
+>
+> O diagnóstico abaixo fica como registro do que o defeito era.
 
 `package.json:28` declara `"@visant/psd-engine": "^0.1.0"`, mas o lockfile revela o que
 isso é de verdade (`package-lock.json:5009-5012`):

@@ -25,27 +25,16 @@ jobs:
           node-version: 22
           cache: npm
 
-      # `@visant/psd-engine` é um LINK LOCAL no lockfile
-      # (`../../Cursor/visantlabs-os/packages/psd-engine`): existe na máquina do autor e não
-      # no runner. O sintoma nunca foi falha de install — o `npm ci` passava e deixava um
-      # symlink pendurado — era o `tsc` explodindo em 26 erros, 20 deles cascata de
-      # `implicitly any` porque o módulo tipado tinha sumido. CI vermelho em 5 runs
-      # seguidas, o que é o mesmo que não ter CI.
+      # Aqui existia um passo que clonava o `visantlabs-os` para o caminho
+      # `../../Cursor/visantlabs-os`, porque `@visant/psd-engine` era um LINK LOCAL no
+      # lockfile: existia na máquina do autor e não no runner. O sintoma nunca foi falha de
+      # install — o `npm ci` passava e deixava um symlink pendurado — era o `tsc` explodindo
+      # em 26 erros, 20 deles cascata de `implicitly any` porque o módulo tipado tinha
+      # sumido. O pacote agora vem do registry (`^0.2.0`) e o passo saiu.
       #
-      # O repo do pacote é público e ele não tem dependência de runtime: basta clonar no
-      # caminho que o lockfile já espera, e o próprio `npm ci` compila o `dist` (que é
-      # gitignored) pelo script de build do pacote. Nada aqui muda como alguém instala na
-      # própria máquina.
-      - name: psd-engine (o link local que o lockfile espera)
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/pedrojaques99/visantlabs-os.git ../../Cursor/visantlabs-os
-          # O `npm ci` daqui a pouco vai rodar o `build` do pacote linkado, e esse build
-          # importa `canvas` (que traz os proprios tipos) e precisa do `typescript`. Os dois
-          # entram no clone, e so eles: instalar o monorepo inteiro custaria minutos por um
-          # pacote que nao tem dependencia de runtime. `--ignore-scripts` porque o `canvas`
-          # e nativo e aqui so os tipos importam.
-          npm install --prefix ../../Cursor/visantlabs-os --ignore-scripts --no-audit --no-fund --no-save --legacy-peer-deps canvas typescript
+      # ⚠️ Se o link voltar ao lockfile (um `npm link` distraído resolve isso), o CI fica
+      # vermelho de novo e o clone público volta a não instalar. `grep Cursor/visantlabs-os
+      # package-lock.json` tem que dar zero.
 
       # .npmrc já tem legacy-peer-deps=true (conflito ag-psd 30 vs peer ^28, aceito de propósito).
       - name: Install
@@ -90,22 +79,24 @@ jobs:
           node-version: 22
           cache: npm
 
-      # Mesmo motivo do job `verify`: o lockfile aponta o psd-engine para um caminho da
-      # máquina do autor. Aqui o efeito era outro e pior de diagnosticar — o `npm run build`
-      # do Next quebrando nos três sistemas operacionais.
-      - name: psd-engine (o link local que o lockfile espera)
-        shell: bash
-        run: |
-          git clone --depth 1 https://github.com/pedrojaques99/visantlabs-os.git ../../Cursor/visantlabs-os
-          # O `npm ci` daqui a pouco vai rodar o `build` do pacote linkado, e esse build
-          # importa `canvas` (que traz os proprios tipos) e precisa do `typescript`. Os dois
-          # entram no clone, e so eles: instalar o monorepo inteiro custaria minutos por um
-          # pacote que nao tem dependencia de runtime. `--ignore-scripts` porque o `canvas`
-          # e nativo e aqui so os tipos importam.
-          npm install --prefix ../../Cursor/visantlabs-os --ignore-scripts --no-audit --no-fund --no-save --legacy-peer-deps canvas typescript
+      # Aqui também existia o clone do `visantlabs-os` (mesmo motivo do job `verify`). O
+      # efeito do link neste job era outro e pior de diagnosticar: o `npm run build` do Next
+      # quebrando nos três sistemas operacionais. Com o pacote vindo do registry, este job
+      # volta a ser o que promete — um clone limpo, e só.
 
       - name: Install
         run: npm ci
+
+      # O portão que impede o link local de voltar. Um `npm link` distraído no
+      # psd-engine reescreve o lockfile com o caminho da máquina do autor, e ninguém
+      # percebe até o próximo clone público não instalar.
+      - name: Nenhum caminho local no lockfile
+        shell: bash
+        run: |
+          if grep -q "Cursor/visantlabs-os" package-lock.json; then
+            echo "::error::package-lock.json voltou a apontar para uma pasta local. Rode: npm install @visant/psd-engine@latest"
+            exit 1
+          fi
 
       # Sem nenhuma variável de ambiente — é exatamente o caso do dev novo.
       - name: Setup
