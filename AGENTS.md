@@ -291,13 +291,36 @@ bun scripts/scene-fidelity.ts --amostra 6      # ou --psd "<arquivo>"
 Compara as duas pipelines com a mesma arte e mede pixel a pixel:
 `composePsd` (produção) vs `extractScene → renderScene` (o Scene Package).
 
-**Resultado em 05/08/2026: 0 de 6 pixel-perfect.** Divergência de 164–229/255 em
-~100% dos pixels, e a assinatura é sempre a mesma: o render pela cena sai
-**lavado** (preto vira cinza, contraste e saturação somem). O `extractScene`
-achata o PSD em `base`+`over` e perde a pilha de ajuste (Levels/Curves, grupo FX
-em `pass through`). Em 5 dos 6 **a extração não avisou nada** — falha calada.
+**Resultado em 10/08/2026: 0 de 6 pixel-perfect** — mas o número mudou de
+significado, e boa parte do "0 de 6" antigo era defeito DO HARNESS. Três
+mentiras foram removidas antes de sobrar medição:
 
-- Por isso o pack sobe **PSD** (14,7 GB) e não cena (seria 6x menor).
+1. **O harness preenchia o slot com `face.name`** (o rótulo de UI). O
+   `resolveSoTarget` não acha, cai no fallback "maior SO do documento" e a arte
+   pinta o cenário. O lado "verdade" saía quebrado: `Double Cards Stack` dava
+   98,18% e quem estava CERTO era a cena. Agora usa `face.smartObject`, pela
+   mesma conta da produção (`scanPsd` + `computeFaces`).
+2. **O `render-cli` somava um slot default** ao `--slot` explícito, jogando arte
+   no fundo além das faces pedidas. Só entra quando ninguém disse a camada.
+3. **O harness era surdo**: lia só o stdout, e os avisos saem por `console.warn`
+   (stderr). O "5 dos 6 não avisaram nada" era isso.
+
+O que sobra, medido com a régua consertada: `Coffee Paper Cups` 11,7% ·
+`Capa CD` 21,5% · `Double Cards Stack` 32,7% · `boxes_scene_3_bg` 39,9% ·
+`paper-ghetto` 92,1%. A causa **não** é mais só o "lavado" — o `pass through` e
+os adjustment layers foram corrigidos no engine 0.2.0. As causas vivas:
+
+- **Decoração dentro do container da face** (o `extract.ts` afirmava que o
+  template BOXY não faz isso; medido, **5 de 5 fazem**): `Shadow`/`Light` dentro
+  do grupo, ou como camadas CLIP. Desde a 0.2.1 isso vira **warning nomeando as
+  camadas** — recompor (blend + clipping + máscara de grupo) está pendente.
+- **Enquadramento da arte na face** difere entre as duas pipelines: no
+  `Coffee Paper Cups` o diff é 100% em cima dos copos e ZERO no cenário, com a
+  arte em escala diferente. Não é luz, é geometria.
+- `adjustment` que o `buildAdjustmentLut` não conhece (vibrance) — avisa.
+
+- Por isso o pack continua subindo **PSD** (14,7 GB) e não cena (seria 5,4x
+  menor: 614 MB de PSD viraram 113 MB de cena na amostra).
   `catalog.json` já reserva `sceneUrl` pra trocar sem mexer no cliente.
 - Consequência viva: `/scene` e `/api/scene/extract` usam esse caminho e
   entregam render lavado hoje. É página de laboratório, não linkada no app.

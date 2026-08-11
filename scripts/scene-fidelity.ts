@@ -26,7 +26,9 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync, readdirSync } from "fs";
 import { join, basename, dirname } from "path";
-import { execFileSync } from "child_process";
+import { spawnSync } from "child_process";
+import { computeFaces } from "@visant/psd-engine";
+import { scanPsd } from "../src/lib/psd-scan";
 
 const arg = (nome: string, padrao = "") => {
   const i = process.argv.indexOf(`--${nome}`);
@@ -79,6 +81,25 @@ async function arteDiagnostica(w: number, h: number, out: string) {
   }
 
   writeFileSync(out, cv.toBuffer("image/png"));
+}
+
+// ----------------------------------------------------------------------- faces
+
+/**
+ * As faces editáveis do PSD, pela MESMA conta da produção: `scanPsd` lista os
+ * smart objects e o `computeFaces` do engine agrupa por `linkId`.
+ *
+ * Existe para dar o `smartObject` de cada face — que é o que o render espera no
+ * slot. O `scene.json` não serve aqui: o `SceneFace` carrega `key` (linkId) e
+ * `name` (rótulo de UI), e nenhum dos dois identifica a camada pro
+ * `resolveSoTarget`.
+ */
+function facesDoPsd(psdPath: string): Array<{ name: string; smartObject: string }> {
+  const meta = scanPsd(psdPath);
+  if (!meta) throw new Error("scanPsd não conseguiu ler o PSD");
+  const faces = computeFaces(meta.smartObjects || []);
+  if (!faces.length) throw new Error("nenhuma face editável encontrada");
+  return faces.map((f) => ({ name: f.name, smartObject: f.smartObject }));
 }
 
 // ------------------------------------------------------------------- diferença
@@ -180,8 +201,19 @@ async function avaliar(psdPath: string): Promise<Veredito> {
   const arte = join(dir, "arte.png");
   await arteDiagnostica(2048, 2048, arte);
 
-  const bun = (script: string, args: string[]) =>
-    execFileSync("bun", [script, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 600_000 });
+  /**
+   * stdout **e** stderr. O `execFileSync` devolve só o stdout, e o
+   * `extract-scene` imprime os avisos com `console.warn` — ou seja, em stderr.
+   * O relatório antigo dizia "5 de 6 sem aviso nenhum" e isso era o harness
+   * surdo, não a extração calada: rodando o mesmo PSD na mão, os avisos estavam
+   * lá. Portão que não escuta o aviso vira portão que aprova.
+   */
+  const bun = (script: string, args: string[]) => {
+    const r = spawnSync("bun", [script, ...args], { encoding: "utf8", timeout: 600_000 });
+    const saida = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
+    if (r.status !== 0) throw new Error(saida.trim().split("\n").slice(-3).join(" | "));
+    return saida;
+  };
 
   // A extração vem PRIMEIRO porque ela é quem lista as faces. Sem isso o lado do
   // PSD preenchia só a face default do `resolveSoTarget` enquanto a cena
@@ -190,24 +222,30 @@ async function avaliar(psdPath: string): Promise<Veredito> {
   const cenasDir = join(dir, "cena");
   rmSync(cenasDir, { recursive: true, force: true });
   let sceneId = "";
-  let faces: Array<{ key: string; name: string }> = [];
   try {
     const log = bun("scripts/extract-scene.ts", ["--psd", psdPath, "--out", cenasDir]);
     v.avisosExtracao = [...log.matchAll(/⚠\s*(.+)/g)].map((m) => m[1].trim());
     sceneId = (log.match(/Scene ID:\s*(\w+)/) ?? [])[1] ?? "";
     if (!sceneId) throw new Error("extract-scene não devolveu Scene ID");
     v.tamanhoCenaMb = tamanhoPasta(join(cenasDir, sceneId));
-    const doc = JSON.parse(readFileSync(join(cenasDir, sceneId, "scene.json"), "utf8"));
-    faces = (doc.doc?.faces ?? []).map((f: { key: string; name: string }) => ({ key: f.key, name: f.name }));
   } catch (e) {
     v.motivo = "extração da cena falhou: " + String((e as Error).message).split("\n")[0];
     return v;
   }
 
   // A) PSD → composePsd (a produção de hoje), com TODAS as faces preenchidas.
+  //
+  // ⚠️ O slot é `face.smartObject` — o path único do representante —, NUNCA
+  // `face.name`. `name` é rótulo curto de UI ("Frente", "Arte") e o
+  // `resolveSoTarget` cai no fallback "maior SO do documento": a arte pinta o
+  // cenário inteiro e a face fica com o placeholder. Foi exatamente o que este
+  // harness fazia, e ele culpava a CENA pela divergência: em `Double Cards
+  // Stack` o lado "verdade" saía quebrado (98,18% dos pixels divergindo) e o
+  // lado da cena estava certo. Comparação com baseline errada mede o harness.
   const outPsd = join(dir, "psd.png");
   try {
-    const slots = faces.flatMap((f) => ["--slot", `${f.name}::${arte}`]);
+    const faces = facesDoPsd(psdPath);
+    const slots = faces.flatMap((f) => ["--slot", `${f.smartObject}::${arte}`]);
     bun("scripts/render-cli.ts", [psdPath, arte, outPsd, ...slots]);
   } catch (e) {
     v.motivo = "render pelo PSD falhou: " + String((e as Error).message).split("\n")[0];

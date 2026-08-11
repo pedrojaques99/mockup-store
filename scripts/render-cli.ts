@@ -58,7 +58,15 @@ await preloadDisplacementMaps(
 const smartObjects = allLayers.filter((l: any) => l.placedLayer);
 step(`SOs: ${smartObjects.map((l: any) => `"${l.name}"${l.hidden ? "(hidden)" : ""}`).join(", ")}`);
 
-const slots = [{ so: soNameArg || "Your design", art: artPath }, ...extraSlots];
+// O slot default ("Your design") só entra quando NINGUÉM disse em qual camada a
+// arte vai. Somado a `--slot` explícito ele era arte a mais: sem `soNameArg`, o
+// `resolveSoTarget` não acha "Your design", cai no fallback "maior SO do
+// documento" — o FUNDO — e a arte pinta o cenário inteiro por cima da cena, além
+// das faces pedidas. Media-se isso como divergência da cena; o defeito era aqui.
+const slots =
+  extraSlots.length && !soNameArg
+    ? extraSlots
+    : [{ so: soNameArg || "Your design", art: artPath }, ...extraSlots];
 const replacedNames = new Set<string>();
 for (const slot of slots) {
   const artImg = await loadImage(readFileSync(resolve(slot.art)));
