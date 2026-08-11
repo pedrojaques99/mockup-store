@@ -305,9 +305,15 @@ mentiras foram removidas antes de sobrar medição:
 3. **O harness era surdo**: lia só o stdout, e os avisos saem por `console.warn`
    (stderr). O "5 dos 6 não avisaram nada" era isso.
 
-Com a régua consertada e o recorte funcionando (engine 0.2.2):
-`Coffee Paper Cups` **2,94%** · `Capa CD` 9,87% · `Double Cards Stack` 32,71% ·
-`boxes_scene_3_bg` 32,71% · `paper-ghetto` 92,07%.
+Estado em 11/08/2026 (engine 0.2.3), % de pixels divergindo, e de onde vieram:
+
+| PSD | régua quebrada | 0.2.2 | **0.2.3** |
+|---|---|---|---|
+| Coffee Paper Cups | 11,71% | 2,94% | **2,94%** |
+| Capa CD | 21,50% | 9,87% | **9,87%** |
+| Double Cards Stack | 32,71% | 32,71% | **11,54%** |
+| boxes_scene_3_bg | 39,90% | 32,71% | **17,79%** |
+| paper-ghetto | 92,07% | 92,07% | **29,41%** |
 
 O "lavado" morreu na 0.2.0 (pass through + adjustment layers). O que derrubou o
 Coffee de 11,71% para 2,94% foi a **camada de recorte**, com três defeitos
@@ -330,14 +336,26 @@ defeitos passavam por qualquer inspeção do `scene.json`: a camada estava lá, 
 blend e opacity certos. Desde a 0.2.2 existe guarda — camada que achata 100%
 transparente vira warning.
 
-As três causas que sobram, cada uma isolada num arquivo da amostra:
-- **`Double Cards Stack`**: decoração dentro de um grupo **com máscara** (que não
-  é recorte) — o container é consumido inteiro e leva `Shadow`/`Light` junto.
-  Avisa desde a 0.2.1; recompor é o trabalho que falta.
-- **`boxes_scene_3_bg`**: a sombra é `linear burn`, que o Canvas 2D não tem — o
-  `BLEND_MAP` aproxima por `color-burn`. Só sai no braço, em pixel.
-- **`paper-ghetto`**: `vibrance` fora do `buildAdjustmentLut` (avisa) + um
-  `Mockup Overlay` dentro do container.
+A 0.2.3 fechou outras duas, e o padrão das duas é o mesmo: **a cena fazia menos
+do que o compositor já fazia.**
+
+- **Decoração dentro do container da face** era descartada com o grupo. Agora
+  cada `Shadow`/`Light` irmão da arte vira `over`, com a máscara do grupo
+  convertida para alpha. ⚠️ A máscara do ag-psd é **cinza opaco** (alpha 255 em
+  todo lugar) e mora num retângulo com **offset** — usá-la crua mantinha tudo
+  visível, e desenhá-la em 0,0 esticada deslocava o recorte inteiro.
+- **Blend sem equivalente no Canvas 2D** (`linear burn`, `linear light`,
+  `vivid light`, `divide`…): o compositor SEMPRE resolveu no pixel
+  (`PIXEL_BLEND_SET` + `pixelBlendMode`) e o `renderScene` usava só a
+  aproximação de CSS do `BLEND_MAP`. As duas funções são exportadas e o
+  `renderScene` chama as MESMAS — nada reimplementado. Sozinho, isso levou o
+  `paper-ghetto` de 92,07% para 29,41%.
+
+O que ainda separa a cena do PSD:
+- `vibrance` (e `exposure`, `hue/sat`, `color balance`) fora do
+  `buildAdjustmentLut` — avisa, não aplica.
+- o resíduo do `Coffee` (2,94%, máx 57) está na BORDA das faces: é
+  antisserrilhado do recorte contra a silhueta, não erro de tom.
 
 - Por isso o pack continua subindo **PSD** (14,7 GB) e não cena (seria 5,4x
   menor: 614 MB de PSD viraram 113 MB de cena na amostra).
