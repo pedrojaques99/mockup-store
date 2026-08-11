@@ -42,7 +42,8 @@
     "check:offline": "node scripts/offline-gate.mjs",
     "seed:publish": "tsx --env-file-if-exists=.env.local scripts/catalog-seed.ts publish",
     "seed:fetch": "tsx --env-file-if-exists=.env.local scripts/catalog-seed.ts fetch",
-    "update": "tsx scripts/update.ts"
+    "update": "tsx scripts/update.ts",
+    "check:colors": "tsx scripts/check-color-slots.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",

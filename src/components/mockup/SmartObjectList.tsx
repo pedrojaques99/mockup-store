@@ -17,6 +17,7 @@
  * PSD antigo do acervo não tem `path`, mas a ordem importa.
  */
 import { Layers, ChevronDown, Image as ImageIcon } from "lucide-react";
+import { ColorPicker } from "@/components/ui/ColorPicker";
 import type { PsdInfo, Face, ArtSlot } from "./types";
 
 export interface SmartObjectListProps {
@@ -30,6 +31,9 @@ export interface SmartObjectListProps {
   onSelectFace: (faceIdx: number, smartObject: string) => void;
   /** Clique na miniatura. `temArte` decide entre focar o slot e pedir o arquivo. */
   onPickArt: (faceIdx: number, temArte: boolean) => void;
+  /** Cor escolhida por camada — `{ [path]: "#rrggbb" }`. Ausente = a do arquivo. */
+  colors: Record<string, string>;
+  onColorChange: (path: string, hex: string | null) => void;
 }
 
 export function SmartObjectList({
@@ -41,8 +45,16 @@ export function SmartObjectList({
   onAbertoChange,
   onSelectFace,
   onPickArt,
+  colors,
+  onColorChange,
 }: SmartObjectListProps) {
-  if (!psdInfo || psdInfo.smartObjects.length <= 1) return null;
+  const cores = psdInfo?.colorSlots ?? [];
+  // Some junto com a lista de faces, mas volta sozinho quando o PSD tem UMA
+  // face e cores editáveis — aí não há escolha de face a fazer e ainda há o que
+  // ajustar. Sumir com a cor por causa da contagem de smart objects seria
+  // esconder função por um motivo que não é dela.
+  if (!psdInfo || (psdInfo.smartObjects.length <= 1 && cores.length === 0)) return null;
+  const soMostraCor = psdInfo.smartObjects.length <= 1;
 
   return (
     <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl overflow-hidden">
@@ -53,14 +65,14 @@ export function SmartObjectList({
       >
         <div className="flex items-center gap-2 text-neutral-300">
           <Layers className="w-3.5 h-3.5 text-neutral-500" />
-          Smart Objects ({psdInfo.smartObjects.length})
+          {soMostraCor ? `Cores (${cores.length})` : `Smart Objects (${psdInfo.smartObjects.length})`}
         </div>
         <ChevronDown className={`w-4 h-4 transition-transform [transition-duration:var(--dur-slow)] ${aberto ? "" : "-rotate-90"}`} />
       </button>
 
       {aberto && (
-        <div className="border-t border-neutral-800 overflow-y-auto max-h-60 no-scrollbar">
-          {psdInfo.smartObjects.map((so, i) => {
+        <div className="border-t border-neutral-800 overflow-y-auto max-h-72 no-scrollbar">
+          {!soMostraCor && psdInfo.smartObjects.map((so, i) => {
             const alvo = so.path || so.name;
             const faceIdx = faces.findIndex((f) => f.smartObject === alvo || f.name === so.name);
             const isFace = faceIdx >= 0;
@@ -108,6 +120,51 @@ export function SmartObjectList({
               </div>
             );
           })}
+
+        </div>
+      )}
+
+      {/* Cores FORA da caixa de rolagem dos smart objects — de propósito.
+          Dentro dela, num PSD com 7 SOs, o seletor nascia abaixo da dobra de um
+          scroll de 288px: existia no DOM e não existia para o usuário. Aqui ele
+          fica sempre visível enquanto a seção está aberta, encostado na seção de
+          arte, que é onde a decisão de cor acontece. */}
+      {aberto && cores.length > 0 && (
+        <div className={soMostraCor ? "" : "border-t border-neutral-800"}>
+          {!soMostraCor && (
+            <div className="px-3 pt-2.5 pb-1 text-[9px] font-medium text-neutral-500 uppercase tracking-wide">
+              Cores ({cores.length})
+            </div>
+          )}
+          {cores.map((c) => {
+                const atual = colors[c.path] ?? c.hex;
+                const mudou = atual.toLowerCase() !== c.hex.toLowerCase();
+                return (
+                  <div
+                    key={c.path}
+                    className="flex items-center gap-3 px-3 py-2.5 border-b border-neutral-900/70 last:border-b-0 select-none"
+                  >
+                    <div
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${mudou ? "bg-white" : "bg-neutral-600"}`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-[11px] font-bold truncate ${mudou ? "text-white" : "text-neutral-300"}`}>
+                        {c.name}
+                      </p>
+                      <p className="text-[9px] text-neutral-500 truncate">
+                        {c.hidden ? "oculta no arquivo · " : ""}
+                        {c.blendMode}
+                        {c.opacity < 1 ? ` · ${Math.round(c.opacity * 100)}%` : ""}
+                      </p>
+                    </div>
+                    <ColorPicker
+                      value={atual}
+                      onChange={(cor) => onColorChange(c.path, cor)}
+                      swatches={[{ valor: c.hex, titulo: `Original do arquivo (${c.hex})` }]}
+                    />
+                  </div>
+                );
+              })}
         </div>
       )}
     </div>

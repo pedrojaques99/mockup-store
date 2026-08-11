@@ -17,6 +17,7 @@ import {
   resolveSoTarget,
   createBrowserFsCallbacks,
   applyHideRules,
+  applyColorOverrides,
 } from "@visant/psd-engine";
 
 export type ArtSlot = { smartObject?: string; artBase64: string };
@@ -26,6 +27,8 @@ export interface RenderRequest {
   psdPath: string;
   arts: ArtSlot[];
   hideLayers?: string[];
+  /** Cor sólida por camada: { [path]: "#rrggbb" }. */
+  colors?: Record<string, string>;
 }
 
 export interface RenderResponse {
@@ -54,7 +57,7 @@ const browserFs = createBrowserFsCallbacks(psdFetcher);
 let currentId = -1;
 
 self.onmessage = async (e: MessageEvent<RenderRequest>) => {
-  const { id, psdPath, arts, hideLayers = [] } = e.data;
+  const { id, psdPath, arts, hideLayers = [], colors } = e.data;
   currentId = id;
 
   try {
@@ -68,6 +71,12 @@ self.onmessage = async (e: MessageEvent<RenderRequest>) => {
 
     const psd = agPsd.readPsd(psdBuffer, { skipThumbnail: true });
     const allLayers = flattenLayers((psd as any).children ?? []);
+
+    // Cor sólida ANTES de compor — a prévia precisa mostrar a mesma coisa que o
+    // render final, senão o usuário escolhe a cor num lugar e descobre no outro.
+    if (colors && Object.keys(colors).length) {
+      applyColorOverrides(allLayers, colors, createCanvas as any);
+    }
 
     await preloadDisplacementMaps(
       allLayers,

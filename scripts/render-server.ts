@@ -9,6 +9,7 @@ import {
   resolveSoTarget,
   preloadDisplacementMaps,
   applyHideRules,
+  applyColorOverrides,
 } from "@visant/psd-engine";
 
 const PORT = parseInt(process.env.RENDER_PORT || "4200");
@@ -134,6 +135,23 @@ async function handleJob(json: string, socket: import("net").Socket) {
         ? `${smartObjects.length}: ${smartObjects.map((l: any) => `"${l.name}"`).join(", ")}`
         : "0 — will try name-based detection"
     );
+
+    // 3.5. Cor sólida: repinta as fill layers pedidas ANTES de compor.
+    // `colors` é { [path ou nome da camada]: "#rrggbb" } — o que o
+    // `computeColorSlots` lista em /api/psd-info. Camada pedida que não existe
+    // no arquivo VIRA AVISO: renderizar com a cor velha e não dizer nada é o
+    // caminho mais rápido pro usuário achar que a UI não funciona.
+    const cores = (job.colors ?? {}) as Record<string, string>;
+    const pedidas = Object.keys(cores);
+    if (pedidas.length) {
+      const aplicadas = applyColorOverrides(allLayers, cores, createCanvas as any);
+      sendProgress(socket, "colors_applied", `${aplicadas.length}/${pedidas.length}: ${aplicadas.join(", ")}`);
+      for (const p of pedidas) {
+        if (!aplicadas.includes(p)) {
+          sendProgress(socket, "warning", `camada de cor "${p}" não existe neste PSD — ignorada`);
+        }
+      }
+    }
 
     await preloadDisplacementMaps(
       allLayers, psdPath, createCanvas as any,

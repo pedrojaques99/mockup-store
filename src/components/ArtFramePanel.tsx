@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { Crop, Shrink, Scaling, X, SlidersHorizontal } from "lucide-react";
 import Cropper from "react-easy-crop";
 import type { Area } from "react-easy-crop";
+import { ColorPicker } from "@/components/ui/ColorPicker";
 import { IconSegmented } from "@/components/ui/IconSegmented";
 import { dec } from "@/lib/utils";
 import {
@@ -318,30 +319,17 @@ export default function ArtFramePanel({
       </div>
 
       {/* Fundo da arte — pra logo/PNG transparente: preenche atrás (tira o rosa). */}
-      <div className="flex items-center gap-2 pt-1.5 mt-0.5 border-t border-zinc-800/60">
-        <span className="text-[10px] text-zinc-500 shrink-0">Fundo</span>
-        <div className="flex items-center gap-1.5">
-          {([
-            { v: null, title: "Transparente (mostra o placeholder)", style: { backgroundImage: "linear-gradient(45deg,#555 25%,transparent 25%,transparent 75%,#555 75%),linear-gradient(45deg,#555 25%,#222 25%,#222 75%,#555 75%)", backgroundSize: "6px 6px", backgroundPosition: "0 0,3px 3px" } as React.CSSProperties },
-            { v: "#ffffff", title: "Branco", style: { background: "#fff" } },
-            { v: "#000000", title: "Preto", style: { background: "#000" } },
-          ] as const).map((o) => {
-            const on = (frame.bg ?? null) === o.v;
-            return (
-              <button key={String(o.v)} type="button" title={o.title}
-                onClick={() => onFrameChange((f) => ({ ...f, bg: o.v }))}
-                className={`w-5 h-5 rounded-full border transition-ui ${on ? "ring-2 ring-acc2 border-acc2" : "border-zinc-700 hover:border-zinc-500"}`}
-                style={o.style} />
-            );
-          })}
-          {/* Cor personalizada */}
-          <label className={`w-5 h-5 rounded-full border grid place-items-center cursor-pointer overflow-hidden transition-ui ${frame.bg && !["#ffffff", "#000000"].includes(frame.bg.toLowerCase()) ? "ring-2 ring-acc2 border-acc2" : "border-zinc-700 hover:border-zinc-500"}`}
-            title="Cor personalizada"
-            style={{ background: frame.bg && !["#ffffff", "#000000"].includes(frame.bg.toLowerCase()) ? frame.bg : "conic-gradient(red,orange,yellow,lime,cyan,blue,magenta,red)" }}>
-            <input type="color" value={frame.bg ?? "#ffffff"} onChange={(e) => onFrameChange((f) => ({ ...f, bg: e.target.value }))}
-              className="opacity-0 w-full h-full cursor-pointer" />
-          </label>
-        </div>
+      <div className="pt-1.5 mt-0.5 border-t border-zinc-800/60">
+        <ColorPicker
+          label="Fundo"
+          value={frame.bg ?? null}
+          onChange={(cor) => onFrameChange((f) => ({ ...f, bg: cor }))}
+          swatches={[
+            { valor: null, titulo: "Transparente (mostra o placeholder)" },
+            { valor: "#ffffff", titulo: "Branco" },
+            { valor: "#000000", titulo: "Preto" },
+          ]}
+        />
       </div>
     </div>
   );

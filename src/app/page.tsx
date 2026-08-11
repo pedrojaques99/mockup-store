@@ -716,6 +716,11 @@ export default function Home() {
   const [selected, setSelected] = useState<Reference | null>(null);
   // Arte por slot — um slot por face do mockup (faces = SOs editáveis distintos)
   const [artSlots, setArtSlots] = useState<Record<number, ArtSlot>>({});
+  // Cor sólida escolhida por camada do PSD: { [path]: "#rrggbb" }. Só entra o
+  // que o usuário MUDOU — mandar a cor do arquivo de volta faria o render
+  // repintar por nada, e apagaria a diferença entre "não mexi" e "escolhi
+  // justamente essa".
+  const [colorOverrides, setColorOverrides] = useState<Record<string, string>>({});
   const [activeSlot, _setActiveSlot] = useState(0);
   const activeSlotRef = useRef(0);
   const setActiveSlot = (i: number) => { activeSlotRef.current = i; _setActiveSlot(i); };
@@ -1669,6 +1674,9 @@ export default function Home() {
     setPsdInfo(null);
     setSelectedSo("");
     setHiddenLayers(new Set());
+    // Cor é por PSD: as camadas do próximo têm outros paths, e manter a escolha
+    // aqui só sobreviveria por acidente de nome igual.
+    setColorOverrides({});
     // Faces mudam por mockup: mantém a arte do slot 0 (recorte resetado,
     // o aspect do SO muda), descarta os slots extras
     setActiveSlot(0);
@@ -2124,6 +2132,7 @@ export default function Home() {
         psdPath: sel.psdPath,
         arts,
         hideLayers: Array.from(hiddenLayers),
+        colors: colorOverrides,
       });
     });
   };
@@ -2191,6 +2200,7 @@ export default function Home() {
           psdPath: selected.psdPath,
           arts,
           hideLayers: Array.from(hiddenLayers),
+          colors: colorOverrides,
           preview: false,
           stream: true,
         }),
@@ -3955,6 +3965,19 @@ export default function Home() {
                       setActiveSlot(faceIdx);
                       setArtSectionCollapsed(false);
                       if (!temArte) fileInputRef.current?.click();
+                    }}
+                    colors={colorOverrides}
+                    onColorChange={(path, hex) => {
+                      setColorOverrides((c) => {
+                        const prox = { ...c };
+                        const original = psdInfo?.colorSlots?.find((s) => s.path === path)?.hex;
+                        // Voltar pra cor do arquivo REMOVE a chave em vez de
+                        // gravar o mesmo valor: assim o render não recebe uma
+                        // troca que não é troca.
+                        if (!hex || (original && hex.toLowerCase() === original.toLowerCase())) delete prox[path];
+                        else prox[path] = hex;
+                        return prox;
+                      });
                     }}
                   />
 

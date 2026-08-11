@@ -34,12 +34,28 @@ export interface Face {
   linkedCount: number;
 }
 
+/**
+ * Camada de cor sólida do PSD ("Cor do Fundo", "Left Cup Color") — o que a UI
+ * oferece pra recolorir. Espelha o `ColorSlot` do engine.
+ */
+export interface ColorSlotInfo {
+  path: string;
+  name: string;
+  /** Cor declarada no arquivo. É o swatch de "voltar ao original". */
+  hex: string;
+  blendMode: string;
+  opacity: number;
+  hidden: boolean;
+}
+
 export interface PsdInfo {
   smartObjects: SmartObjectInfo[];
   adjustments: AdjustmentInfo[];
   width: number;
   height: number;
   faces?: Face[];
+  /** Ausente = PSD indexado antes do campo existir; `[]` = não tem cor editável. */
+  colorSlots?: ColorSlotInfo[];
 }
 
 /** A arte de UMA face, com o enquadramento dela. */

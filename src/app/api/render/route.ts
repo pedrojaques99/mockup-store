@@ -93,9 +93,17 @@ export async function POST(req: NextRequest) {
   }
   const { psdPath, artBase64, smartObject = "Your design", hideLayers = [] } = body as {
     psdPath?: string; artBase64?: string; smartObject?: string; hideLayers?: string[];
+    colors?: Record<string, string>;
   };
   const stream = body.stream === true;
   const preview = body.preview === true;
+  // Cor sólida por camada: { [path da camada]: "#rrggbb" }. Só hex de 6 dígitos
+  // passa — o valor vai direto pro `fillStyle` do canvas no render-server, e
+  // string arbitrária ali é o começo de uma superfície de injeção.
+  const colors: Record<string, string> = {};
+  for (const [k, v] of Object.entries(body.colors ?? {})) {
+    if (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v.trim())) colors[k] = v.trim();
+  }
 
   // Multi-face: arts = [{ smartObject, artBase64 }]. Legado: artBase64 + smartObject soltos.
   const arts: Array<{ smartObject?: string; artBase64: string }> =
@@ -129,14 +137,14 @@ export async function POST(req: NextRequest) {
   const artPath = replacements[0].artPath;
 
   if (stream) {
-    return streamRender({ psdPath, artPath, replacements, outputPath, smartObject, hideLayers, preview, jobId });
+    return streamRender({ psdPath, artPath, replacements, outputPath, smartObject, hideLayers, preview, jobId, colors });
   }
 
   activeRenders++;
   const start = Date.now();
 
   try {
-    const result = await sendToRenderServer({ psdPath, artPath, replacements, outputPath, smartObject, hideLayers, preview });
+    const result = await sendToRenderServer({ psdPath, artPath, replacements, outputPath, smartObject, hideLayers, preview, colors });
 
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: 500 });
@@ -168,6 +176,7 @@ function streamRender(job: {
   psdPath: string; artPath: string; outputPath: string;
   replacements: Array<{ smartObject?: string; artPath: string }>;
   smartObject: string; hideLayers: string[]; preview: boolean; jobId: string;
+  colors?: Record<string, string>;
 }) {
   const encoder = new TextEncoder();
   const readable = new ReadableStream({

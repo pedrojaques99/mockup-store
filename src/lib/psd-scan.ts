@@ -1,7 +1,8 @@
 import { readPsd } from "ag-psd";
 import { readFileSync, statSync } from "fs";
 import { basename } from "path";
-import { BRAND_HIDE, flattenLayers } from "@visant/psd-engine";
+import { BRAND_HIDE, flattenLayers, computeColorSlots } from "@visant/psd-engine";
+import type { ColorSlot } from "@visant/psd-engine";
 
 // flattenLayers vem do pacote SSoT; re-exporta p/ consumidores (e o teste deste módulo).
 export { flattenLayers };
@@ -34,6 +35,8 @@ export interface AdjustmentMeta {
   data: Record<string, unknown>;
 }
 
+export type { ColorSlot };
+
 export interface PsdMetadata {
   fileName: string;
   filePath: string;
@@ -43,6 +46,13 @@ export interface PsdMetadata {
   height: number;
   smartObjects: SmartObjectMeta[];
   adjustments: AdjustmentMeta[];
+  /**
+   * Camadas de cor sólida ("Cor do Fundo", "Left Cup Color") — o que a UI
+   * oferece pra recolorir. Documento indexado antes desta versão não tem o
+   * campo; quem lê trata `undefined` como "ainda não escaneado", que é
+   * diferente de "este PSD não tem cor editável" (`[]`).
+   */
+  colorSlots?: ColorSlot[];
   scannedAt: Date;
 }
 
@@ -95,6 +105,8 @@ export function scanPsd(filePath: string): PsdMetadata | null {
         data: l.adjustment,
       }));
 
+    const colorSlots = computeColorSlots(all);
+
     const stat = statSync(filePath);
     const normalized = filePath.replace(/\\/g, "/");
 
@@ -107,6 +119,7 @@ export function scanPsd(filePath: string): PsdMetadata | null {
       height: psd.height,
       smartObjects,
       adjustments,
+      colorSlots,
       scannedAt: new Date(),
     };
   } catch {
