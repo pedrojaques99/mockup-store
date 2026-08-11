@@ -39,6 +39,12 @@ export async function POST(
   for (const layer of doc.layers) {
     const p = join(sceneDir, `${layer.src}.png`);
     if (existsSync(p)) assets[layer.src] = await loadImage(await readFile(p));
+    // A máscara da camada é o recorte (clipping) no `over`. Sem carregá-la, o
+    // `renderScene` desenha sem recorte e a sombra do produto vaza pro cenário.
+    if (layer.maskRef) {
+      const pm = join(sceneDir, `${layer.maskRef}.png`);
+      if (existsSync(pm)) assets[layer.maskRef] = await loadImage(await readFile(pm));
+    }
   }
   for (const face of doc.faces) {
     if (face.maskRef) {

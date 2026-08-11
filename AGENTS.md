@@ -305,19 +305,39 @@ mentiras foram removidas antes de sobrar medição:
 3. **O harness era surdo**: lia só o stdout, e os avisos saem por `console.warn`
    (stderr). O "5 dos 6 não avisaram nada" era isso.
 
-O que sobra, medido com a régua consertada: `Coffee Paper Cups` 11,7% ·
-`Capa CD` 21,5% · `Double Cards Stack` 32,7% · `boxes_scene_3_bg` 39,9% ·
-`paper-ghetto` 92,1%. A causa **não** é mais só o "lavado" — o `pass through` e
-os adjustment layers foram corrigidos no engine 0.2.0. As causas vivas:
+Com a régua consertada e o recorte funcionando (engine 0.2.2):
+`Coffee Paper Cups` **2,94%** · `Capa CD` 9,87% · `Double Cards Stack` 32,71% ·
+`boxes_scene_3_bg` 32,71% · `paper-ghetto` 92,07%.
 
-- **Decoração dentro do container da face** (o `extract.ts` afirmava que o
-  template BOXY não faz isso; medido, **5 de 5 fazem**): `Shadow`/`Light` dentro
-  do grupo, ou como camadas CLIP. Desde a 0.2.1 isso vira **warning nomeando as
-  camadas** — recompor (blend + clipping + máscara de grupo) está pendente.
-- **Enquadramento da arte na face** difere entre as duas pipelines: no
-  `Coffee Paper Cups` o diff é 100% em cima dos copos e ZERO no cenário, com a
-  arte em escala diferente. Não é luz, é geometria.
-- `adjustment` que o `buildAdjustmentLut` não conhece (vibrance) — avisa.
+O "lavado" morreu na 0.2.0 (pass through + adjustment layers). O que derrubou o
+Coffee de 11,71% para 2,94% foi a **camada de recorte**, com três defeitos
+empilhados — e cada um, sozinho, parecia estar melhorando o número:
+
+1. achatada isolada, a camada CLIP recorta contra o nada e sai **100%
+   transparente** (`over-1` com 19 KB e 0,00% de alpha). Era emitida, era
+   desenhada, e não mudava um pixel;
+2. consertada, a máscara vinha do alpha da base **assado no arquivo** — que é o
+   do PLACEHOLDER, pequeno e já aparado. Cobria 0,41% do quadro e apagava a
+   sombra de novo, agora sem vazar. Hoje `clipToFaces` manda recortar contra a
+   silhueta das faces que o `renderScene` acabou de desenhar;
+3. quem carrega os assets **só lia `layer.src`**, nunca `layer.maskRef` — sem a
+   máscara o render sai sem recorte e a sombra pinta o cenário inteiro (erro de
+   15/255 no fundo, contra 0,23 com ela). Consertado em `scripts/render-scene.ts`
+   e em `/api/scene/[sceneId]/render`.
+
+⚠️ **"A camada foi emitida" não é "a camada faz alguma coisa".** Os três
+defeitos passavam por qualquer inspeção do `scene.json`: a camada estava lá, com
+blend e opacity certos. Desde a 0.2.2 existe guarda — camada que achata 100%
+transparente vira warning.
+
+As três causas que sobram, cada uma isolada num arquivo da amostra:
+- **`Double Cards Stack`**: decoração dentro de um grupo **com máscara** (que não
+  é recorte) — o container é consumido inteiro e leva `Shadow`/`Light` junto.
+  Avisa desde a 0.2.1; recompor é o trabalho que falta.
+- **`boxes_scene_3_bg`**: a sombra é `linear burn`, que o Canvas 2D não tem — o
+  `BLEND_MAP` aproxima por `color-burn`. Só sai no braço, em pixel.
+- **`paper-ghetto`**: `vibrance` fora do `buildAdjustmentLut` (avisa) + um
+  `Mockup Overlay` dentro do container.
 
 - Por isso o pack continua subindo **PSD** (14,7 GB) e não cena (seria 5,4x
   menor: 614 MB de PSD viraram 113 MB de cena na amostra).

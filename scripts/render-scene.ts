@@ -49,6 +49,14 @@ const assets: AssetMap = {};
 for (const layer of doc.layers) {
   const p = resolve(sceneDir, `${layer.src}.png`);
   if (existsSync(p)) assets[layer.src] = await loadImage(readFileSync(p));
+  // ⚠️ A camada também tem máscara — no `over` é o RECORTE (clipping). Carregar
+  // só o `src` fazia a sombra do produto pintar o cenário inteiro: o
+  // `renderScene` procura `assets[maskRef]`, não acha, e desenha sem recorte.
+  // O erro no cenário era 15/255; carregando a máscara, 0,23.
+  if (layer.maskRef) {
+    const pm = resolve(sceneDir, `${layer.maskRef}.png`);
+    if (existsSync(pm)) assets[layer.maskRef] = await loadImage(readFileSync(pm));
+  }
 }
 for (const face of doc.faces) {
   if (face.maskRef) {
