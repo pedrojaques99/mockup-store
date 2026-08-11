@@ -351,11 +351,26 @@ do que o compositor já fazia.**
   `renderScene` chama as MESMAS — nada reimplementado. Sozinho, isso levou o
   `paper-ghetto` de 92,07% para 29,41%.
 
-O que ainda separa a cena do PSD:
-- `vibrance` (e `exposure`, `hue/sat`, `color balance`) fora do
-  `buildAdjustmentLut` — avisa, não aplica.
-- o resíduo do `Coffee` (2,94%, máx 57) está na BORDA das faces: é
-  antisserrilhado do recorte contra a silhueta, não erro de tom.
+O que ainda separa a cena do PSD — tudo no mesmo lugar agora, a **face**:
+
+- **o blend da própria face é ignorado.** O `SceneFace` não tem `blendMode` nem
+  `opacity`, e o `renderScene` desenha a face com `drawImage` puro. No
+  `paper-ghetto` a face é `multiply`, e o compositor a aplica assim.
+- **a máscara da face é aplicada esticada.** É guardada crua (`m.canvas`) e o
+  `applyMaskToFace` a estica pro tamanho do canvas da face — os mesmos dois
+  defeitos que a máscara de grupo tinha (cinza opaco, offset). O
+  `mascaraComoAlpha` da 0.2.3 é o conserto pronto, falta usá-lo aqui.
+- **irmão vinculado da face é descartado.** `Mockup Overlay` (multiply, 0,5)
+  divide o `linkId` com a arte, então `computeFaces` o agrupa na mesma face e o
+  container o consome. O compositor preenche os DOIS.
+
+⚠️ **`vibrance` NÃO é causa de divergência**, ao contrário do que este arquivo
+chegou a dizer: o `composePsd` também passa pelo `buildAdjustmentLut` e também
+devolve `null` para ele. Os dois lados ignoram igual. O aviso continua útil —
+ele mede a distância pro Photoshop, não a distância entre as duas pipelines.
+
+O resíduo do `Coffee` (2,94%, máx 57) está na BORDA das faces: antisserrilhado
+do recorte contra a silhueta, não erro de tom.
 
 - Por isso o pack continua subindo **PSD** (14,7 GB) e não cena (seria 5,4x
   menor: 614 MB de PSD viraram 113 MB de cena na amostra).
