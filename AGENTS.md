@@ -69,6 +69,33 @@ dois sentidos (vazar a chave ⇒ `exit 1`). Roda no CI sobre o job de clone limp
 3. **No modo `--url` ele escreve na config DE VERDADE** — deixou `sk-teste-…` gravado em
    `data/config.json` na primeira execução. Agora desfaz o que escreveu.
 
+## `npm run ship` — os portões antes de empurrar
+
+```
+npm run ship                  # estáticos + os que dão para subir sozinho
+npm run ship -- --rapido      # só tsc, lint, ui:audit, test (~30s)
+npm run ship -- --url http://localhost:4100    # usa um app já de pé
+npm run ship -- --sem-build   # pula o `next build`
+```
+
+Os portões viraram dezessete comandos, cada um com pré-requisito próprio (uns
+querem o app de pé, um quer o render-server na 4200, um quer PSD no disco).
+Guardar essa lista na cabeça é como não ter portão: roda-se os três de sempre e
+o resto vira decoração. Prova viva: o `visual:console` estava vermelho desde
+06/08 e ninguém tinha visto.
+
+Três regras que vêm de erro pago aqui:
+
+- ⚠️ **Pular é resultado, não silêncio.** Portão que não pôde rodar sai como
+  PULADO com o motivo, e o resumo repete: "não medido — isto NÃO é verde".
+  Verde escondendo ausência foi como o `check:offline` já passou medindo um app
+  configurado, e como o `pack:publish` aprovou mockup quebrado.
+- ⚠️ **Servidor de pé é reaproveitado, nunca duplicado** — dois `next` no mesmo
+  `.next` dão 404 com portão verde.
+- ⚠️ **O que ele sobe, ele derruba com `taskkill /T`.** No Windows `kill` não
+  mata a árvore do `next`/`bun`, e a rodada seguinte mede o ZUMBI da anterior
+  com o código velho.
+
 # Operação headless (agente via CLI)
 
 Pedidos tipo "renderiza N mockups com a marca X" são atendidos pelo `scripts/agent-cli.ts` — fala direto com Mongo + Visant + render-server, sem precisar do Next:
