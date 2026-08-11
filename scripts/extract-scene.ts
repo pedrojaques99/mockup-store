@@ -6,10 +6,10 @@
  *   bun scripts/extract-scene.ts --psd "Z:/mockups/billboard.psd"
  *   bun scripts/extract-scene.ts --psd "Z:/mockups/billboard.psd" --out .tmp/scenes
  */
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
-import { resolve, basename } from "path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { resolve, basename, dirname } from "path";
 import { createHash } from "crypto";
-import { extractScene, createNodeAdapter, initializeAgPsdCanvas } from "@visant/psd-engine";
+import { extractScene, createNodeAdapter, initializeAgPsdCanvas, flattenLayers, preloadDisplacementMaps } from "@visant/psd-engine";
 
 function arg(name: string, fallback = ""): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -36,6 +36,21 @@ step(`reading ${basename(psdPath)}`);
 const psdBuffer = readFileSync(resolve(psdPath));
 const psd = agPsd.readPsd(new Uint8Array(psdBuffer).buffer as ArrayBuffer, { skipThumbnail: true });
 step(`parsed ${psd.width}×${psd.height}`);
+
+// Smart Filter "Displace" (o amassado do papel, a curvatura da caneca) mora num
+// arquivo VIZINHO do PSD, então quem tem disco é quem carrega. Sem este passo o
+// `extractScene` não vê mapa nenhum e a cena sai com a arte lisa sobre uma
+// superfície amassada — o `composePsd` sempre fez isso e a cena não.
+step("carregando mapas de displacement...");
+const todasCamadas = flattenLayers(psd.children || []);
+await preloadDisplacementMaps(
+  todasCamadas,
+  psdPath,
+  createCanvas as any,
+  { exists: existsSync, read: (p) => readFileSync(p), resolve, dirname, basename },
+  (buf, opts) => agPsd.readPsd(buf as ArrayBufferLike, opts),
+  (msg) => step(`WARN: ${msg}`)
+);
 
 step("extracting scene...");
 const { doc, assets } = extractScene(psd, createCanvas as any);
