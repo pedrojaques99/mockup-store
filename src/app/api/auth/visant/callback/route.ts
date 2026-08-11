@@ -6,7 +6,7 @@
  * redireciona pro `returnTo` original (embutido no state).
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getRegisteredClient, exchangeCode, fetchUser, COOKIE } from "@/lib/visant-user-oauth";
+import { getRegisteredClient, exchangeCode, fetchUser, safeReturnTo, COOKIE } from "@/lib/visant-user-oauth";
 
 function callbackUrl(req: NextRequest): string {
   const env = process.env.VISANT_OAUTH_REDIRECT_URI;
@@ -39,7 +39,9 @@ export async function GET(req: NextRequest) {
     }
     if (!uid) return NextResponse.json({ error: "could not resolve user id" }, { status: 500 });
 
-    const target = returnTo.startsWith("/") ? new URL(returnTo, req.url).toString() : "/";
+    // Guard em `visant-user-oauth.ts` (SSoT, testado): `startsWith("/")` deixa
+    // passar `//evil.com`, que resolve pra outro host.
+    const target = new URL(safeReturnTo(returnTo), req.url).toString();
     const res = NextResponse.redirect(target);
     const secure = process.env.NODE_ENV === "production";
     const atTtl = Math.max(60, Math.floor((tokens.expiresAt - Date.now()) / 1000));

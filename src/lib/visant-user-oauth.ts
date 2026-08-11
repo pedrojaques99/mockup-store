@@ -48,6 +48,18 @@ export function pkcePair(): { verifier: string; challenge: string } {
 }
 export const randomState = () => randomBytes(24).toString("base64url");
 
+/**
+ * O `returnTo` do login só pode apontar pra dentro desta loja.
+ *
+ * `startsWith("/")` NÃO basta: `//evil.com` e `/\evil.com` começam com barra e
+ * o `new URL(x, base)` resolve os dois pra outro host — open redirect logo
+ * depois do login, com a sessão já quente. Só caminho relativo de UMA barra
+ * passa; o resto vira "/".
+ */
+export function safeReturnTo(returnTo: string | null | undefined): string {
+  return typeof returnTo === "string" && /^\/(?![/\\])/.test(returnTo) ? returnTo : "/";
+}
+
 // JWT decode (sem verificação — usado só pra extrair `sub`/`email` do access token).
 // Não TRUST sem checagem do endpoint /me. Mas serve pra cookie inicial sem round-trip.
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
