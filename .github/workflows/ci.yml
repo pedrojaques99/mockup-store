@@ -40,23 +40,17 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Typecheck
-        run: npx tsc --noEmit
-
-      - name: Lint
-        run: npm run lint
-
-      # Placar da UI com teto. Pega o que tsc/lint não veem: modal escrito à mão,
-      # `<select>` nativo, duração fora do token, botão sem nome acessível.
-      # Provado nos dois sentidos (violação injetada ⇒ exit 1).
-      - name: UI audit
-        run: npm run ui:audit
-
-      - name: Test
-        run: npm test
-
-      - name: Build
-        run: npm run build
+      # Um comando, porque a lista de portões tem que existir num lugar só.
+      # `npm run ship` é o mesmo que a pessoa roda antes de empurrar — tsc, lint,
+      # ui:audit, test e build — e `--sem-servidor` para aqui, que é o escopo
+      # deste job. Quando alguém adiciona um portão ao ship, o CI ganha junto;
+      # antes eram duas listas e elas iam divergir (já divergiam: o ship rodava
+      # `visual:home` e `check:colors`, que este arquivo nunca soube que existiam).
+      #
+      # O `ship` constrói em `NEXT_DIST_DIR=.next-ship` — irrelevante no runner,
+      # essencial na máquina de quem tem `next dev` aberto.
+      - name: Portões estáticos + build (npm run ship)
+        run: npm run ship -- --sem-servidor
         env:
           NEXT_TELEMETRY_DISABLED: "1"
 
@@ -123,17 +117,19 @@ jobs:
             if [ "$i" = "60" ]; then echo "app não subiu em 60s"; exit 1; fi
             sleep 1
           done
-          npm run smoke -- --url http://localhost:3123
-          # Portão visual: dirige um Chrome de verdade e checa o que só se vê com
-          # o olho (diálogo abre, nada cortado pelas bordas, validação reprova
-          # caminho inexistente, lista virtualizada). O `npm ci` já baixa o
-          # Chromium do puppeteer. A fixture é o que torna a checagem de
-          # virtualização real em vez de pulada.
-          npm run fixture:virt
-          npm run visual:ingest -- --url http://localhost:3123
-          # O app é distribuível? Este runner É a máquina de quem baixou: sem
-          # .env.local, sem Mongo, sem acervo. O portão confere que o catálogo
-          # sobe local, que dá para configurar acervo e chave PELA API (sem
-          # editar arquivo, sem reiniciar) e que a chave nunca volta em claro.
-          # Provado nos dois sentidos: vazar a chave derruba o passo.
-          npm run check:offline -- --url http://localhost:3123
+          # Os portões de servidor, pelo MESMO script que a pessoa roda antes de
+          # empurrar — a lista mora no `ship`, não aqui.
+          #
+          # `--somente` nomeia o que este runner PODE rodar: ele não tem acervo
+          # (`visual:home` mede um grid com um card só) nem render-server na 4200
+          # (`check:colors` renderiza PSD de verdade). Pedir esses aqui seria
+          # pedir PULADO.
+          #
+          # ⚠️ `--exigir` faz PULADO virar FALHA. Local, pular é informação e
+          # você lê o resumo; no CI ninguém lê, e portão que se pula sozinho é
+          # portão que não existe. Então o job nomeia o que espera e quebra se
+          # algum não rodar.
+          #
+          # `--sem-build` porque o passo anterior já construiu, e `--url` porque
+          # o app já está de pé aqui: sem isso o ship subiria um segundo.
+          npm run ship -- --sem-build --url http://localhost:3123 --somente smoke,visual:ingest,check:offline --exigir

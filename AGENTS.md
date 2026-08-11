@@ -84,6 +84,19 @@ Guardar essa lista na cabeça é como não ter portão: roda-se os três de semp
 o resto vira decoração. Prova viva: o `visual:console` estava vermelho desde
 06/08 e ninguém tinha visto.
 
+**O CI chama o mesmo script** (`.github/workflows/ci.yml`): o job `verify` roda
+`ship -- --sem-servidor` e o `clone-and-run` roda
+`ship -- --sem-build --url ... --somente smoke,visual:ingest,check:offline --exigir`.
+A lista de portões mora num arquivo só; antes eram duas e já divergiam — o `ship`
+rodava `visual:home` e `check:colors`, que o CI nunca soube que existiam.
+
+- `--somente a,b,c` nomeia o que aquele runner PODE rodar (ele não tem acervo nem
+  render-server na 4200).
+- ⚠️ `--exigir` faz **PULADO virar FALHA**. Local, pular é informação e você lê o
+  resumo; no CI ninguém lê, e portão que se pula sozinho é portão que não existe.
+  Provado nos dois sentidos: `--sem-build --somente build` pula e sai 0;
+  com `--exigir`, falha e sai 1.
+
 Três regras que vêm de erro pago aqui:
 
 - ⚠️ **Pular é resultado, não silêncio.** Portão que não pôde rodar sai como
@@ -95,6 +108,11 @@ Três regras que vêm de erro pago aqui:
 - ⚠️ **O que ele sobe, ele derruba com `taskkill /T`.** No Windows `kill` não
   mata a árvore do `next`/`bun`, e a rodada seguinte mede o ZUMBI da anterior
   com o código velho.
+- ⚠️ **Ele constrói em `NEXT_DIST_DIR=.next-ship`, nunca no `.next`.** `next
+  build` no mesmo `.next` de um `next dev` aberto corrompe os dois: a home passa
+  a servir sem CSS e sem cards, e os portões visuais acusam contraste 1.06:1 e
+  rolagem horizontal — defeitos que o build ACABOU de criar. Foi assim na
+  primeira rodada: 4 falhas, nenhuma real.
 
 # Operação headless (agente via CLI)
 

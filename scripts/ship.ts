@@ -37,7 +37,23 @@ const valor = (f: string, padrao = "") => {
 
 const RAPIDO = tem("--rapido");
 const SEM_BUILD = tem("--sem-build");
+const SEM_SERVIDOR = tem("--sem-servidor");
 const URL_ARG = valor("--url");
+/**
+ * `--somente a,b,c` — roda só esses portões (por id). É o que o CI usa: num
+ * runner limpo não existe acervo nem render-server, e pedir portão que não pode
+ * rodar seria pedir PULADO — que com `--exigir` é falha.
+ */
+const SOMENTE = valor("--somente")
+  .split(",")
+  .map((x) => x.trim())
+  .filter(Boolean);
+/**
+ * `--exigir` — PULADO vira FALHA. Local, pular é informação: você vê no resumo e
+ * decide. No CI ninguém lê, e portão que se pula sozinho é portão que não
+ * existe. Por isso o CI liga isto e diz explicitamente o que espera rodar.
+ */
+const EXIGIR = tem("--exigir");
 const PORTA_APP = 4123; // porta própria: não briga com o dev que você deixou aberto
 /**
  * ⚠️ `distDir` PRÓPRIO, sempre.
@@ -76,8 +92,15 @@ function rodar(
   args: string[],
   opts: { pularSe?: string; env?: NodeJS.ProcessEnv } = {}
 ) {
+  if (SOMENTE.length && !SOMENTE.includes(nome)) return false;
   if (opts.pularSe) {
-    placar.push({ nome, estado: "pulado", detalhe: opts.pularSe, ms: 0 });
+    // Com `--exigir`, pular é falhar: o CI pediu este portão nominalmente.
+    placar.push({
+      nome,
+      estado: EXIGIR ? "falha" : "pulado",
+      detalhe: EXIGIR ? `exigido, mas não pôde rodar: ${opts.pularSe}` : opts.pularSe,
+      ms: 0,
+    });
     linha(placar[placar.length - 1]);
     return false;
   }
@@ -168,6 +191,19 @@ async function main() {
     env: ENV_DIST,
   });
 
+  // Os que precisam do app respondendo. Se `--somente` não pede nenhum deles,
+  // nem procura servidor: subir um app para não usar é minuto jogado fora.
+  const COM_SERVIDOR = [
+    "smoke",
+    "visual:ingest",
+    "check:offline",
+    "visual:console",
+    "visual:home",
+    "check:colors",
+  ];
+  if (SEM_SERVIDOR) return fechar(t0);
+  if (SOMENTE.length && !SOMENTE.some((id) => COM_SERVIDOR.includes(id))) return fechar(t0);
+
   // ── 3. Portões que precisam do app respondendo ───────────────────────────
   let url = URL_ARG;
   let pid: number | undefined;
@@ -201,6 +237,12 @@ async function main() {
 
   try {
     rodar("smoke", "npm", ["run", "smoke", "--", "--url", url || ""], { pularSe: semApp });
+
+    // A fixture é o que torna a checagem de virtualização real em vez de pulada.
+    if (!semApp && (!SOMENTE.length || SOMENTE.includes("visual:ingest"))) {
+      spawnSync("npm", ["run", "fixture:virt"], { encoding: "utf8", shell: process.platform === "win32" });
+    }
+    rodar("visual:ingest", "npm", ["run", "visual:ingest", "--", "--url", url || ""], { pularSe: semApp });
     rodar("check:offline", "npm", ["run", "check:offline", "--", "--url", url || ""], { pularSe: semApp });
     rodar("visual:console", "npm", ["run", "visual:console", "--", "--url", url || ""], { pularSe: semApp });
     rodar("visual:home", "npm", ["run", "visual:home", "--", "--url", url || ""], { pularSe: semApp });
