@@ -3,9 +3,12 @@
  *
  * O defeito que este portão existe para pegar é MUDO: a UI mostra o seletor, o
  * usuário escolhe, o render responde 200 — e sai a cor velha. Aconteceu na
- * primeira tentativa, e o culpado era um render-server ZUMBI de uma sessão
- * anterior segurando a 4200 com o código antigo (a mesma armadilha que o
- * `check:offline` já documenta: no Windows, `kill` não mata; é `taskkill /T`).
+ * primeira tentativa, e o culpado NÃO era bug do código: a 4200 estava ocupada
+ * por um render-server que o **app jaques-os** (`Z:/Cursor/jaques-os`) mantém de
+ * pé como processo filho. Ele roda o código de quando FOI iniciado, então
+ * `npm run render` falhava com "Failed to listen" e a medição saía do processo
+ * antigo — 0,00% com o conserto certo no disco. Ver AGENTS.md, "o render-server
+ * pode não ser seu".
  *
  * Medir "a cor aparece" procurando o pixel rosa na imagem não serve — é o mesmo
  * erro que o `pack:publish` já pagou com a arte: cenário colorido é

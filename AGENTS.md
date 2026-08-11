@@ -69,6 +69,29 @@ dois sentidos (vazar a chave ⇒ `exit 1`). Roda no CI sobre o job de clone limp
 3. **No modo `--url` ele escreve na config DE VERDADE** — deixou `sk-teste-…` gravado em
    `data/config.json` na primeira execução. Agora desfaz o que escreveu.
 
+### ⚠️ O render-server da 4200 pode não ser seu
+
+O app **jaques-os** (`Z:/Cursor/jaques-os`, `desktop/supervisor.js`) sobe o
+`render-server` como processo filho e o **mantém vivo**: matar o PID devolve
+outro PID em segundos. Não é zumbi, é supervisor fazendo o trabalho dele.
+
+A consequência morde quem edita `scripts/render-server.ts`: o processo de pé roda
+o código de quando FOI iniciado. Seu `npm run render` falha com
+**"Failed to listen"** (a porta já está tomada), você não repara, e toda medição
+sai do processo ANTIGO. Foi assim que um teste diferencial de cor deu **0,00%**
+com o conserto certo já no disco.
+
+Como saber e como resolver:
+
+```
+netstat -ano | findstr :4200        # tem PID? então tem servidor
+npm run render                       # se logar "Failed to listen", não é o seu
+```
+
+Feche o hub (ou pare a aba do Mockup Store nele) antes de testar mudança no
+render-server. E desconfie sempre que um portão de render der resultado
+**idêntico ao de antes da sua mudança**.
+
 ## `npm run ship` — os portões antes de empurrar
 
 ```
