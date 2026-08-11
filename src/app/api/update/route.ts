@@ -12,34 +12,32 @@
  * POST → aplica (exige clique na interface)
  */
 import { NextRequest, NextResponse } from "next/server";
-import { estadoUpdate, aplicarUpdate } from "@/lib/update";
+import { estadoUpdate, aplicarUpdate, requisicaoLocal } from "@/lib/update";
 
 export const runtime = "nodejs";
 // Estado de git não pode ser cacheado: a resposta muda a cada push no remoto.
 export const dynamic = "force-dynamic";
 
 /**
- * Só a própria máquina. `x-forwarded-for` presente indica proxy à frente, ou
- * seja, alguém publicou isto — e aí nem tentamos adivinhar.
+ * ⚠️ NUNCA transforme isto num `NextResponse` de módulo. O corpo de uma
+ * `Response` é um stream que se lê UMA vez: reaproveitar o mesmo objeto entre
+ * requisições faz a segunda recusa em diante sair com **corpo vazio**, e o
+ * cliente recebe um 403 mudo. Foi assim aqui, e o corpo vazio foi justamente o
+ * que atrasou o diagnóstico — parecia 403 de outra camada, não da rota.
  */
-function daPropriaMaquina(req: NextRequest): boolean {
-  if (req.headers.get("x-forwarded-for")) return false;
-  const host = (req.headers.get("host") ?? "").split(":")[0].toLowerCase();
-  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
-}
-
-const RECUSA = NextResponse.json(
-  { erro: "A atualização só funciona com o app aberto na própria máquina." },
-  { status: 403 }
-);
+const recusa = () =>
+  NextResponse.json(
+    { erro: "A atualização só funciona com o app aberto na própria máquina." },
+    { status: 403 }
+  );
 
 export async function GET(req: NextRequest) {
-  if (!daPropriaMaquina(req)) return RECUSA;
+  if (!requisicaoLocal(req.headers)) return recusa();
   return NextResponse.json(await estadoUpdate());
 }
 
 export async function POST(req: NextRequest) {
-  if (!daPropriaMaquina(req)) return RECUSA;
+  if (!requisicaoLocal(req.headers)) return recusa();
   const r = await aplicarUpdate();
   return NextResponse.json(r, { status: r.ok ? 200 : 409 });
 }

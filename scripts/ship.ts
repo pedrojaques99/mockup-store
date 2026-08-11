@@ -39,6 +39,19 @@ const RAPIDO = tem("--rapido");
 const SEM_BUILD = tem("--sem-build");
 const URL_ARG = valor("--url");
 const PORTA_APP = 4123; // porta própria: não briga com o dev que você deixou aberto
+/**
+ * ⚠️ `distDir` PRÓPRIO, sempre.
+ *
+ * `next build` no mesmo `.next` que um `next dev` aberto corrompe o estado dos
+ * dois: o dev passa a servir a home SEM CSS e SEM cards, e os portões visuais
+ * acusam "texto a 1.06:1" e "página rola horizontalmente" — defeitos que o
+ * build ACABOU de criar, não que existiam. Aconteceu na primeira rodada deste
+ * script: 4 falhas, nenhuma real, e o `tsc` junto porque o `.next/types` estava
+ * sendo reescrito embaixo dele. O repo já documenta a saída (`NEXT_DIST_DIR`);
+ * faltava o portão usá-la.
+ */
+const DIST = ".next-ship";
+const ENV_DIST = { ...process.env, NEXT_DIST_DIR: DIST };
 
 type Estado = "ok" | "falha" | "pulado";
 interface Resultado {
@@ -57,14 +70,23 @@ function linha(r: Resultado) {
   console.log(`  ${cor[r.estado]}${marca}${cor.off}  ${r.nome.padEnd(26)} ${r.detalhe} ${tempo}`);
 }
 
-function rodar(nome: string, cmd: string, args: string[], opts: { pularSe?: string } = {}) {
+function rodar(
+  nome: string,
+  cmd: string,
+  args: string[],
+  opts: { pularSe?: string; env?: NodeJS.ProcessEnv } = {}
+) {
   if (opts.pularSe) {
     placar.push({ nome, estado: "pulado", detalhe: opts.pularSe, ms: 0 });
     linha(placar[placar.length - 1]);
     return false;
   }
   const t0 = Date.now();
-  const r = spawnSync(cmd, args, { encoding: "utf8", shell: process.platform === "win32" });
+  const r = spawnSync(cmd, args, {
+    encoding: "utf8",
+    shell: process.platform === "win32",
+    env: opts.env ?? process.env,
+  });
   const ms = Date.now() - t0;
   const saida = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
   const ok = r.status === 0;
@@ -143,6 +165,7 @@ async function main() {
 
   rodar("build", "npx", ["next", "build"], {
     pularSe: SEM_BUILD ? "--sem-build" : undefined,
+    env: ENV_DIST,
   });
 
   // ── 3. Portões que precisam do app respondendo ───────────────────────────
@@ -161,12 +184,13 @@ async function main() {
     }
   }
 
-  if (!url && !SEM_BUILD && existsSync(".next")) {
+  if (!url && !SEM_BUILD && existsSync(DIST)) {
     console.log(`  ${cor.fraco}subindo o app na ${PORTA_APP}...${cor.off}`);
     const filho = spawn("npx", ["next", "start", "-p", String(PORTA_APP)], {
       shell: process.platform === "win32",
       stdio: "ignore",
       detached: process.platform !== "win32",
+      env: ENV_DIST,
     });
     pid = filho.pid;
     if (await esperarHttp(`http://localhost:${PORTA_APP}`, 90)) url = `http://localhost:${PORTA_APP}`;

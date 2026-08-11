@@ -151,3 +151,39 @@ function mensagem(e: unknown): string {
   // stderr do git vem com ruído de progresso; a primeira linha basta.
   return t.split("\n").find((l) => l.trim()) ?? "Erro desconhecido";
 }
+
+/**
+ * A requisição veio da PRÓPRIA MÁQUINA?
+ *
+ * A rota de update roda `git merge` e `npm ci` — é execução de código, e só é
+ * aceitável porque o app é local. "É local" é premissa, e premissa não checada
+ * vira falha; por isso a checagem existe. Só que a primeira versão recusava
+ * `x-forwarded-for` PRESENTE, achando que ele indica proxy à frente.
+ *
+ * ⚠️ **O Next põe `x-forwarded-for` sozinho**, sem proxy nenhum: medido no
+ * `next dev`, a rota recebe `x-forwarded-for: ::1`, `x-forwarded-host`,
+ * `x-forwarded-port` e `x-forwarded-proto`. Ou seja, a regra recusava SEMPRE, em
+ * qualquer máquina — o botão de atualizar nunca funcionou, e o 403 aparecia no
+ * console de toda visita à home.
+ *
+ * A regra certa não é "existe XFF", é "quem está do outro lado é loopback": o
+ * PRIMEIRO item da lista é o cliente original, e os seguintes são os proxies que
+ * ele atravessou. Proxy de verdade põe ali o IP público de quem chamou.
+ *
+ * Vive aqui, e não na rota, para ser testável sem subir servidor.
+ */
+const LOOPBACK = new Set(["::1", "127.0.0.1", "::ffff:127.0.0.1", "0:0:0:0:0:0:0:1"]);
+
+export function requisicaoLocal(headers: Headers): boolean {
+  // ⚠️ IPv6 no `Host` vem ENTRE COLCHETES (`[::1]:3000`), e um `split(":")[0]`
+  // devolve `"["`. O teste pegou isto; a olho passava por óbvio.
+  const bruto = (headers.get("host") ?? "").trim().toLowerCase();
+  const host = bruto.startsWith("[") ? bruto.slice(1, bruto.indexOf("]")) : bruto.split(":")[0];
+  if (!(host === "localhost" || host === "127.0.0.1" || host === "::1")) return false;
+
+  const xff = headers.get("x-forwarded-for");
+  if (!xff) return true;
+
+  const cliente = xff.split(",")[0].trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return LOOPBACK.has(cliente);
+}
