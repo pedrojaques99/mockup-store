@@ -378,6 +378,26 @@ chegou a dizer: o `composePsd` também passa pelo `buildAdjustmentLut` e também
 devolve `null` para ele. Os dois lados ignoram igual. O aviso continua útil —
 ele mede a distância pro Photoshop, não a distância entre as duas pipelines.
 
+### Warp de MALHA — o amassado do papel (engine 0.2.5)
+
+⚠️ **`perspectiveWarp` é de 4 cantos e não entorta no meio.** Por anos o engine
+ignorou `placedLayer.warp.customEnvelopeWarp` — a malha de Bézier do Photoshop
+Warp — e **o `composePsd` também**, então a arte saía lisa sobre papel amassado
+e a diferença só aparecia contra o Photoshop, nunca contra nós mesmos. O
+`paper-ghetto` tem malha 13x13 com 47px de desvio.
+
+- `mesh-warp.ts` avalia a superfície de Bézier **cúbica por patch**: N pontos
+  por eixo = `(N−1)/3` patches, porque patches adjacentes compartilham a borda
+  (13 → 4 patches; 4 → 1, que é o warp padrão). Bilinear seria mais simples e
+  erraria exatamente no vinco.
+- A caixa de saída é medida na **malha projetada**, não no quad — o vinco passa
+  da borda, e recortar no quad comeria o que a malha existe para mostrar.
+- Malha **identidade** vira `null` (o `[BOXY]` do acervo tem desvio 0,00px):
+  deformar por ela reamostraria a arte inteira para não mudar um pixel.
+- Estilo que não é `custom` (arc/flag/wave) é **fórmula**, não malha → `null`.
+- A cena carrega a malha como **dado** (169 pontos no `scene.json`, sem asset) e
+  aplica o mesmo warp; consertar só a produção afastaria as duas pipelines.
+
 O resíduo do `Coffee` (2,94%, máx 57) está na BORDA das faces: antisserrilhado
 do recorte contra a silhueta, não erro de tom.
 
