@@ -307,13 +307,15 @@ mentiras foram removidas antes de sobrar medição:
 
 Estado em 11/08/2026 (engine 0.2.3), % de pixels divergindo, e de onde vieram:
 
-| PSD | régua quebrada | 0.2.2 | **0.2.3** |
-|---|---|---|---|
-| Coffee Paper Cups | 11,71% | 2,94% | **2,94%** |
-| Capa CD | 21,50% | 9,87% | **9,87%** |
-| Double Cards Stack | 32,71% | 32,71% | **11,54%** |
-| boxes_scene_3_bg | 39,90% | 32,71% | **17,79%** |
-| paper-ghetto | 92,07% | 92,07% | **29,41%** |
+| PSD | régua quebrada | 0.2.2 | 0.2.3 | **0.2.4** |
+|---|---|---|---|---|
+| Coffee Paper Cups | 209 · 11,71% | 57 · 2,94% | 57 · 2,94% | **57 · 2,62%** |
+| Capa CD | 231 · 21,50% | 231 · 9,87% | 231 · 9,87% | **41 · 3,80%** |
+| boxes_scene_3_bg | 218 · 39,90% | 218 · 32,71% | 218 · 17,79% | **52 · 5,87%** |
+| Double Cards Stack | 216 · 32,71% | 216 · 32,71% | 210 · 11,54% | **210 · 11,54%** |
+| paper-ghetto | 231 · 92,07% | 231 · 92,07% | 231 · 29,41% | **125 · 18,29%** |
+
+(máximo de desvio num canal · % de pixels fora da tolerância de 1/255)
 
 O "lavado" morreu na 0.2.0 (pass through + adjustment layers). O que derrubou o
 Coffee de 11,71% para 2,94% foi a **camada de recorte**, com três defeitos
@@ -351,18 +353,25 @@ do que o compositor já fazia.**
   `renderScene` chama as MESMAS — nada reimplementado. Sozinho, isso levou o
   `paper-ghetto` de 92,07% para 29,41%.
 
-O que ainda separa a cena do PSD — tudo no mesmo lugar agora, a **face**:
+A 0.2.4 fecha o terceiro grupo, na **face**. Uma face não é um quad: é um GRUPO
+de smart objects que dividem o mesmo `linkId` (editar o vinculado atualiza
+todos, e o `replaceLinkedSmartObjects` preenche todos). A cena guardava só o
+representante. `SceneFace.instances[]` agora carrega quad/origin, inner,
+máscara, blend, `psBlend` e opacity de CADA ocorrência:
 
-- **o blend da própria face é ignorado.** O `SceneFace` não tem `blendMode` nem
-  `opacity`, e o `renderScene` desenha a face com `drawImage` puro. No
-  `paper-ghetto` a face é `multiply`, e o compositor a aplica assim.
-- **a máscara da face é aplicada esticada.** É guardada crua (`m.canvas`) e o
-  `applyMaskToFace` a estica pro tamanho do canvas da face — os mesmos dois
-  defeitos que a máscara de grupo tinha (cinza opaco, offset). O
-  `mascaraComoAlpha` da 0.2.3 é o conserto pronto, falta usá-lo aqui.
-- **irmão vinculado da face é descartado.** `Mockup Overlay` (multiply, 0,5)
-  divide o `linkId` com a arte, então `computeFaces` o agrupa na mesma face e o
-  container o consome. O compositor preenche os DOIS.
+- **irmão vinculado sumia** — o `Mockup Overlay` (multiply, 0,5) do
+  `paper-ghetto` divide o linkId com a arte, caía dentro da face e ia embora
+  junto com o container;
+- **o blend da face era ignorado** (`drawImage` puro; a face do `paper-ghetto` é
+  `multiply`);
+- **a máscara da face era esticada** pro canvas do quad. Agora é gravada em
+  espaço de DOCUMENTO e recortada pela JANELA em `(dx,dy)`.
+
+⚠️ **Compatível nos dois sentidos, e isso não é zelo à toa**: doc sem
+`instances` (o `buildPhotoSceneDoc` monta o `SceneDoc` na mão) cai num fallback
+de uma instância com o comportamento antigo, máscara esticada inclusive — é o
+que `maskSpace` distingue. Mudar o default ali mexeria no render WYSIWYG, que é
+provado byte a byte.
 
 ⚠️ **`vibrance` NÃO é causa de divergência**, ao contrário do que este arquivo
 chegou a dizer: o `composePsd` também passa pelo `buildAdjustmentLut` e também
